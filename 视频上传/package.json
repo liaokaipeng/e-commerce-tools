@@ -1,0 +1,12 @@
+{
+  "name": "shopee-video-upload",
+  "version": "1.0.0",
+  "description": "Shopee 短视频批量上传工具",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {}
+}

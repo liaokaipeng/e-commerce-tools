@@ -1,0 +1,14 @@
+node_modules/
+
+*.log
+server.log
+
+*.xlsx
+!下载tiktok无水印视频/public/*.xlsx
+!视频上传/public/*.xlsx
+
+session.json
+creds.json
+
+.DS_Store
+Thumbs.db
