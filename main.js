@@ -18,9 +18,8 @@ const bidding = require('./bidding');
 const video = require('./video');
 
 const PORT = process.env.PORT || 8765;
-// 前端为 Vite 构建产物（frontend/dist）；未构建时回退到旧 public/ 目录
-const FRONTEND_DIR = path.join(__dirname, 'frontend', 'dist');
-const PUBLIC_DIR = fs.existsSync(FRONTEND_DIR) ? FRONTEND_DIR : path.join(__dirname, 'public');
+// 前端为 Vite 构建产物（frontend/dist），由 main.js 托管
+const PUBLIC_DIR = path.join(__dirname, 'frontend', 'dist');
 
 // ============ 简易路由表 ============
 const routes = [];

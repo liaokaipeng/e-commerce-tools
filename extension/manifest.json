@@ -8,6 +8,10 @@
     "https://seller.shopee.cn/*",
     "https://*.shopee.cn/*",
     "https://*.shopee.com/*",
+    "https://*.shopee.ph/*",
+    "https://*.shopee.sg/*",
+    "https://*.shopee.com.my/*",
+    "https://*.usercontent.com/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],

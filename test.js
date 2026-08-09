@@ -123,11 +123,11 @@ async function main() {
       t('GET /api/creds 返回 200', r.status === 200, r.text);
     }
     {
-      // 模拟视频上传扩展推送凭证
+      // 模拟视频上传扩展推送凭证（按站点批量）
       const r = await req('POST', '/api/creds', {
-        auth: 'NTAwMDcyMjU6dGVzdA==',
-        cookie: 'video_upload_session_id=1; SPC_F=2',
-        shopId: '557630453',
+        sites: {
+          cn: { auth: 'NTAwMDcyMjU6dGVzdA==', cookie: 'video_upload_session_id=1; SPC_F=2', shopId: '557630453' },
+        },
       });
       t('POST /api/creds（扩展推送）返回 ok', r.status === 200 && JSON.parse(r.text).ok === true, r.text);
     }

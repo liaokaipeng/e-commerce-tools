@@ -248,11 +248,8 @@ onMounted(() => {
 <template>
   <div class="page">
     <div class="header">
-      <div class="logo">TT</div>
-      <div>
-        <h1>TikTok 无水印视频批量下载工具</h1>
-        <p>支持批量输入多个视频链接 · 以视频 ID 命名 · 自动跳过失效链接</p>
-      </div>
+      <h1>TikTok 无水印视频批量下载工具</h1>
+      <p>支持批量输入多个视频链接 · 以视频 ID 命名 · 自动跳过失效链接</p>
     </div>
 
     <div class="container">
@@ -334,36 +331,23 @@ onMounted(() => {
 <style scoped>
 .page {
   font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", sans-serif;
-  background: #f5f6fa;
-  color: #23262f;
+  background: #f4f6fb;
+  color: #1f2330;
   min-height: 100vh;
+  padding: 28px 20px 0;
+  box-sizing: border-box;
 }
 .header {
-  background: linear-gradient(135deg, #000000 0%, #1a1a2e 100%);
-  color: #fff;
-  padding: 28px 40px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
+  max-width: 900px;
+  margin: 0 auto;
+  padding-bottom: 20px;
 }
-.logo {
-  width: 44px;
-  height: 44px;
-  background: #fe2c55;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  font-weight: 700;
-  box-shadow: 0 4px 14px rgba(254, 44, 85, 0.4);
-}
-.header h1 { font-size: 20px; font-weight: 600; }
-.header p { font-size: 13px; opacity: 0.7; margin-top: 2px; }
-.container { max-width: 900px; margin: 28px auto; padding: 0 20px 60px; }
+.header h1 { font-size: 22px; font-weight: 700; color: #1f2330; margin: 0; }
+.header p { font-size: 13px; color: #6b7280; margin: 4px 0 0; }
+.container { max-width: 900px; margin: 0 auto; padding-bottom: 60px; }
 .card { margin-bottom: 20px; border-radius: 14px; }
 .step-num {
-  background: #fe2c55;
+  background: #ee4d2d;
   color: #fff;
   width: 22px;
   height: 22px;

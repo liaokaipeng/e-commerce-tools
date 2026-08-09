@@ -8,8 +8,6 @@ _diag*.js
 server.log
 
 *.xlsx
-!下载tiktok无水印视频/public/*.xlsx
-!视频上传/public/*.xlsx
 竞价获胜_*.xlsx
 
 session.json

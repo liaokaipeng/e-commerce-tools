@@ -2,10 +2,23 @@
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 
+// ---------- 站点（跨境 .cn / 本土各站点） ----------
+const SITES = [
+  { key: 'cn', label: '跨境（.cn）' },
+  { key: 'ph', label: '本土-菲律宾（.ph）' },
+];
+const site = ref('cn');
+const isPh = computed(() => site.value === 'ph');
+function siteLabel() {
+  const s = SITES.find((x) => x.key === site.value);
+  return s ? s.label : site.value;
+}
+
 // ---------- 凭证 ----------
 const auth = ref('');
 const cookie = ref('');
 const shopId = ref('');
+const userid = ref('');
 const credsStatus = ref('');
 const refreshingCreds = ref(false);
 
@@ -19,15 +32,18 @@ const shopName = computed(() => {
 });
 
 function saveCreds() {
-  localStorage.setItem('shopee_auth', auth.value);
-  localStorage.setItem('shopee_cookie', cookie.value);
-  localStorage.setItem('shopee_shopId', shopId.value);
+  localStorage.setItem(`shopee_creds_${site.value}`, JSON.stringify({
+    auth: auth.value, cookie: cookie.value, shopId: shopId.value, userid: userid.value,
+  }));
 }
 
 function loadLocalCreds() {
-  auth.value = localStorage.getItem('shopee_auth') || '';
-  cookie.value = localStorage.getItem('shopee_cookie') || '';
-  shopId.value = localStorage.getItem('shopee_shopId') || '';
+  let c = {};
+  try { c = JSON.parse(localStorage.getItem(`shopee_creds_${site.value}`) || '{}'); } catch (e) { c = {}; }
+  auth.value = c.auth || '';
+  cookie.value = c.cookie || '';
+  shopId.value = c.shopId || '';
+  userid.value = c.userid || '';
 }
 
 function setValIfNotFocused(id, v) {
@@ -37,6 +53,7 @@ function setValIfNotFocused(id, v) {
     if (id === 'auth') auth.value = v;
     else if (id === 'cookie') cookie.value = v;
     else if (id === 'shopId') shopId.value = v;
+    else if (id === 'userid') userid.value = v;
   }
 }
 
@@ -44,15 +61,17 @@ async function loadCredsFromServer(quiet) {
   try {
     const r = await fetch('/api/creds');
     const c = await r.json();
-    if (c && (c.auth || c.cookie || c.shopId)) {
-      setValIfNotFocused('auth', c.auth);
-      setValIfNotFocused('cookie', c.cookie);
-      setValIfNotFocused('shopId', c.shopId);
-      const t = c.updatedAt ? new Date(c.updatedAt).toLocaleString() : '';
-      credsStatus.value = '已自动获取凭证' + (t ? '（' + t + '）' : '');
+    const cur = (c && c.sites && c.sites[site.value]) || null;
+    if (cur && (cur.auth || cur.cookie || cur.shopId || cur.userid)) {
+      setValIfNotFocused('auth', cur.auth);
+      setValIfNotFocused('cookie', cur.cookie);
+      setValIfNotFocused('shopId', cur.shopId);
+      setValIfNotFocused('userid', cur.userid);
+      const t = cur.updatedAt ? new Date(cur.updatedAt).toLocaleString() : '';
+      credsStatus.value = '已自动获取「' + siteLabel() + '」凭证' + (t ? '（' + t + '）' : '');
       if (!quiet) saveCreds();
     } else {
-      credsStatus.value = '尚未抓取到凭证，请安装扩展并在短视频页手动上传一次';
+      credsStatus.value = '尚未抓取到「' + siteLabel() + '」凭证，请安装扩展并在该站点短视频页手动上传一次';
     }
   } catch (e) {
     /* 服务未启动忽略 */
@@ -238,22 +257,31 @@ function startUpload() {
   const authV = auth.value.trim();
   const cookieV = cookie.value.trim();
   const shopIdV = shopId.value.trim();
-  if (!cookieV || !shopIdV) {
-    ElMessage.warning('请先填写 Cookie 与 Shop ID（Authorization 可留空，会自动获取）');
+  const useridV = userid.value.trim();
+  if (!cookieV) {
+    ElMessage.warning('请先填写 Cookie');
+    return;
+  }
+  if (isPh.value && !useridV) {
+    ElMessage.warning('本土站点请填写 User ID（扩展会自动抓取，若为空请手动填写，见下方说明）');
+    return;
+  }
+  if (!isPh.value && !shopIdV) {
+    ElMessage.warning('跨境站点请填写 Shop ID（Authorization 可留空，会自动获取）');
     return;
   }
 
   uploading.value = true;
   logLines.value = [];
   summary.value = '';
-  log('开始批量上传，共 ' + rows.value.length + ' 个任务', 'ok');
+  log(`开始批量上传（${siteLabel()}），共 ${rows.value.length} 个任务`, 'ok');
 
   const mapped = rows.value.map((r) => ({ path: r.path, caption: r.caption, product: r.product }));
 
   fetch('/api/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rows: mapped, auth: authV, cookie: cookieV, shopId: shopIdV }),
+    body: JSON.stringify({ site: site.value, rows: mapped, auth: authV, cookie: cookieV, shopId: shopIdV, userid: useridV }),
   })
     .then((r) => r.json())
     .then(({ jobId }) => {
@@ -318,8 +346,13 @@ onMounted(() => {
     .then((d) => { stores.value = Array.isArray(d) ? d : []; })
     .catch(() => { /* 服务未启动忽略 */ });
   const timer = setInterval(() => loadCredsFromServer(true), 5000);
+  const stopWatch = watch(site, () => {
+    loadLocalCreds();
+    loadCredsFromServer(true);
+  });
   onUnmounted(() => {
     clearInterval(timer);
+    stopWatch();
     if (es) es.close();
   });
 });
@@ -327,38 +360,53 @@ onMounted(() => {
 
 <template>
   <div class="wrap">
-    <h1>Shopee 视频批量上传</h1>
-    <div class="sub">根据抓包接口还原的本地上传工具 · 视频路径/说明/商品编码存于表格，按行批量上传并关联商品</div>
+    <div class="header">
+      <h1>Shopee 视频批量上传</h1>
+      <p>根据抓包接口还原的本地上传工具 · 视频路径/说明/商品编码存于表格，按行批量上传并关联商品</p>
+    </div>
+    <div class="container">
 
     <!-- 凭证 -->
     <el-card shadow="never" class="card">
       <template #header>
         <el-collapse style="border: none">
-          <el-collapse-item title="接口凭证（可留空，服务端会用 Cookie 自动刷新 Authorization）" name="creds">
+          <el-collapse-item title="接口凭证（可留空，服务端会用 Cookie 自动换取所需凭证）" name="creds">
             <div class="row">
-              <el-input v-model="auth" placeholder="可留空，自动获取">
-                <template #label>Authorization（分片上传用，可留空，服务端会自动获取）</template>
+              <span class="site-label">上传站点</span>
+              <el-select v-model="site" style="max-width: 260px">
+                <el-option v-for="s in SITES" :key="s.key" :value="s.key" :label="s.label" />
+              </el-select>
+            </div>
+            <div v-if="!isPh" class="row" style="margin-top: 8px">
+              <el-input id="auth" v-model="auth" placeholder="可留空，自动获取">
+                <template #label>Authorization（跨境分片上传用，可留空，服务端自动获取）</template>
               </el-input>
             </div>
             <div class="row" style="margin-top: 8px">
-              <el-input v-model="cookie" type="textarea" :rows="3" placeholder="Cookie（item/list 与 video/create 用，含 video_upload_session_id 等）">
+              <el-input id="cookie" v-model="cookie" type="textarea" :rows="3" placeholder="Cookie（含 video_upload_session_id 等）">
                 <template #label>Cookie</template>
               </el-input>
             </div>
-            <div class="row" style="margin-top: 8px">
-              <el-input v-model="shopId" style="max-width: 220px" placeholder="Shop ID">
-                <template #label>Shop ID</template>
+            <div v-if="!isPh" class="row" style="margin-top: 8px">
+              <el-input id="shopId" v-model="shopId" style="max-width: 220px" placeholder="Shop ID">
+                <template #label>Shop ID（仅跨境需要）</template>
               </el-input>
               <span v-if="shopName" class="hint shop-name">→ {{ shopName }}</span>
+            </div>
+            <div v-if="isPh" class="row" style="margin-top: 8px">
+              <el-input id="userid" v-model="userid" style="max-width: 220px" placeholder="User ID（如 13469117809）">
+                <template #label>User ID（本土上传需要，扩展会自动抓取，若为空请手动填写）</template>
+              </el-input>
             </div>
             <div class="btn-row" style="margin-top: 10px">
               <el-button :loading="refreshingCreds" @click="refreshCreds">从浏览器刷新凭证</el-button>
               <span class="hint creds-status">{{ credsStatus }}</span>
             </div>
             <div class="hint">
-              安装「凭证抓取」浏览器扩展后，在 Shopee 短视频页手动上传一次视频，扩展会自动抓取 Cookie/ShopID 并填入。Authorization
-              时效很短，无需手动抓取——服务端每次上传前会用 Cookie 自动换取新 token。Cookie
-              失效时（上传报 token is expired）重新登录并在短视频页上传一次即可。
+              选择站点后，安装「凭证抓取」浏览器扩展，并登录对应站点卖家中心，在短视频上传页手动上传一次视频，扩展会自动抓取该站点的
+              Cookie 与 User ID 并填入。Authorization 时效很短，无需手动抓取——服务端上传前会自动换取。切换站点会自动切换对应凭证。Cookie
+              失效时（上传报 token is expired）重新登录并在短视频页上传一次即可。若 User ID 未自动抓到，请手动填写：打开短视频上传页按
+              F12 → Network → 筛选 <b>report/add</b> → 点请求看 Payload 里的 <b>userId=后面那串数字</b>。
             </div>
           </el-collapse-item>
         </el-collapse>
@@ -437,27 +485,34 @@ onMounted(() => {
         <div v-for="(l, i) in logLines" :key="i" class="log-line" :class="l.cls">[{{ l.time }}] {{ l.msg }}</div>
       </div>
     </el-card>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .wrap {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", sans-serif;
   background: #f4f6fb;
   color: #1f2330;
   line-height: 1.5;
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 24px 16px 60px;
+  min-height: 100vh;
+  padding: 28px 20px 0;
   box-sizing: border-box;
 }
-h1 { font-size: 22px; margin: 0 0 4px; }
-.sub { color: #6b7280; font-size: 13px; margin-bottom: 20px; }
-.card { margin-bottom: 18px; }
+.header {
+  max-width: 900px;
+  margin: 0 auto;
+  padding-bottom: 20px;
+}
+.header h1 { font-size: 22px; font-weight: 700; color: #1f2330; margin: 0; }
+.header p { font-size: 13px; color: #6b7280; margin: 4px 0 0; }
+.container { max-width: 900px; margin: 0 auto; padding-bottom: 60px; }
+.card { margin-bottom: 18px; border-radius: 14px; }
 .pill { margin-left: 8px; }
 .file-row { display: flex; flex-direction: column; gap: 8px; }
 .file-input { padding: 4px 0; }
 .hint { font-size: 12px; color: #9aa0ad; margin-top: 6px; }
+.site-label { font-size: 12px; color: #6b7280; margin-right: 8px; align-self: center; }
 .creds-status { align-self: center; margin: 0; }
 .shop-name { margin: 0 0 0 8px; align-self: center; color: #2f6fed; }
 .btn-row { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
@@ -473,10 +528,10 @@ h1 { font-size: 22px; margin: 0 0 4px; }
 .grid3 label { display: block; font-size: 12px; color: #6b7280; margin: 0 0 4px; }
 .preview { margin-top: 14px; }
 .log {
-  background: #0f1320;
+  background: #10131c;
   color: #c8e1ff;
-  font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
   border-radius: 10px;
   padding: 14px;
   height: 320px;
@@ -486,6 +541,6 @@ h1 { font-size: 22px; margin: 0 0 4px; }
 }
 .log-line { margin: 0 0 2px; }
 .log-line .tag { color: #7fd1ff; }
-.log-line.err { color: #ff8585; }
-.log-line.ok { color: #7cfc9b; }
+.log-line.err { color: #ff7b72; }
+.log-line.ok { color: #5fd08a; }
 </style>

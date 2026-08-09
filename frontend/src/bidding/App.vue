@@ -243,9 +243,11 @@ onUnmounted(() => {
 
 <template>
   <div class="page">
-    <div class="container">
+    <div class="header">
       <h1>Shopee 竞价导出工具</h1>
-      <div class="sub">按「分类 / 店铺简称 / 店铺 ID」选择店铺，一键导出获胜竞价数据到 Excel</div>
+      <p>按「分类 / 店铺简称 / 店铺 ID」选择店铺，一键导出获胜竞价数据到 Excel</p>
+    </div>
+    <div class="container">
 
       <el-card shadow="never" class="card">
         <template #header>① 登录（Cookie）</template>
@@ -326,17 +328,22 @@ onUnmounted(() => {
 
 <style scoped>
 .page {
-  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
-  background: #f4f5f7;
-  color: #333;
+  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", sans-serif;
+  background: #f4f6fb;
+  color: #1f2330;
   min-height: 100vh;
-  padding: 24px;
+  padding: 28px 20px 0;
   box-sizing: border-box;
 }
-.container { max-width: 860px; margin: 0 auto; }
-h1 { font-size: 22px; color: #ee4d2d; margin: 0 0 4px; }
-.sub { color: #888; font-size: 13px; margin-bottom: 20px; }
-.card { margin-bottom: 16px; }
+.header {
+  max-width: 900px;
+  margin: 0 auto;
+  padding-bottom: 20px;
+}
+.header h1 { font-size: 22px; font-weight: 700; color: #1f2330; margin: 0; }
+.header p { font-size: 13px; color: #6b7280; margin: 4px 0 0; }
+.container { max-width: 900px; margin: 0 auto; padding-bottom: 60px; }
+.card { margin-bottom: 18px; border-radius: 14px; }
 .status-bar {
   display: flex;
   align-items: center;
@@ -396,20 +403,20 @@ h1 { font-size: 22px; color: #ee4d2d; margin: 0 0 4px; }
 .sel-count { font-size: 13px; color: #666; }
 .log-box { margin-top: 14px; }
 .log {
-  background: #1e1e1e;
-  color: #d4d4d4;
-  font-family: Consolas, monospace;
-  border-radius: 8px;
+  background: #10131c;
+  color: #c8e1ff;
+  font-family: Consolas, "Courier New", monospace;
+  border-radius: 10px;
   padding: 14px;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 12.5px;
+  line-height: 1.7;
   max-height: 260px;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;
 }
-.log .ok { color: #7ee787; }
+.log .ok { color: #5fd08a; }
 .log .err { color: #ff7b72; }
-.log .info { color: #79c0ff; }
+.log .info { color: #b8c0cc; }
 .log-empty { color: #8a8a8a; }
 </style>
