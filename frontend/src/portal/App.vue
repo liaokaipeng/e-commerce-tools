@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 
 // 三个工具各用一个 iframe，首次访问时加载并常驻 DOM。
 // 切换 Tab 只改变 display，不重新加载页面，从而保留各 Tab 状态。
@@ -10,7 +10,8 @@ const tabs = [
 ];
 
 const active = ref('bidding');
-const loaded = new Set();
+// 用 reactive 包裹，add/delete 会触发视图更新（否则首次挂载后 iframe src 不会刷新）
+const loaded = reactive(new Set());
 
 function show(key) {
   active.value = key;
@@ -25,9 +26,12 @@ function isActive(key) {
 }
 
 function iframeSrc(tab) {
-  // 仅当该 Tab 被首次激活时才真正赋值 src，避免一次性加载三个页面
+  // 仅当该 Tab 被激活时才真正赋值 src，避免一次性加载三个页面
   return loaded.has(tab.key) ? tab.src : undefined;
 }
+
+// 首次打开即加载默认 Tab（竞价导出），否则其 iframe 无 src 显示空白
+onMounted(() => show(active.value));
 </script>
 
 <template>

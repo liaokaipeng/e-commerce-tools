@@ -39,6 +39,17 @@ function saveCredsFile() {
 // 统一出站请求：视频上传各步骤依赖跨请求的会话 Cookie，故 useJar=true
 const call = (opts) => request(Object.assign({ useJar: true }, opts));
 
+// ------- 店铺列表（复用 stores.json，用于展示 shopId 对应店名，参考竞价导出） -------
+function loadStores() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, 'stores.json'), 'utf8'));
+  } catch (e) {
+    console.warn('读取 stores.json 失败:', e.message);
+    return [];
+  }
+}
+const STORES = loadStores();
+
 // ------- 上传流程各步骤 -------
 async function refreshAuthToken(cookie, shopId) {
   const resp = await call({
@@ -439,6 +450,12 @@ function register({ get, post }) {
   get('/api/creds', (req, res) => {
     res.writeHead(200, Object.assign({ 'Content-Type': 'application/json' }, corsH));
     res.end(JSON.stringify(storedCreds));
+  });
+
+  // 店铺列表（用于把 shopId 展示成店名，复用 stores.json，参考竞价导出）
+  get('/api/stores', (req, res) => {
+    res.writeHead(200, Object.assign({ 'Content-Type': 'application/json' }, corsH));
+    res.end(JSON.stringify(STORES));
   });
   post('/api/creds', (req, res) => {
     let body = '';

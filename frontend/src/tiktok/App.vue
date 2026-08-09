@@ -7,6 +7,7 @@ import DirPicker from '../components/DirPicker.vue';
 const urls = ref('');
 const dir = ref('');
 const downloading = ref(false);
+const abortRef = ref(null);
 const proxyConnected = ref(true);
 const proxyText = ref('正在检测网络环境...');
 const showVpn = ref(false);
@@ -179,11 +180,14 @@ async function startDownload() {
   let networkIssue = false;
   progress.value = { show: true, done: 0, ok: 0, fail: 0, total: list.length };
 
+  const controller = new AbortController();
+  abortRef.value = controller;
   try {
     const resp = await fetch('/api/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ urls: list.join('\n'), dir: d }),
+      signal: controller.signal,
     });
     if (!resp.ok || !resp.body) {
       const err = await resp.json().catch(() => ({}));
@@ -213,12 +217,21 @@ async function startDownload() {
       }
     }
   } catch (e) {
-    log('连接服务失败：' + e.message, 'err');
+    if (e.name === 'AbortError') {
+      log('已手动停止下载任务', 'warn', '提示');
+    } else {
+      log('连接服务失败：' + e.message, 'err');
+    }
   } finally {
     downloading.value = false;
+    abortRef.value = null;
   }
 
-  if (networkIssue) showVpn.value = true;
+  if (networkIssue && !abortRef.value) showVpn.value = true;
+}
+
+function stopDownload() {
+  abortRef.value?.abort();
 }
 
 async function recheckNetwork() {
@@ -284,9 +297,11 @@ onMounted(() => {
           <el-button @click="openDir">打开目录</el-button>
         </div>
         <div class="actions">
-          <el-button type="primary" size="large" :loading="downloading" @click="startDownload">
-            {{ downloading ? '下载中...' : '开始下载' }}
-          </el-button>
+          <template v-if="downloading">
+            <el-button type="primary" size="large" :loading="true">下载中...</el-button>
+            <el-button type="danger" size="large" @click="stopDownload">停止下载</el-button>
+          </template>
+          <el-button v-else type="primary" size="large" @click="startDownload">开始下载</el-button>
           <el-button size="large" @click="recheckNetwork">重新检测网络</el-button>
         </div>
       </el-card>

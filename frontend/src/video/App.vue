@@ -9,6 +9,15 @@ const shopId = ref('');
 const credsStatus = ref('');
 const refreshingCreds = ref(false);
 
+// 店铺列表（复用 stores.json，用于把 shopId 展示成店名，参考竞价导出）
+const stores = ref([]);
+const shopName = computed(() => {
+  const id = shopId.value.trim();
+  if (!id) return '';
+  const s = stores.value.find((x) => String(x.id) === id);
+  return s ? s.name : '';
+});
+
 function saveCreds() {
   localStorage.setItem('shopee_auth', auth.value);
   localStorage.setItem('shopee_cookie', cookie.value);
@@ -304,6 +313,10 @@ function startUpload() {
 onMounted(() => {
   loadLocalCreds();
   loadCredsFromServer(true);
+  fetch('/api/stores')
+    .then((r) => r.json())
+    .then((d) => { stores.value = Array.isArray(d) ? d : []; })
+    .catch(() => { /* 服务未启动忽略 */ });
   const timer = setInterval(() => loadCredsFromServer(true), 5000);
   onUnmounted(() => {
     clearInterval(timer);
@@ -336,6 +349,7 @@ onMounted(() => {
               <el-input v-model="shopId" style="max-width: 220px" placeholder="Shop ID">
                 <template #label>Shop ID</template>
               </el-input>
+              <span v-if="shopName" class="hint shop-name">→ {{ shopName }}</span>
             </div>
             <div class="btn-row" style="margin-top: 10px">
               <el-button :loading="refreshingCreds" @click="refreshCreds">从浏览器刷新凭证</el-button>
@@ -445,6 +459,7 @@ h1 { font-size: 22px; margin: 0 0 4px; }
 .file-input { padding: 4px 0; }
 .hint { font-size: 12px; color: #9aa0ad; margin-top: 6px; }
 .creds-status { align-self: center; margin: 0; }
+.shop-name { margin: 0 0 0 8px; align-self: center; color: #2f6fed; }
 .btn-row { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
 .mapping { margin-top: 14px; }
 .grid3 {

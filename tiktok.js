@@ -61,14 +61,14 @@ function createAgent(proxy) {
 
 // ---------- HTTP 请求 ----------
 
-function httpsGet(url, { agent, headers = {}, method = 'GET', timeout = 30000, redirects = 5, onResponse } = {}) {
+function httpsGet(url, { agent, headers = {}, method = 'GET', timeout = 30000, redirects = 5, onResponse, signal } = {}) {
   return new Promise((resolve, reject) => {
     const req = https.request(url, { agent, headers, method, timeout }, (res) => {
       // 重定向处理
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects > 0) {
         res.resume();
         const nextUrl = new URL(res.headers.location, url).toString();
-        httpsGet(nextUrl, { agent, headers, method, timeout, redirects: redirects - 1, onResponse })
+        httpsGet(nextUrl, { agent, headers, method, timeout, redirects: redirects - 1, onResponse, signal })
           .then(resolve, reject);
         return;
       }
@@ -79,6 +79,11 @@ function httpsGet(url, { agent, headers = {}, method = 'GET', timeout = 30000, r
       res.on('data', (c) => data += c);
       res.on('end', () => resolve({ status: res.statusCode, body: data, cookies }));
     });
+    const onAbort = () => req.destroy(new Error('aborted'));
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
     req.on('timeout', () => req.destroy(new Error('timeout')));
     req.on('error', reject);
     req.end();
@@ -107,14 +112,16 @@ function extractVideoIdFromUrl(url) {
 }
 
 /** 解析单个视频页，返回无水印地址 + cookie */
-async function parseVideo(url, { agent, session = {}, onLog = () => {} }) {
+async function parseVideo(url, { agent, session = {}, onLog = () => {}, signal }) {
   let lastError = null;
   // 优先复用跨视频共享的会话 Cookie（ttwid 等），降低被风控识别为陌生批量请求的概率
   let cookies = session.cookies || '';
   for (let attempt = 1; attempt <= 5; attempt++) {
+    if (signal && signal.aborted) throw new Error('aborted');
     try {
       let page = await httpsGet(url, {
         agent,
+        signal,
         headers: {
           'User-Agent': UA,
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -157,6 +164,7 @@ async function parseVideo(url, { agent, session = {}, onLog = () => {} }) {
       return { videoId, downloadUrl, playUrl, awemeUrl, cookies: page.cookies };
     } catch (e) {
       lastError = e;
+      if (signal && signal.aborted) break;
       if (attempt < 5) {
         // 间隔递增 + 随机抖动，降低被风控模式识别的概率
         const wait = 3000 * attempt + Math.floor(Math.random() * 2000);
@@ -169,12 +177,17 @@ async function parseVideo(url, { agent, session = {}, onLog = () => {} }) {
 }
 
 /** 下载文件到指定路径（自动跟随重定向，aweme 接口会 302 到实际 CDN 地址） */
-function downloadFile(url, destPath, cookies, agent, redirects = 5) {
+function downloadFile(url, destPath, cookies, agent, redirects = 5, signal) {
   return new Promise((resolve, reject) => {
     const out = fs.createWriteStream(destPath);
     // 立即挂载写流错误监听：文件创建失败（权限/磁盘满/被占用等）时 error 会异步立即触发，
     // 若等响应回调里才挂监听，就会变成未处理的 'error' 事件导致整个 node 进程崩溃（SSE 断流）。
     out.on('error', reject);
+    // 清理半成品文件：中止或失败时移除 .part 残留
+    const cleanup = () => {
+      try { out.destroy(); } catch {}
+      try { fs.rmSync(destPath, { force: true }); } catch {}
+    };
     const req = https.request(url, {
       agent,
       headers: {
@@ -190,11 +203,11 @@ function downloadFile(url, destPath, cookies, agent, redirects = 5) {
         out.destroy();
         const next = new URL(res.headers.location, url).toString();
         res.resume();
-        downloadFile(next, destPath, cookies, agent, redirects - 1).then(resolve, reject);
+        downloadFile(next, destPath, cookies, agent, redirects - 1, signal).then(resolve, reject);
         return;
       }
       if (res.statusCode !== 200) {
-        out.destroy();
+        cleanup();
         reject(new Error('视频下载返回 HTTP ' + res.statusCode));
         res.resume();
         return;
@@ -202,7 +215,12 @@ function downloadFile(url, destPath, cookies, agent, redirects = 5) {
       res.pipe(out);
       out.on('finish', () => resolve({ bytes: fs.statSync(destPath).size }));
     });
-    req.on('timeout', () => req.destroy(new Error('timeout')));
+    const onAbort = () => { cleanup(); req.destroy(new Error('aborted')); };
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+    req.on('timeout', () => { cleanup(); req.destroy(new Error('timeout')); });
     req.on('error', reject);
     req.end();
   });
@@ -233,8 +251,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * @param {string} saveDir 保存目录
  * @param {(event: object) => void} emit 事件回调
  */
-async function runBatch(urls, saveDir, emit) {
+async function runBatch(urls, saveDir, emit, signal) {
   const dir = saveDir || path.join(process.env.USERPROFILE || process.env.HOME || '.', 'Downloads', 'tiktok_videos');
+  const isAborted = () => !!(signal && signal.aborted);
   try {
     fs.mkdirSync(dir, { recursive: true });
   } catch (e) {
@@ -256,11 +275,13 @@ async function runBatch(urls, saveDir, emit) {
   const session = {};
 
   for (let i = 0; i < urls.length; i++) {
+    if (isAborted()) break;
     const url = urls[i];
     emit({ type: 'start', index: i + 1, total: urls.length, url });
 
     try {
-      const v = await parseVideo(url, { agent, session, onLog: (m) => emit({ type: 'log', url, message: m }) });
+      const v = await parseVideo(url, { agent, session, signal, onLog: (m) => emit({ type: 'log', url, message: m }) });
+      if (isAborted()) break;
       emit({ type: 'log', url, message: `解析成功：视频ID ${v.videoId}` });
 
       const filePath = path.join(dir, `${v.videoId}.mp4`);
@@ -279,25 +300,28 @@ async function runBatch(urls, saveDir, emit) {
         ['playAddr', v.playUrl],
       ];
       for (const [name, u] of candidates) {
-        if (!u) continue;
+        if (!u || isAborted()) break;
         try {
           emit({ type: 'log', url, message: `正在通过 ${name} 下载...` });
           const tmp = filePath + '.part';
-          await downloadFile(u, tmp, v.cookies, agent);
+          await downloadFile(u, tmp, v.cookies, agent, 5, signal);
           fs.renameSync(tmp, filePath);
           downloaded = true;
           break;
         } catch (e) {
+          if (isAborted()) break;
           emit({ type: 'log', url, message: `${name} 下载失败（${e.message}），尝试备用地址...` });
         }
       }
 
+      if (isAborted()) break;
       if (!downloaded) {
         throw new Error('所有视频地址均下载失败');
       }
       emit({ type: 'done', url, ok: true, message: `下载完成：${v.videoId}.mp4`, file: filePath });
       success++;
     } catch (e) {
+      if (isAborted()) break;
       failed++;
       if (isNetworkError(e)) networkError = true;
       emit({
@@ -310,6 +334,12 @@ async function runBatch(urls, saveDir, emit) {
     }
     // 间隔请求 + 随机抖动，降低被风控识别为批量脚本的概率
     if (i < urls.length - 1) await sleep(3000 + Math.floor(Math.random() * 1500));
+    if (isAborted()) break;
+  }
+
+  if (isAborted()) {
+    emit({ type: 'summary', success, failed, networkError, message: `任务已手动中止：成功 ${success} 个，失败 ${failed} 个。` });
+    return;
   }
 
   emit({
@@ -384,9 +414,14 @@ async function handleDownload(req, res) {
 
   emit({ type: 'info', message: `共 ${urls.length} 个链接，开始下载...` });
 
-  runBatch(urls, saveDir, emit).then(() => {
+  // 客户端断开（用户点击“停止下载”会 abort fetch）时，中止整个下载任务
+  const controller = new AbortController();
+  res.on('close', () => controller.abort());
+
+  runBatch(urls, saveDir, emit, controller.signal).then(() => {
     try { res.end(); } catch { /* ignore */ }
   }).catch((e) => {
+    if (controller.signal.aborted) return;
     emit({ type: 'fatal', message: `任务异常：${e.message}` });
     try { res.end(); } catch { /* ignore */ }
   });
