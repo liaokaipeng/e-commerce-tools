@@ -22,7 +22,7 @@
 
 ## 项目格式约定（已统一）
 
-新增子项目请沿用：入口 `main.js` / 文档 `使用说明.md` / 启动脚本 `启动.bat` / 带 `package.json`（零依赖可空 `dependencies`）与 `.gitignore`（忽略 `node_modules/`、凭证 `session.json`/`creds.json`、`*.log`、导出的 xlsx）。
+新增子项目请沿用：入口 `main.js` / 文档 `使用说明.md` / 启动脚本 `启动.bat` / 带 `package.json`（零依赖可空 `dependencies`）与 `.gitignore`（忽略 `node_modules/`、凭证 `session.json`、`*.log`、导出的 xlsx）。
 
 ## 子项目结构速查
 
@@ -30,7 +30,7 @@
 
 **竞价**：`main.js`（ESM CLI，子命令 `login` 起 8765 收 Cookie / `export -s 店铺ID` 拉数据写 Excel）→ `extension/`（读 `seller.shopee.cn` 的 Cookie（含 HttpOnly）→ POST 到 `http://127.0.0.1:8765/api/cookie`）→ `启动.bat`（一键收 Cookie → 问店铺 ID → 导出）；依赖 `exceljs`；运行时产物 `session.json`（不入库）。
 
-**视频上传**：`main.js`（零依赖 HTTP 服务，上传链路 `preupload → 分片upload → mergeFiles → reportupload → item/list → video/create`，自带按 host 维护的 Cookie 罐供分片会话）→ `public/index.html` + `xlsx.full.min.js` → `extension/background.js`（Service Worker，监听 `webRequest` 抓 Authorization/Cookie/ShopID → 推到 `http://localhost:3000`）→ `启动.bat`；运行时产物 `creds.json` / `server.log`（不入库）。
+**视频上传**：`main.js`（零依赖 HTTP 服务，上传链路 `preupload → 分片upload → mergeFiles → reportupload → item/list → video/create`，自带按 host 维护的 Cookie 罐供分片会话）→ `public/index.html` + `xlsx.full.min.js` → `extension/background.js`（Service Worker，监听 `webRequest` 抓 Authorization/Cookie/ShopID → 推到 `http://localhost:3000`）→ `启动.bat`；运行时产物 `session.json` / `server.log`（不入库）。
 
 ## 运行与启动
 
@@ -54,7 +54,7 @@ cd 视频上传 && node main.js         # http://localhost:3000（零依赖，�
 4. **不破坏 `.bat` 流程**：改入口/端口时，同步改对应 `.bat` 与 `使用说明.md`。
 5. **端口固定**：8737 / 8765 / 3000，扩展与文档已硬编码，勿随意换。
 6. **接口还原，不用 UI 自动化**：`竞价` 与 `视频上传` 直接调 Shopee 内部 HTTP 接口，遵循抓包链路；不要改成 Playwright/Selenium。
-7. **凭证不入库**：`session.json`、`creds.json`、`server.log` 不提交；日志不完整打印 Cookie/Authorization。
+7. **凭证不入库**：`session.json`、`server.log` 不提交；日志不完整打印 Cookie/Authorization。
 8. **中文优先**：面向中文用户，文档/注释/用户文案用中文；代码标识符可英文。
 9. **不主动新增文档文件**：用各子项目现有的 `使用说明.md`，按需更新。
 
@@ -71,5 +71,5 @@ cd 视频上传 && node main.js         # http://localhost:3000（零依赖，�
 | TikTok 下载网络错误 | 开 VPN/代理（工具自动读取系统代理） |
 | 竞价 `Failed to fetch` | 8765 服务没起，重跑 `.bat` |
 | 竞价 403 / 登录失效 | 重新登录卖家中心 → 扩展重推 Cookie |
-| 视频上传 401/403 / 上传失败 | 凭证过期，去短视频上传页手动传一次视频，扩展自动刷新 `creds.json` |
+| 视频上传 401/403 / 上传失败 | 凭证过期，去短视频上传页手动传一次视频，扩展自动刷新 `session.json` |
 | 端口占用 | 关残留 `node` 进程或旧黑窗口 |

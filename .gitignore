@@ -8,7 +8,6 @@ server.log
 !视频上传/public/*.xlsx
 
 session.json
-creds.json
 
 .DS_Store
 Thumbs.db

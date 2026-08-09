@@ -1,4 +1,4 @@
 node_modules/
-creds.json
+session.json
 server.log
 *.log

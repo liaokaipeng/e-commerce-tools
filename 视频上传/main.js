@@ -51,7 +51,7 @@ function getCookieHeader(hostname) {
 }
 
 // ------- 自动凭证存储（浏览器扩展推送，网页读取） -------
-const CREDS_FILE = path.join(__dirname, 'creds.json');
+const CREDS_FILE = path.join(__dirname, 'session.json');
 let storedCreds = { auth: '', cookie: '', shopId: '', updatedAt: 0 };
 try {
   if (fs.existsSync(CREDS_FILE)) {
