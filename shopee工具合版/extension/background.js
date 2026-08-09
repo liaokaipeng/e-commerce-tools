@@ -1,8 +1,7 @@
-// Shopee 视频上传凭证抓取 - 后台服务
-// 监听浏览器请求，自动抓取三项凭证并推送到本地工具 http://localhost:3000
-// v1.1：凭证缓存到 chrome.storage.local，本地服务未启动时抓取的凭证不会丢失，
-//        下次抓到新请求 / 点击扩展图标时自动补推。
-const LOCAL = 'http://localhost:3000/api/creds';
+// Shopee 工具合版助手 - 后台服务（视频上传凭证抓取）
+// 监听 Shopee 请求，自动抓取 Authorization/Cookie/ShopID 并推送到本地工具 http://localhost:8765/api/creds
+// 凭证缓存到 chrome.storage.local，本地服务未启动时抓取的凭证不会丢失，下次抓到新请求时自动补推。
+const LOCAL = 'http://localhost:8765/api/creds';
 const creds = { auth: '', cookie: '', shopId: '' };
 let pushing = false;
 
@@ -73,9 +72,3 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
   { urls: ['https://*.shopee.cn/*'] },
   ['requestHeaders', 'extraHeaders']
 );
-
-// 点击扩展图标：打开本地工具并补推凭证（解决"先抓凭证、后启动工具"导致漏推的问题）
-chrome.action.onClicked.addListener(() => {
-  push();
-  chrome.tabs.create({ url: 'http://localhost:3000/' });
-});

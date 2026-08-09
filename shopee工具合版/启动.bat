@@ -1,10 +1,11 @@
 @echo off
 chcp 65001 >nul
-title TikTok 无水印视频下载工具
 cd /d "%~dp0"
+title Shopee 工具合版（下载 / 竞价 / 上传）
 
 echo ==========================================
-echo    TikTok 无水印视频下载工具
+echo     Shopee 工具合版
+echo     TikTok下载 / 竞价导出 / 视频上传
 echo ==========================================
 echo.
 
@@ -29,17 +30,17 @@ if not exist "node_modules" (
 )
 
 rem 检查端口是否已被占用（服务可能已在运行）
-netstat -ano | findstr ":8737" | findstr "LISTENING" >nul
+netstat -ano | findstr ":8765" | findstr "LISTENING" >nul
 if %errorlevel%==0 (
-    echo [提示] 服务已在运行（端口 8737 被占用），无需重复启动。
+    echo [提示] 服务已在运行（端口 8765 被占用），无需重复启动。
     echo        正在打开浏览器...
-    start "" "http://localhost:8737"
+    start "" "http://127.0.0.1:8765"
     pause
     exit /b 0
 )
 
 rem 启动服务，并延迟 2 秒后自动打开浏览器
-start "" /b powershell -NoProfile -Command "Start-Sleep -Seconds 2; Start-Process 'http://localhost:8737'"
+start "" /b powershell -NoProfile -Command "Start-Sleep -Seconds 2; Start-Process 'http://127.0.0.1:8765'"
 node main.js
 
 pause

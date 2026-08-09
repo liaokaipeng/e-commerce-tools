@@ -239,7 +239,7 @@ function log(message, cls = 'info', title = '') {
 // ---------- 代理状态 ----------
 async function checkNetwork() {
   try {
-    const r = await fetch('/api/status');
+    const r = await fetch('/api/tiktok/status');
     const data = await r.json();
     proxyInfo = data.proxy;
     if (data.defaultDir && !$('dir').value) $('dir').value = data.defaultDir;
@@ -258,7 +258,7 @@ async function checkNetwork() {
 $('btnDefaultDir').onclick = () => {
   if (proxyInfo) {
     // 重新拉取默认目录
-    fetch('/api/status').then(r => r.json()).then(d => {
+    fetch('/api/tiktok/status').then(r => r.json()).then(d => {
       if (d.defaultDir) { $('dir').value = d.defaultDir; log('已填入默认目录：' + d.defaultDir, 'info'); }
     }).catch(() => {});
   }

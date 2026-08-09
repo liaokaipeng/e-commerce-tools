@@ -1,25 +1,14 @@
 /**
- * Shopee 实时竞价数据导出工具（网页版）
- *
- * 用法：
- *   node main.js    # 启动本地网页服务，浏览器访问 http://127.0.0.1:8765
- *
- * 原理：
- *   - 网页提供店铺选择（分类 / 店铺简称 / 店铺 ID），勾选后一键导出 Excel
- *   - 登录 Cookie 由浏览器扩展（extension/ 目录）读取（含 HttpOnly）推送到 /api/cookie，保存到 session.json
- *   - 导出时直接用 HTTP 请求调用卖家中心内部接口（非 UI 自动化），翻页拉取全部数据
+ * Shopee 实时竞价数据导出模块（CommonJS）
+ * 由合并服务 main.js 引入，通过 register({ get, post }) 注册路由。
+ * 登录 Cookie 由浏览器扩展推送至 /api/cookie，保存到本目录 bidding-session.json。
  */
-import http from 'node:http';
-import ExcelJS from 'exceljs';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+const ExcelJS = require('exceljs');
+const fs = require('fs');
+const path = require('path');
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SESSION_FILE = path.join(__dirname, 'session.json');
-const PUBLIC_DIR = path.join(__dirname, 'public');
+const SESSION_FILE = path.join(__dirname, 'bidding-session.json');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-const SERVER_PORT = 8765;
 
 // ============ 店铺列表（分类 / 店铺简称 / 店铺 ID） ============
 const STORES = [
@@ -38,32 +27,6 @@ const STORES = [
   { category: 'Shopee-PC', name: 'Shopee-PC-泰国', id: '753230225' },
   { category: 'Shopee-PC', name: 'Shopee-PC-马来西亚', id: '744794639' },
 ];
-
-// ============ 静态文件服务 ============
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-};
-
-function serveStatic(req, res) {
-  let urlPath = decodeURIComponent(req.url.split('?')[0]);
-  if (urlPath === '/') urlPath = '/index.html';
-  const filePath = path.join(PUBLIC_DIR, urlPath);
-  if (!filePath.startsWith(PUBLIC_DIR)) {
-    res.writeHead(403); res.end('forbidden'); return;
-  }
-  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('not found'); return;
-  }
-  const ext = path.extname(filePath).toLowerCase();
-  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-  fs.createReadStream(filePath).pipe(res);
-}
 
 // ============ 登录状态 ============
 function readSession() {
@@ -142,8 +105,6 @@ async function fetchWinningData(cookieHeader, shopId, region) {
           商品编号: String(item.item_id),
           编号: String(model.product_info?.model_id ?? ''),
           系统竞价价格: toAmount(b.bid_price),
-          // 页面"最终价格"列 = 预估供应价 estimated_supply_price
-          // （bid_price_after_rebate 仅极个别行有值，不可作为数据源）
           最终价格: toAmount(b.estimated_supply_price),
           我的最佳价格: toAmount(b.floor_price),
           我的活动价格: toAmount(b.ceiling_price),
@@ -259,69 +220,36 @@ function handleExport(body, res) {
   });
 }
 
-// ============ HTTP 服务 ============
-function createServer() {
-  return http.createServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+// ============ 路由注册 ============
+function register({ get, post }) {
+  get('/api/status', (req, res) => {
+    const session = readSession();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      loggedIn: !!(session && session.cookies && session.cookies.length),
+      cookieCount: session?.cookies?.length || 0,
+      savedAt: session?.savedAt || null,
+    }));
+  });
 
-    const urlPath = req.url.split('?')[0];
+  get('/api/stores', (req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(STORES));
+  });
 
-    if (req.method === 'POST' && urlPath === '/api/cookie') {
-      handleCookie(req, res); return;
-    }
+  post('/api/export', (req, res) => {
+    let body = '';
+    req.on('data', c => { body += c; });
+    req.on('end', () => {
+      let parsed = {};
+      try { parsed = JSON.parse(body); } catch {}
+      handleExport(parsed, res);
+    });
+  });
 
-    if (req.method === 'POST' && urlPath === '/api/export') {
-      let body = '';
-      req.on('data', c => { body += c; });
-      req.on('end', () => {
-        let parsed = {};
-        try { parsed = JSON.parse(body); } catch {}
-        handleExport(parsed, res);
-      });
-      return;
-    }
-
-    if (req.method === 'GET' && urlPath === '/api/stores') {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(STORES));
-      return;
-    }
-
-    if (req.method === 'GET' && urlPath === '/api/status') {
-      const session = readSession();
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({
-        loggedIn: !!(session && session.cookies && session.cookies.length),
-        cookieCount: session?.cookies?.length || 0,
-        savedAt: session?.savedAt || null,
-      }));
-      return;
-    }
-
-    serveStatic(req, res);
+  post('/api/cookie', (req, res) => {
+    handleCookie(req, res);
   });
 }
 
-// ============ 入口 ============
-const server = createServer();
-server.on('error', (e) => {
-  if (e.code === 'EADDRINUSE') {
-    console.error(`端口 ${SERVER_PORT} 已被占用，可能已有服务在运行。请先关闭旧的黑色窗口后重试。`);
-  } else {
-    console.error('本地服务启动失败:', e.message);
-  }
-  process.exit(1);
-});
-
-server.listen(SERVER_PORT, '127.0.0.1', () => {
-  console.log('==============================================');
-  console.log('  Shopee 竞价导出工具（网页版）');
-  console.log('  请打开浏览器访问: http://127.0.0.1:' + SERVER_PORT);
-  console.log('==============================================');
-  console.log('第 1 步：在浏览器点击扩展 [Shopee 竞价导出助手] → [发送登录信息到本地工具]');
-  console.log('（若网页未自动打开，请手动复制上面的网址到浏览器）');
-  console.log('（需先安装扩展：edge://extensions → 开发人员模式 → 加载解压缩的扩展 → 选择 extension 文件夹）');
-});
+module.exports = { register, STORES };

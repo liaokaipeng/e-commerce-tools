@@ -1,0 +1,17 @@
+{
+  "name": "shopee-tools-all-in-one",
+  "version": "1.0.0",
+  "description": "Shopee 工具合版：TikTok 下载 / 竞价导出 / 视频上传（单服务单端口）",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "test": "node test.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "https-proxy-agent": "^9.1.0",
+    "socks-proxy-agent": "^10.1.0"
+  }
+}

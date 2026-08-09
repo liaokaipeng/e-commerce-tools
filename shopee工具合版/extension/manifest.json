@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Shopee 工具合版助手",
+  "version": "1.0.0",
+  "description": "推送 Shopee 登录 Cookie（竞价导出）与视频上传凭证到本地工具（127.0.0.1:8765）",
+  "permissions": ["cookies", "webRequest", "storage"],
+  "host_permissions": [
+    "https://seller.shopee.cn/*",
+    "https://*.shopee.cn/*",
+    "https://*.shopee.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Shopee 工具合版助手"
+  }
+}

@@ -1,28 +1,16 @@
 'use strict';
-/*
- * Shopee 视频批量上传工具 - 本地后端
- *
- * 功能：读取本地视频文件，按捕获的接口流程上传到 Shopee VOD，
- *       再通过商品编码关联商品，最终调用 video/create 完成发布。
- *
- * 接口流程（依据 video-upload.txt 中的 curl 还原）：
- *   1) preupload        -> 申请上传 (api.mms.shopee.cn)
- *   2) upload x N       -> 分片上传 (up-sp.vod.shopee.cn)  [带 Cookie 会话关联]
- *   3) mergeFiles       -> 合并分片
- *   4) reportupload     -> 上报上传结果
- *   5) item/list        -> 用商品编码查询 item_id (solutions.shopee.cn)
- *   6) video/create     -> 创建视频并关联商品
- *
- * 仅使用 Node 内置模块，无需 npm install。
+/**
+ * Shopee 视频批量上传模块（CommonJS）
+ * 由合并服务 main.js 引入，通过 register({ get, post }) 注册路由。
+ * 接口流程：preupload -> 分片 upload -> mergeFiles -> reportupload -> item/list -> video/create
+ * 凭证由浏览器扩展推送至 /api/creds，保存到本目录 video-session.json。
  */
-
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('url');
 
-const PORT = process.env.PORT || 3000;
 const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB 分片（与抓包一致）
 
 const BIZ = 178;
@@ -51,7 +39,7 @@ function getCookieHeader(hostname) {
 }
 
 // ------- 自动凭证存储（浏览器扩展推送，网页读取） -------
-const CREDS_FILE = path.join(__dirname, 'session.json');
+const CREDS_FILE = path.join(__dirname, 'video-session.json');
 let storedCreds = { auth: '', cookie: '', shopId: '', updatedAt: 0 };
 try {
   if (fs.existsSync(CREDS_FILE)) {
@@ -70,9 +58,6 @@ function request({ method = 'GET', url, headers = {}, body = null }) {
     const cookie = getCookieHeader(u.hostname);
     const reqHeaders = Object.assign({}, headers);
     if (cookie) reqHeaders['Cookie'] = cookie;
-    // 关键：显式设置 Content-Length，避免 Node 使用 chunked 分块传输。
-    // 分块传输会给 body 包裹分块长度前缀，导致服务端收到的字节与原始分片不一致，
-    // 从而 md5/ETag 校验失败（报错 "eTag error, check your ETag or Content-Length"）。
     if (body && reqHeaders['Content-Length'] === undefined && reqHeaders['content-length'] === undefined) {
       reqHeaders['Content-Length'] = Buffer.isBuffer(body) ? body.length : Buffer.byteLength(body);
     }
@@ -105,9 +90,6 @@ function request({ method = 'GET', url, headers = {}, body = null }) {
 }
 
 // ------- 上传流程各步骤 -------
-// 用长效 Cookie 从 authorization 接口动态换取新鲜的上传 token。
-// 抓包证据：GET /sellers/video-upload/api/v1/lib/authorization?shop_id=xxx 仅需 Cookie，
-// 返回的 token（NTAw 开头）用于分片上传 / mergeFiles，时效很短（分钟级）。
 async function refreshAuthToken(cookie, shopId) {
   const resp = await request({
     method: 'GET',
@@ -120,7 +102,6 @@ async function refreshAuthToken(cookie, shopId) {
       'user-agent': UA,
     },
   });
-  // 递归提取形如 NTAw... 的 token（兼容 data 直接为字符串 / 嵌套对象 / 纯文本）
   const found = [];
   (function walk(v) {
     if (typeof v === 'string') {
@@ -132,7 +113,6 @@ async function refreshAuthToken(cookie, shopId) {
       Object.values(v).forEach(walk);
     }
   })(resp.json || resp.text);
-  // 兜底：若返回纯 JWT（无 NTAw 前缀），按抓包格式补前缀
   if (!found.length) {
     const m = (typeof (resp.json || resp.text) === 'string' ? resp.text : JSON.stringify(resp.json))
       .match(/eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}/);
@@ -142,11 +122,6 @@ async function refreshAuthToken(cookie, shopId) {
 }
 
 function md5hex(buf) { return crypto.createHash('md5').update(buf).digest('hex'); }
-// ETag 算法（已用抓包对应的真实 mp4 文件逐片验证，完全吻合）：
-//   ETag = base64url( 0x16 + SHA1(内容) )
-// - 首字节固定 0x16（=22），后接 20 字节 SHA1，共 21 字节
-// - base64url 无填充 → 28 字符
-// - 注意：不是 md5。reportupload 里的 md5 字段才是 md5(hex)。
 function etagOf(buf) {
   const sha1 = crypto.createHash('sha1').update(buf).digest();
   return Buffer.concat([Buffer.from([0x16]), sha1]).toString('base64url');
@@ -282,7 +257,6 @@ async function videoCreate({ cookie, shopId, vid, videourl, caption, itemId, vid
   return resp;
 }
 
-// 从响应中尽力提取 item_id
 function findItemIds(obj, acc = []) {
   if (Array.isArray(obj)) {
     obj.forEach((o) => findItemIds(o, acc));
@@ -298,9 +272,6 @@ function findItemIds(obj, acc = []) {
   return acc;
 }
 
-// 解析 MP4 视频元信息（width/height/duration），无需 ffmpeg。
-// 遍历 ISO BMFF box：moov -> mvhd(时长) / trak -> tkhd(宽高)。
-// 已用抓包 mp4 验证：720x1280, ~15000ms。
 function probeVideo(buf) {
   const r = { width: 0, height: 0, duration: 0 };
   function iter(start, end, cb) {
@@ -358,7 +329,6 @@ async function uploadOne(row, creds, log) {
   const wholeEtag = etagOf(fileBuf);
   const videoSizeKB = Math.round(fsize / 1024);
 
-  // 0. 用长效 Cookie 动态换取新鲜上传 token（VOD token 时效极短，过期会报 code 10003）
   if (cookie && shopId) {
     log('auth', '刷新上传凭证(token)...');
     try {
@@ -379,7 +349,6 @@ async function uploadOne(row, creds, log) {
     log('auth', '缺少 Cookie/ShopId，无法自动刷新 token，使用现有 Authorization');
   }
 
-  // 1. preupload
   log('preupload', '申请上传...');
   const pre = await preupload(auth);
   const preData = (pre.json && (pre.json.data || pre.json)) || {};
@@ -387,14 +356,12 @@ async function uploadOne(row, creds, log) {
   if (!vid) {
     throw new Error(`preupload 未返回 vid。响应: ${pre.text.slice(0, 500)}`);
   }
-  // 取 shopeeuss 服务的下载域名与 bucket，用于 merge 后拼接 videourl
   const services = preData.services || [];
   const svc = services.find((s) => s.serviceid === 'shopeeuss') || services[0] || {};
-  const downDomain = (svc.domain || '').replace(/\/+$/, ''); // 如 https://down-sp-cn.vod.susercontent.com/c3/50007225
+  const downDomain = (svc.domain || '').replace(/\/+$/, '');
   const bucket = svc.bucket || String(BIZ);
   log('preupload', `vid=${vid} downDomain=${downDomain || '(空)'} bucket=${bucket}`);
 
-  // 2. 分片上传
   const totalChunks = Math.max(1, Math.ceil(fsize / CHUNK_SIZE));
   const fids = [];
   for (let i = 0; i < totalChunks; i++) {
@@ -406,7 +373,6 @@ async function uploadOne(row, creds, log) {
     const upData = (up.json && (up.json.data || up.json)) || {};
     const fid = upData.fid || upData.fileId || upData.id;
     if (!fid) {
-      // 识别 VOD token 过期（code 10003 / "token is expired"），给出可操作的提示
       const tokenExpired = (up.json && up.json.code === 10003) || /token is expired/i.test(up.text);
       throw new Error(
         tokenExpired
@@ -418,12 +384,9 @@ async function uploadOne(row, creds, log) {
   }
   log('upload', `分片上传完成，共 ${fids.length} 片`);
 
-  // 3. mergeFiles
   log('merge', '合并分片...');
   const merge = await mergeFiles(fids, auth, wholeEtag);
   const mergeData = (merge.json && (merge.json.data || merge.json)) || {};
-  // mergeFiles 返回 fid（合并后的文件标识），不直接返回 videourl。
-  // videourl 需拼接：{downDomain}/{bucket}/{fid}.mp4（已用真实上传验证该 URL 可下载，返回 200 + 正确字节数）。
   const mergeFid = mergeData.fid || mergeData.fileId || mergeData.id;
   if (!mergeFid) {
     throw new Error(`mergeFiles 未返回 fid。响应: ${merge.text.slice(0, 500)}`);
@@ -436,12 +399,10 @@ async function uploadOne(row, creds, log) {
   }
   log('merge', `fid=${mergeFid} videourl=${videourl}`);
 
-  // 4. reportupload
   log('report', '上报上传结果...');
   const rep = await reportUpload({ vid, extendid: extendid || '', fsize, md5hexval: wholeMd5hex, videourl });
   log('report', `响应: ${rep.text.slice(0, 300)}`);
 
-  // 5. 商品编码 -> item_id
   let itemId = null;
   if (row.product) {
     log('item', `查询商品编码: ${row.product}`);
@@ -457,7 +418,6 @@ async function uploadOne(row, creds, log) {
     log('item', '未提供商品编码，仅上传视频不关联商品');
   }
 
-  // 6. video/create
   log('create', '创建视频并发布...');
   const meta = probeVideo(fileBuf);
   log('create', `视频元信息: ${meta.width}x${meta.height}, ${meta.duration}ms`);
@@ -507,33 +467,10 @@ async function processJob(jobId, rows, creds) {
   broadcast(jobId, { type: 'finished', total });
 }
 
-// ------- HTTP Server -------
-const PUBLIC_DIR = path.join(__dirname, 'public');
-
-const server = http.createServer((req, res) => {
-  const u = new URL(req.url, `http://localhost:${PORT}`);
-
-  if (req.method === 'GET') {
-    const safe = path.normalize(u.pathname).replace(/^(\.\.[\/\\])+/, '');
-    const fp = path.join(PUBLIC_DIR, safe);
-    if (fs.existsSync(fp) && fs.statSync(fp).isFile()) {
-      const ext = path.extname(fp).toLowerCase();
-      const ct =
-        ext === '.js' ? 'application/javascript; charset=utf-8'
-        : ext === '.css' ? 'text/css; charset=utf-8'
-        : 'application/octet-stream';
-      serveFile(res, fp, ct);
-      return;
-    }
-  }
-
-  if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
-    serveFile(res, path.join(PUBLIC_DIR, 'index.html'), 'text/html; charset=utf-8');
-    return;
-  }
-
-  if (req.method === 'GET' && u.pathname === '/api/events') {
-    const jobId = u.searchParams.get('jobId');
+// ============ 路由注册 ============
+function register({ get, post }) {
+  get('/api/events', (req, res, url) => {
+    const jobId = url.searchParams.get('jobId');
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -547,42 +484,36 @@ const server = http.createServer((req, res) => {
       const set = clients.get(jobId);
       if (set) set.delete(res);
     });
-    return;
-  }
+  });
 
-  // 凭证：浏览器扩展推送（POST）/ 网页读取（GET）
-  if (u.pathname === '/api/creds') {
-    const corsH = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    };
-    if (req.method === 'OPTIONS') { res.writeHead(204, corsH); res.end(); return; }
-    if (req.method === 'GET') {
+  // 凭证：扩展推送（POST）/ 网页读取（GET）
+  const corsH = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+  get('/api/creds', (req, res) => {
+    res.writeHead(200, Object.assign({ 'Content-Type': 'application/json' }, corsH));
+    res.end(JSON.stringify(storedCreds));
+  });
+  post('/api/creds', (req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      try {
+        const p = JSON.parse(body);
+        if (p.auth && p.auth.startsWith('NTAw')) storedCreds.auth = p.auth;
+        if (p.cookie && p.cookie.length > 80) storedCreds.cookie = p.cookie;
+        if (p.shopId) storedCreds.shopId = String(p.shopId);
+        storedCreds.updatedAt = Date.now();
+        saveCredsFile();
+      } catch (e) { /* ignore */ }
       res.writeHead(200, Object.assign({ 'Content-Type': 'application/json' }, corsH));
-      res.end(JSON.stringify(storedCreds));
-      return;
-    }
-    if (req.method === 'POST') {
-      let body = '';
-      req.on('data', (c) => (body += c));
-      req.on('end', () => {
-        try {
-          const p = JSON.parse(body);
-          if (p.auth && p.auth.startsWith('NTAw')) storedCreds.auth = p.auth;
-          if (p.cookie && p.cookie.length > 80) storedCreds.cookie = p.cookie;
-          if (p.shopId) storedCreds.shopId = String(p.shopId);
-          storedCreds.updatedAt = Date.now();
-          saveCredsFile();
-        } catch (e) { /* ignore */ }
-        res.writeHead(200, Object.assign({ 'Content-Type': 'application/json' }, corsH));
-        res.end(JSON.stringify({ ok: true, updatedAt: storedCreds.updatedAt }));
-      });
-      return;
-    }
-  }
+      res.end(JSON.stringify({ ok: true, updatedAt: storedCreds.updatedAt }));
+    });
+  });
 
-  if (req.method === 'POST' && u.pathname === '/api/start') {
+  post('/api/start', (req, res) => {
     let body = '';
     req.on('data', (c) => (body += c));
     req.on('end', () => {
@@ -604,21 +535,7 @@ const server = http.createServer((req, res) => {
         broadcast(jobId, { type: 'fatal', error: e.message })
       );
     });
-    return;
-  }
-
-  res.writeHead(404); res.end('Not Found');
-});
-
-function serveFile(res, filePath, contentType) {
-  fs.readFile(filePath, (err, data) => {
-    if (err) { res.writeHead(404); res.end('Not Found'); return; }
-    res.writeHead(200, { 'Content-Type': contentType });
-    res.end(data);
   });
 }
 
-server.listen(PORT, () => {
-  console.log(`Shopee 视频批量上传服务已启动: http://localhost:${PORT}`);
-  console.log(`分片大小: ${CHUNK_SIZE / 1024 / 1024}MB`);
-});
+module.exports = { register };

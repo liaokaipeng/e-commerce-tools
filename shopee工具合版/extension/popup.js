@@ -1,4 +1,4 @@
-// 读取 Shopee 相关 Cookie（含 HttpOnly）并发送到本地导出工具
+// 读取 Shopee 相关 Cookie（含 HttpOnly）并发送到本地工具（竞价导出用）
 const SERVER_URL = 'http://127.0.0.1:8765/api/cookie';
 const SHOPEE_DOMAINS = ['shopee.cn', 'shopee.com', 'shopee.com.hk', 'shopee.sg'];
 
@@ -48,7 +48,7 @@ document.getElementById('send').addEventListener('click', async () => {
     });
     const text = await resp.text();
     if (resp.ok && text.includes('ok')) {
-      status.textContent = '✅ 发送成功！请到本地网页（http://127.0.0.1:8765）查看并导出。';
+      status.textContent = '✅ 发送成功！请到本地网页（http://127.0.0.1:8765）「竞价导出」Tab 查看并导出。';
       status.className = 'ok';
     } else {
       status.textContent = `发送失败（${resp.status}）：${text}。请先双击 启动.bat，再点此按钮`;
