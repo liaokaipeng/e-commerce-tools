@@ -231,21 +231,25 @@ async function doExport(shopId, outPath) {
   await writeExcel(shopId, rows, out);
 }
 
-// ============ 一键模式：接收 Cookie → 输入店铺ID → 导出 ============
+// ============ 一键模式：接收 Cookie → 输入店铺ID → 连续导出多个店铺 ============
 async function runAll() {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   console.log('========== Shopee 竞价数据导出工具 ==========');
   console.log('第 1 步：请点击浏览器扩展 [Shopee 竞价导出助手] → [发送登录信息到本地工具]');
   startCookieServer(async () => {
     try {
-      // 清掉已缓冲的 stdin 后询问店铺 ID
-      const answer = await rl.question('\n第 2 步：请输入店铺 ID（如 557630453）: ');
-      const shopId = answer.trim();
-      if (!shopId) {
-        console.error('店铺 ID 不能为空！');
-        process.exit(1);
+      // 支持一次输入多个店铺 ID（用逗号、空格或换行分隔），也可多次输入；直接回车结束
+      while (true) {
+        const answer = await rl.question('\n请输入店铺 ID（多个用逗号或空格分隔，如 557630453,123456；直接回车结束）: ');
+        const input = answer.trim();
+        if (!input) {
+          break;
+        }
+        const shopIds = input.split(/[,，\s]+/).filter(Boolean);
+        for (const shopId of shopIds) {
+          await doExport(shopId, null);
+        }
       }
-      await doExport(shopId, null);
       rl.close();
       process.exit(0);
     } catch (e) {
