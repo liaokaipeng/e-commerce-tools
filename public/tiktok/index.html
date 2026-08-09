@@ -155,6 +155,9 @@
   .log-network { color: #ff9d5c; font-weight: 600; }
   .log-title { color: #7d8aff; font-weight: 600; }
   #summary { font-size: 13.5px; font-weight: 600; margin-top: 12px; display: none; }
+  #progress { display: none; margin-top: 12px; font-size: 13px; font-weight: 600; }
+  #progress .ok { color: var(--green); }
+  #progress .err { color: var(--red); }
   .empty-hint { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
   .footer {
     text-align: center;
@@ -202,7 +205,7 @@
         <label>保存目录（不存在将自动创建）</label>
         <input type="text" id="dir" placeholder="例如 D:\videos\tiktok">
       </div>
-      <button class="btn btn-secondary" id="btnDefaultDir">默认目录</button>
+      <button class="btn btn-secondary" id="btnSetDefault">设为默认目录</button>
       <button class="btn btn-secondary" id="btnOpenDir">打开目录</button>
     </div>
     <div class="actions">
@@ -213,6 +216,7 @@
 
   <div class="card">
     <h2><span class="step">3</span> 下载日志</h2>
+    <div id="progress"></div>
     <div id="log"></div>
     <div id="summary"></div>
   </div>
@@ -226,6 +230,7 @@ const $ = (id) => document.getElementById(id);
 // ---------- 状态 ----------
 let downloading = false;
 let proxyInfo = null;
+let doneCount = 0, okCount = 0, failCount = 0, totalCount = 0;
 
 function log(message, cls = 'info', title = '') {
   const el = document.createElement('div');
@@ -234,6 +239,11 @@ function log(message, cls = 'info', title = '') {
   el.innerHTML = `<span class="log-time">${time}</span><span class="log-${cls}">${title ? `[${title}] ` : ''}${message}</span>`;
   $('log').appendChild(el);
   $('log').scrollTop = $('log').scrollHeight;
+}
+
+function renderProgress() {
+  const p = $('progress');
+  p.innerHTML = `进度：${doneCount} / ${totalCount}　<span class="ok">成功 ${okCount}</span>　<span class="err">失败 ${failCount}</span>`;
 }
 
 // ---------- 代理状态 ----------
@@ -255,13 +265,39 @@ async function checkNetwork() {
 }
 
 // ---------- 目录 ----------
-$('btnDefaultDir').onclick = () => {
-  if (proxyInfo) {
-    // 重新拉取默认目录
-    fetch('/api/tiktok/status').then(r => r.json()).then(d => {
-      if (d.defaultDir) { $('dir').value = d.defaultDir; log('已填入默认目录：' + d.defaultDir, 'info'); }
-    }).catch(() => {});
+let hasDefault = false;
+
+// 读取默认目录：首次未设置则留空（要求用户自选），设置过则回显
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/settings');
+    const s = await r.json();
+    const d = s.defaults && s.defaults.tiktok;
+    if (d) { $('dir').value = d; hasDefault = true; }
+  } catch {}
+}
+
+async function setDefaultDir(dir) {
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool: 'tiktok', dir }),
+    });
+    const d = await r.json();
+    if (d.ok) { hasDefault = true; log('已设为默认目录：' + dir, 'ok'); return true; }
+    log('设置默认目录失败：' + (d.message || '未知错误'), 'err');
+    return false;
+  } catch {
+    log('设置默认目录失败：连接服务失败', 'err');
+    return false;
   }
+}
+
+$('btnSetDefault').onclick = async () => {
+  const dir = $('dir').value.trim();
+  if (!dir) { alert('请先填写保存目录'); return; }
+  await setDefaultDir(dir);
 };
 
 $('btnOpenDir').onclick = async () => {
@@ -302,6 +338,17 @@ async function startDownload() {
     return;
   }
   const dir = $('dir').value.trim();
+  if (!dir) {
+    log('请先选择保存目录', 'err');
+    alert('请先选择保存目录');
+    return;
+  }
+  // 首次设置目录后，询问是否设为默认目录（下次打开自动回显）
+  if (!hasDefault) {
+    if (confirm(`是否将「${dir}」设为默认目录？\n下次打开会自动使用该目录。`)) {
+      await setDefaultDir(dir);
+    }
+  }
   downloading = true;
   $('btnDownload').disabled = true;
   $('btnDownload').textContent = '下载中...';
@@ -311,6 +358,10 @@ async function startDownload() {
 
   log(`开始任务：共 ${urls.length} 个链接`, 'title', '任务');
   let networkIssue = false;
+  doneCount = 0; okCount = 0; failCount = 0; totalCount = urls.length;
+  const progress = $('progress');
+  progress.style.display = 'block';
+  renderProgress();
 
   try {
     const resp = await fetch('/api/download', {
@@ -364,8 +415,10 @@ function handleEvent(ev) {
       log(ev.message, 'warn');
       break;
     case 'done': {
-      if (ev.ok) log(ev.message, 'ok', '成功');
-      else log(ev.message, ev.network ? 'network' : 'err', '跳过');
+      doneCount++;
+      if (ev.ok) { okCount++; log(ev.message, 'ok', '成功'); }
+      else { failCount++; log(ev.message, ev.network ? 'network' : 'err', '跳过'); }
+      renderProgress();
       break;
     }
     case 'fatal':
@@ -382,12 +435,19 @@ function handleEvent(ev) {
 }
 
 $('btnDownload').onclick = startDownload;
-$('btnCheckNet').onclick = () => {
-  checkNetwork();
+$('btnCheckNet').onclick = async () => {
+  const b = $('btnCheckNet');
+  b.disabled = true;
+  const orig = b.textContent;
+  b.textContent = '检测中…';
+  await checkNetwork();
+  b.disabled = false;
+  b.textContent = orig;
   log('已重新检测网络环境', 'info');
 };
 
 checkNetwork();
+loadSettings();
 updateCount();
 </script>
 </body>

@@ -2,9 +2,11 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const { execFileSync } = require('child_process');
+const { execFileSync, execFile } = require('child_process');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const { SocksProxyAgent } = require('socks-proxy-agent');
+const { sendJson, readBody } = require('./lib/http-utils');
+const { getDefault } = require('./lib/settings');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const REHYDRATION_MARKER = '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">';
@@ -313,4 +315,80 @@ async function runBatch(urls, saveDir, emit) {
   });
 }
 
-module.exports = { runBatch, extractUrls, detectProxy };
+// ============ 路由处理（SSE 下载 / 状态 / 打开目录） ============
+
+/** GET /api/tiktok/status */
+function handleStatus(req, res) {
+  sendJson(res, 200, {
+    ok: true,
+    proxy: detectProxy() || null,
+    defaultDir: getDefault('tiktok'), // 未设置过时为 null，前端提示用户自选目录
+    version: '1.0.0',
+  });
+}
+
+/** POST /api/open-dir */
+async function handleOpenDir(req, res) {
+  try {
+    const { dir } = JSON.parse(await readBody(req));
+    const d = (dir || '').trim();
+    if (!d) {
+      sendJson(res, 400, { ok: false, message: '请先填写保存目录' });
+      return;
+    }
+    fs.mkdirSync(d, { recursive: true });
+    execFile('cmd.exe', ['/c', 'start', '', d], { windowsHide: true }, () => {});
+    sendJson(res, 200, { ok: true });
+  } catch (e) {
+    sendJson(res, 500, { ok: false, message: e.message });
+  }
+}
+
+/** POST /api/download（SSE 流式进度） */
+async function handleDownload(req, res) {
+  let payload;
+  try {
+    const raw = (await readBody(req)).replace(/^\uFEFF/, '').trim();
+    payload = JSON.parse(raw);
+  } catch {
+    sendJson(res, 400, { ok: false, message: '无效的请求体' });
+    return;
+  }
+  const urls = extractUrls(payload.urls || '');
+  const saveDir = (payload.dir || '').trim();
+
+  if (urls.length === 0) {
+    sendJson(res, 400, { ok: false, message: '未识别到有效的 TikTok 链接，请检查输入（每行一个链接）' });
+    return;
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write('retry: 2000\n\n');
+
+  const emit = (event) => {
+    try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch { /* client gone */ }
+  };
+
+  emit({ type: 'info', message: `共 ${urls.length} 个链接，开始下载...` });
+
+  runBatch(urls, saveDir, emit).then(() => {
+    try { res.end(); } catch { /* ignore */ }
+  }).catch((e) => {
+    emit({ type: 'fatal', message: `任务异常：${e.message}` });
+    try { res.end(); } catch { /* ignore */ }
+  });
+}
+
+/** 注册路由 */
+function register({ get, post }) {
+  get('/api/tiktok/status', handleStatus);
+  post('/api/open-dir', handleOpenDir);
+  post('/api/download', handleDownload);
+}
+
+module.exports = { runBatch, extractUrls, detectProxy, register };

@@ -1,4 +1,4 @@
-// Shopee 工具合版 - 冒烟测试
+// 工具合集 - 冒烟测试
 // 运行：node test.js
 // 说明：不依赖真实网络（TikTok/Shopee），仅验证合并服务路由与本地纯函数。
 //       会临时启动一个服务实例到测试端口，测完自动关闭并清理测试产生的 session 文件。
@@ -49,6 +49,10 @@ async function main() {
   let childErr = '';
   child.stderr.on('data', (d) => { childErr += d.toString(); });
 
+  // 备份并清理测试期间可能改动的默认目录配置（settings.json）
+  const settingsFile = path.join(__dirname, 'settings.json');
+  const settingsBackup = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile) : null;
+
   try {
     if (!(await waitReady())) {
       console.log('\n服务未能启动，无法执行接口测试。stderr:\n' + childErr);
@@ -68,8 +72,20 @@ async function main() {
       t('GET /api/tiktok/status 返回 200', r.status === 200, r.text);
       if (r.status === 200) {
         const j = JSON.parse(r.text);
-        t('/api/tiktok/status 含 ok=true 与 defaultDir', j.ok === true && typeof j.defaultDir === 'string');
+        t('/api/tiktok/status 含 ok=true 与 defaultDir', j.ok === true && (j.defaultDir === null || typeof j.defaultDir === 'string'));
       }
+    }
+
+    console.log('===== 工具默认目录设置 API =====');
+    {
+      const r = await req('GET', '/api/settings');
+      const j = JSON.parse(r.text);
+      t('GET /api/settings 返回 ok 与 defaults', r.status === 200 && j.ok === true && 'tiktok' in j.defaults && 'bidding' in j.defaults);
+      const p = await req('POST', '/api/settings', { tool: 'tiktok', dir: 'C:\\test\\dir' });
+      const pj = JSON.parse(p.text);
+      t('POST /api/settings 设置默认目录', p.status === 200 && pj.ok === true);
+      const invalid = await req('POST', '/api/settings', { tool: 'xxx', dir: 'C:\\x' });
+      t('POST /api/settings 非法工具返回 400', invalid.status === 400);
     }
 
     console.log('===== 竞价导出 API =====');
@@ -126,6 +142,9 @@ async function main() {
       const fp = path.join(__dirname, f);
       if (fs.existsSync(fp)) fs.unlinkSync(fp);
     }
+    // 恢复测试前被改动的默认目录配置
+    if (settingsBackup) fs.writeFileSync(settingsFile, settingsBackup);
+    else if (fs.existsSync(settingsFile)) fs.unlinkSync(settingsFile);
   }
 
   const ok = results.filter((r) => r.ok).length;

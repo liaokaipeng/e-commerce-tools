@@ -5,11 +5,10 @@
  * 接口流程：preupload -> 分片 upload -> mergeFiles -> reportupload -> item/list -> video/create
  * 凭证由浏览器扩展推送至 /api/creds，保存到本目录 video-session.json。
  */
-const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { URL } = require('url');
+const { request } = require('./lib/http');
 
 const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB 分片（与抓包一致）
 
@@ -21,77 +20,28 @@ const SOLUTIONS = 'https://solutions.shopee.cn';
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0';
 
-// ------- 简易 Cookie 罐（按 host 维护，分片上传会话依赖它） -------
-const cookieJars = {}; // hostname -> {name: value}
-function storeCookies(hostname, setCookieHeaders) {
-  if (!setCookieHeaders) return;
-  if (!cookieJars[hostname]) cookieJars[hostname] = {};
-  for (const sc of setCookieHeaders) {
-    const kv = sc.split(';')[0];
-    const idx = kv.indexOf('=');
-    if (idx > 0) cookieJars[hostname][kv.slice(0, idx).trim()] = kv.slice(idx + 1).trim();
-  }
-}
-function getCookieHeader(hostname) {
-  const j = cookieJars[hostname];
-  if (!j || !Object.keys(j).length) return '';
-  return Object.entries(j).map(([k, v]) => `${k}=${v}`).join('; ');
-}
-
 // ------- 自动凭证存储（浏览器扩展推送，网页读取） -------
+// 出站请求统一走 lib/http 的 request（useJar=true 由 lib 内部按 host 维护分片会话 Cookie 罐）。
 const CREDS_FILE = path.join(__dirname, 'video-session.json');
 let storedCreds = { auth: '', cookie: '', shopId: '', updatedAt: 0 };
 try {
   if (fs.existsSync(CREDS_FILE)) {
     storedCreds = Object.assign(storedCreds, JSON.parse(fs.readFileSync(CREDS_FILE, 'utf8')));
   }
-} catch (e) { /* ignore */ }
+} catch (e) {
+  console.warn('读取视频凭证文件失败:', e.message);
+}
 function saveCredsFile() {
-  try { fs.writeFileSync(CREDS_FILE, JSON.stringify(storedCreds, null, 2)); } catch (e) { /* ignore */ }
+  try { fs.writeFileSync(CREDS_FILE, JSON.stringify(storedCreds, null, 2)); }
+  catch (e) { console.warn('保存视频凭证文件失败:', e.message); }
 }
 
-// ------- 通用 HTTP 请求 -------
-function request({ method = 'GET', url, headers = {}, body = null }) {
-  return new Promise((resolve, reject) => {
-    const u = new URL(url);
-    const lib = u.protocol === 'https:' ? require('https') : require('http');
-    const cookie = getCookieHeader(u.hostname);
-    const reqHeaders = Object.assign({}, headers);
-    if (cookie) reqHeaders['Cookie'] = cookie;
-    if (body && reqHeaders['Content-Length'] === undefined && reqHeaders['content-length'] === undefined) {
-      reqHeaders['Content-Length'] = Buffer.isBuffer(body) ? body.length : Buffer.byteLength(body);
-    }
-
-    const opts = {
-      method,
-      hostname: u.hostname,
-      port: u.port || (u.protocol === 'https:' ? 443 : 80),
-      path: u.pathname + u.search,
-      headers: reqHeaders,
-    };
-
-    const req = lib.request(opts, (res) => {
-      const chunks = [];
-      res.on('data', (d) => chunks.push(d));
-      res.on('end', () => {
-        const buf = Buffer.concat(chunks);
-        if (res.headers['set-cookie']) storeCookies(u.hostname, res.headers['set-cookie']);
-        const text = buf.toString('utf8');
-        let json = null;
-        try { json = JSON.parse(text); } catch (e) { /* not json */ }
-        resolve({ status: res.statusCode, headers: res.headers, text, json, buf });
-      });
-    });
-    req.on('error', reject);
-    req.setTimeout(120000, () => req.destroy(new Error('请求超时')));
-    if (body) req.write(body);
-    req.end();
-  });
-}
+// 统一出站请求：视频上传各步骤依赖跨请求的会话 Cookie，故 useJar=true
+const call = (opts) => request(Object.assign({ useJar: true }, opts));
 
 // ------- 上传流程各步骤 -------
 async function refreshAuthToken(cookie, shopId) {
-  const resp = await request({
+  const resp = await call({
     method: 'GET',
     url: `${SOLUTIONS}/sellers/video-upload/api/v1/lib/authorization?shop_id=${encodeURIComponent(shopId)}`,
     headers: {
@@ -102,23 +52,17 @@ async function refreshAuthToken(cookie, shopId) {
       'user-agent': UA,
     },
   });
-  const found = [];
-  (function walk(v) {
-    if (typeof v === 'string') {
-      const m = v.match(/NTAw[A-Za-z0-9_\-=]{20,}/);
-      if (m) found.push(m[0]);
-    } else if (Array.isArray(v)) {
-      v.forEach(walk);
-    } else if (v && typeof v === 'object') {
-      Object.values(v).forEach(walk);
-    }
-  })(resp.json || resp.text);
-  if (!found.length) {
-    const m = (typeof (resp.json || resp.text) === 'string' ? resp.text : JSON.stringify(resp.json))
-      .match(/eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}/);
-    if (m) found.push('NTAwMDcyMjU6' + m[0]);
+  // 优先直接匹配响应文本中的 VOD token（形如 NTAw...），其次兜底 JWT 前缀拼接
+  const text = typeof resp.text === 'string' ? resp.text : JSON.stringify(resp.json);
+  let token = '';
+  const m = text.match(/NTAw[A-Za-z0-9_\-=]{20,}/);
+  if (m) {
+    token = m[0];
+  } else {
+    const jwt = text.match(/eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}/);
+    if (jwt) token = 'NTAwMDcyMjU6' + jwt[0];
   }
-  return { token: found[0] || '', resp };
+  return { token, resp };
 }
 
 function md5hex(buf) { return crypto.createHash('md5').update(buf).digest('hex'); }
@@ -128,7 +72,7 @@ function etagOf(buf) {
 }
 
 async function preupload(auth) {
-  const resp = await request({
+  const resp = await call({
     method: 'POST',
     url: `${MMS}/uploadapi/api/v1/vod/preupload`,
     headers: {
@@ -149,7 +93,7 @@ async function preupload(auth) {
 }
 
 async function uploadChunk(chunk, etag, auth) {
-  const resp = await request({
+  const resp = await call({
     method: 'POST',
     url: `${UPLOAD}/api/v2/upload/${BIZ}`,
     headers: {
@@ -166,7 +110,7 @@ async function uploadChunk(chunk, etag, auth) {
 }
 
 async function mergeFiles(fids, auth, fileEtag) {
-  const resp = await request({
+  const resp = await call({
     method: 'POST',
     url: `${UPLOAD}/api/v2/mergeFiles/${BIZ}`,
     headers: {
@@ -183,7 +127,7 @@ async function mergeFiles(fids, auth, fileEtag) {
 }
 
 async function reportUpload({ vid, extendid, fsize, md5hexval, videourl }) {
-  const resp = await request({
+  const resp = await call({
     method: 'POST',
     url: `${MMS}/uploadapi/api/v1/vod/reportupload`,
     headers: {
@@ -214,7 +158,7 @@ async function reportUpload({ vid, extendid, fsize, md5hexval, videourl }) {
 
 async function itemList(keyword, cookie, shopId) {
   const url = `${SOLUTIONS}/sellers/video-upload/api/v1/item/list?shop_id=${shopId}&keyword=${encodeURIComponent(keyword)}&page_no=1&page_size=20`;
-  const resp = await request({
+  const resp = await call({
     method: 'GET',
     url,
     headers: {
@@ -228,7 +172,7 @@ async function itemList(keyword, cookie, shopId) {
 }
 
 async function videoCreate({ cookie, shopId, vid, videourl, caption, itemId, videoSizeKB, width, height, duration }) {
-  const resp = await request({
+  const resp = await call({
     method: 'POST',
     url: `${SOLUTIONS}/sellers/video-upload/api/v1/video/create`,
     headers: {

@@ -6,33 +6,29 @@
 const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
+const { request } = require('./lib/http');
+const { sendJson } = require('./lib/http-utils');
 
 const SESSION_FILE = path.join(__dirname, 'bidding-session.json');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
-// ============ 店铺列表（分类 / 店铺简称 / 店铺 ID） ============
-const STORES = [
-  // ---- Shopee-DM ----
-  { category: 'Shopee-DM', name: 'Shopee-DM-PH1店', id: '557630453' },
-  { category: 'Shopee-DM', name: 'Shopee-DM-PH2店', id: '1377489803' },
-  { category: 'Shopee-DM', name: 'Shopee-DM-PH3店', id: '953673451' },
-  { category: 'Shopee-DM', name: 'Shopee-DM-MY1店', id: '595674837' },
-  { category: 'Shopee-DM', name: 'Shopee-DM-MY2店', id: '1434986483' },
-  { category: 'Shopee-DM', name: 'Shopee-DM-MY3店', id: '1510186427' },
-  { category: 'Shopee-DM', name: 'Shopee-DM-VN1店', id: '1713972908' },
-  { category: 'Shopee-DM', name: 'Shopee-DM-TH1店', id: '601642389' },
-  // ---- Shopee-PC ----
-  { category: 'Shopee-PC', name: 'Shopee-PC-越南', id: '772716966' },
-  { category: 'Shopee-PC', name: 'Shopee-PC-菲律宾', id: '687713299' },
-  { category: 'Shopee-PC', name: 'Shopee-PC-泰国', id: '753230225' },
-  { category: 'Shopee-PC', name: 'Shopee-PC-马来西亚', id: '744794639' },
-];
+// ============ 店铺列表（分类 / 店铺简称 / 店铺 ID）============
+// 从 stores.json 读取，便于非技术用户直接增删店铺，无需改代码。
+function loadStores() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, 'stores.json'), 'utf8'));
+  } catch (e) {
+    console.warn('读取 stores.json 失败:', e.message);
+    return [];
+  }
+}
+const STORES = loadStores();
 
 // ============ 登录状态 ============
 function readSession() {
   if (!fs.existsSync(SESSION_FILE)) return null;
   try { return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')); }
-  catch { return null; }
+  catch (e) { console.warn('读取会话文件失败:', e.message); return null; }
 }
 
 // ============ 数据抓取（纯 HTTP） ============
@@ -53,28 +49,30 @@ function loadCookieHeader(targetDomain = 'seller.shopee.cn') {
   return matched.map(c => `${c.name}=${c.value}`).join('; ');
 }
 
-async function apiGet(cookieHeader, url) {
-  const resp = await fetch(url, {
-    headers: { 'Cookie': cookieHeader, 'User-Agent': UA, 'Accept': 'application/json' },
-  });
-  const text = await resp.text();
-  if (resp.status === 403 || (text.includes('token not found'))) {
+function assertLoginOk(resp) {
+  if (resp.status === 403 || (resp.text && resp.text.includes('token not found'))) {
     throw new Error('登录已失效（403 token not found），请重新登录卖家中心并点扩展推送');
   }
-  return JSON.parse(text);
+}
+
+async function apiGet(cookieHeader, url) {
+  const resp = await request({
+    url,
+    headers: { 'Cookie': cookieHeader, 'User-Agent': UA, 'Accept': 'application/json' },
+  });
+  assertLoginOk(resp);
+  return resp.json;
 }
 
 async function apiPost(cookieHeader, url, body) {
-  const resp = await fetch(url, {
+  const resp = await request({
     method: 'POST',
+    url,
     headers: { 'Content-Type': 'application/json', 'Cookie': cookieHeader, 'User-Agent': UA, 'Accept': 'application/json' },
     body: JSON.stringify(body),
   });
-  const text = await resp.text();
-  if (resp.status === 403 || (text.includes('token not found'))) {
-    throw new Error('登录已失效（403 token not found），请重新登录卖家中心并点扩展推送');
-  }
-  return JSON.parse(text);
+  assertLoginOk(resp);
+  return resp.json;
 }
 
 /** 金额：内部单位为"分"，除以 100000 得到实际金额 */
@@ -139,7 +137,7 @@ async function writeExcel(shopId, rows, outPath) {
 }
 
 /** 导出单个店铺，返回结果对象 */
-async function exportShop(shopId) {
+async function exportShop(shopId, saveDir) {
   const cookieHeader = loadCookieHeader();
 
   // 1. 获取店铺市场（cbsc_shop_region）
@@ -149,16 +147,20 @@ async function exportShop(shopId) {
     if (j.code === 0 && j.data?.shop_region) region = j.data.shop_region.toLowerCase();
   } catch (e) {
     // 获取市场失败时默认 ph，继续导出
+    console.warn(`获取店铺 ${shopId} 市场失败，默认 ph: ${e.message}`);
   }
 
   // 2. 拉取【获胜】数据
   const { rows, total } = await fetchWinningData(cookieHeader, shopId, region);
 
-  // 3. 导出 Excel（文件名带时分秒，避免同日多次运行或文件被 Excel 占用导致冲突）
+  // 3. 导出 Excel（保存到用户指定目录，缺省为脚本目录；文件名带时分秒避免冲突）
+  const outDir = (saveDir || '').trim() || __dirname;
+  try { fs.mkdirSync(outDir, { recursive: true }); }
+  catch (e) { throw new Error('无法创建保存目录：' + e.message); }
   const d = new Date();
   const pad = n => String(n).padStart(2, '0');
   const ts = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  const out = path.join(__dirname, `竞价获胜_店铺${shopId}_${ts}.xlsx`);
+  const out = path.join(outDir, `竞价获胜_店铺${shopId}_${ts}.xlsx`);
   await writeExcel(shopId, rows, out);
 
   return { shopId, rows: rows.length, total, file: path.basename(out) };
@@ -188,35 +190,47 @@ function handleCookie(req, res) {
   });
 }
 
-// ============ 导出接口 ============
+// ============ 导出接口（SSE 流式事件） ============
 function handleExport(body, res) {
+  const shopIds = Array.isArray(body.shopIds) ? body.shopIds : [];
+  const saveDir = String(body.dir || '').trim();
+  if (shopIds.length === 0) {
+    sendJson(res, 400, { ok: false, msg: '请先选择至少一个店铺' });
+    return;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write('retry: 2000\n\n');
+
+  const emit = (data) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* client gone */ } };
+
   (async () => {
-    const shopIds = Array.isArray(body.shopIds) ? body.shopIds : [];
-    if (shopIds.length === 0) {
-      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, msg: '请先选择至少一个店铺' }));
-      return;
-    }
-    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
     const results = [];
     for (const id of shopIds) {
       const store = STORES.find(s => s.id === String(id));
       const name = store ? store.name : id;
+      emit({ type: 'start', shopId: id, name });
       try {
-        const r = await exportShop(String(id));
-        res.write(`\n▶ ${name}（${id}）导出成功：${r.rows} 条 → ${r.file}`);
+        const r = await exportShop(String(id), saveDir);
+        emit({ type: 'done', shopId: id, name, ok: true, rows: r.rows, total: r.total, file: r.file });
         results.push({ shopId: id, name, ok: true, rows: r.rows, file: r.file });
       } catch (e) {
-        res.write(`\n✕ ${name}（${id}）失败：${e.message}`);
+        emit({ type: 'done', shopId: id, name, ok: false, msg: e.message });
         results.push({ shopId: id, name, ok: false, msg: e.message });
       }
     }
-    res.end(`\n\n完成：成功 ${results.filter(r => r.ok).length} / 共 ${results.length} 个店铺。`);
-  })().catch(e => {
-    try {
-      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('导出失败：' + e.message);
-    } catch { /* ignore */ }
+    emit({
+      type: 'summary',
+      success: results.filter(r => r.ok).length,
+      failed: results.filter(r => !r.ok).length,
+      total: results.length,
+    });
+    try { res.end(); } catch { /* ignore */ }
+  })().catch((e) => {
+    try { emit({ type: 'fatal', msg: `导出失败：${e.message}` }); res.end(); } catch { /* ignore */ }
   });
 }
 
@@ -224,17 +238,15 @@ function handleExport(body, res) {
 function register({ get, post }) {
   get('/api/status', (req, res) => {
     const session = readSession();
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({
+    sendJson(res, 200, {
       loggedIn: !!(session && session.cookies && session.cookies.length),
       cookieCount: session?.cookies?.length || 0,
       savedAt: session?.savedAt || null,
-    }));
+    });
   });
 
   get('/api/stores', (req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify(STORES));
+    sendJson(res, 200, STORES);
   });
 
   post('/api/export', (req, res) => {
@@ -242,7 +254,7 @@ function register({ get, post }) {
     req.on('data', c => { body += c; });
     req.on('end', () => {
       let parsed = {};
-      try { parsed = JSON.parse(body); } catch {}
+      try { parsed = JSON.parse(body); } catch (e) { console.warn('解析 /api/export 请求体失败:', e.message); }
       handleExport(parsed, res);
     });
   });

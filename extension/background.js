@@ -1,4 +1,4 @@
-// Shopee 工具合版助手 - 后台服务（视频上传凭证抓取）
+// KP工具合集助手 - 后台服务（视频上传凭证抓取）
 // 监听 Shopee 请求，自动抓取 Authorization/Cookie/ShopID 并推送到本地工具 http://localhost:8765/api/creds
 // 凭证缓存到 chrome.storage.local，本地服务未启动时抓取的凭证不会丢失，下次抓到新请求时自动补推。
 const LOCAL = 'http://localhost:8765/api/creds';

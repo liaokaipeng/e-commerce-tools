@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Shopee 工具合版助手",
+  "name": "KP工具合集助手",
   "version": "1.0.0",
   "description": "推送 Shopee 登录 Cookie（竞价导出）与视频上传凭证到本地工具（127.0.0.1:8765）",
   "permissions": ["cookies", "webRequest", "storage"],
@@ -14,6 +14,6 @@
   "background": { "service_worker": "background.js" },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Shopee 工具合版助手"
+    "default_title": "KP工具合集助手"
   }
 }

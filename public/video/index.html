@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Shopee 视频批量上传</title>
+<script src="/xlsx.full.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f4f6fb; margin: 0; color: #1f2330; line-height: 1.5;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #6b7280; font-size: 13px; margin-bottom: 20px; }
+  .card {
+    background: #fff; border: 1px solid #e6e8ef; border-radius: 12px;
+    padding: 18px; margin-bottom: 18px; box-shadow: 0 1px 2px rgba(0,0,0,.03);
+  }
+  .card h2 { font-size: 15px; margin: 0 0 14px; display: flex; align-items: center; gap: 8px; }
+  label { display: block; font-size: 12px; color: #6b7280; margin: 10px 0 4px; }
+  input[type="text"], input[type="password"], textarea, select {
+    width: 100%; padding: 9px 11px; border: 1px solid #d3d7e0; border-radius: 8px;
+    font-size: 13px; font-family: inherit; background: #fff; color: #1f2330;
+  }
+  textarea { resize: vertical; min-height: 64px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 200px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+  button {
+    background: #ee4d2d; color: #fff; border: 0; border-radius: 8px;
+    padding: 11px 20px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  button.ghost { background: #eef0f6; color: #1f2330; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-row { display: flex; gap: 12px; margin-top: 6px; }
+  .hint { font-size: 12px; color: #9aa0ad; margin-top: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { border: 1px solid #eceef3; padding: 7px 8px; text-align: left; word-break: break-all; }
+  th { background: #f7f8fc; }
+  .status { font-size: 12px; padding: 2px 8px; border-radius: 20px; display: inline-block; }
+  .s-wait { background: #eef0f6; color: #6b7280; }
+  .s-run { background: #fff4e5; color: #b76e00; }
+  .s-ok { background: #e7f7ec; color: #1a7f37; }
+  .s-err { background: #fdeaea; color: #c0392b; }
+  #log {
+    background: #0f1320; color: #c8e1ff; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px; border-radius: 10px; padding: 14px; height: 320px; overflow: auto; white-space: pre-wrap;
+  }
+  .log-line { margin: 0 0 2px; }
+  .tag { color: #7fd1ff; }
+  .err { color: #ff8585; }
+  .ok { color: #7CFC9B; }
+  details summary { cursor: pointer; font-size: 13px; color: #ee4d2d; font-weight: 600; }
+  .pill { background:#f0f2f7; color:#555; border-radius:6px; padding:1px 7px; font-size:11px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Shopee 视频批量上传</h1>
+  <div class="sub">根据抓包接口还原的本地上传工具 · 视频路径/说明/商品编码存于表格，按行批量上传并关联商品</div>
+
+  <!-- 凭证 -->
+  <div class="card">
+    <details>
+      <summary>接口凭证（可留空，服务端会用 Cookie 自动刷新 Authorization）</summary>
+      <div class="row" style="margin-top:12px;">
+        <div>
+          <label>Authorization（分片上传用，可留空，服务端会自动获取）</label>
+          <input type="text" id="auth" placeholder="可留空，自动获取" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <div>
+          <label>Cookie（item/list 与 video/create 用，含 video_upload_session_id 等）</label>
+          <textarea id="cookie"></textarea>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <div style="max-width:220px;">
+          <label>Shop ID</label>
+          <input type="text" id="shopId" />
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top:10px;">
+        <button id="refreshCredsBtn" class="ghost" type="button">从浏览器刷新凭证</button>
+        <span id="credsStatus" class="hint" style="align-self:center;"></span>
+      </div>
+      <div class="hint">安装「凭证抓取」浏览器扩展后，在 Shopee 短视频页手动上传一次视频，扩展会自动抓取 Cookie/ShopID 并填入。Authorization 时效很短，无需手动抓取——服务端每次上传前会用 Cookie 自动换取新 token。Cookie 失效时（上传报 token is expired）重新登录并在短视频页上传一次即可。</div>
+    </details>
+  </div>
+
+  <!-- 表格 -->
+  <div class="card">
+    <h2>① 选择表格 <span class="pill">支持 .xlsx / .xls / .csv</span></h2>
+    <input type="file" id="file" accept=".xlsx,.xls" />
+    <div class="hint">使用 <b>.xlsx</b> 表格。表头需包含：<b>视频路径</b>（本地文件完整路径）、<b>视频说明</b>（caption）、<b>商品编码</b>（用于查询并关联商品）。如列名不同，可在下方手动映射。</div>
+
+    <div id="mapping" style="display:none; margin-top:14px;">
+      <div class="grid2">
+        <div>
+          <label>视频路径列</label>
+          <select id="mapPath"></select>
+        </div>
+        <div>
+          <label>视频说明列</label>
+          <select id="mapCaption"></select>
+        </div>
+        <div>
+          <label>商品编码列</label>
+          <select id="mapProduct"></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button id="parseBtn">解析表格</button>
+      <button id="tplBtn" class="ghost">下载 xlsx 模板</button>
+    </div>
+
+    <div id="previewBox" style="margin-top:14px; overflow:auto; max-height:320px; display:none;">
+      <table id="preview"></table>
+    </div>
+  </div>
+
+  <!-- 执行 -->
+  <div class="card">
+    <h2>② 开始批量上传</h2>
+    <div class="btn-row">
+      <button id="startBtn" disabled>开始上传</button>
+      <button id="clearBtn" class="ghost">清空日志</button>
+      <button id="pauseBtn" class="ghost" type="button">暂停滚动</button>
+    </div>
+    <div id="summary" class="hint" style="margin-top:10px;"></div>
+    <div id="log" style="margin-top:12px;"></div>
+  </div>
+</div>
+
+<script>
+// 默认凭证初始为空：凭证一律由「浏览器扩展自动抓取」或用户手动填写，
+// 不再内置任何历史会话凭证，避免真实 Cookie/Token 泄露与过期误导。
+const DEFAULTS = {
+  auth: '',
+  cookie: '',
+  shopId: '',
+};
+
+// 恢复 localStorage
+['auth', 'cookie', 'shopId'].forEach((k) => {
+  const v = localStorage.getItem('shopee_' + k) || DEFAULTS[k];
+  document.getElementById(k).value = v;
+});
+function saveCreds() {
+  ['auth', 'cookie', 'shopId'].forEach((k) => localStorage.setItem('shopee_' + k, document.getElementById(k).value));
+}
+
+// 从本地服务拉取浏览器扩展自动抓取的凭证（不会覆盖正在编辑的输入框）
+function setValIfNotFocused(id, v) {
+  const el = document.getElementById(id);
+  if (el && v && document.activeElement !== el) el.value = v;
+}
+async function loadCredsFromServer(quiet) {
+  try {
+    const r = await fetch('/api/creds');
+    const c = await r.json();
+    const st = document.getElementById('credsStatus');
+    if (c && (c.auth || c.cookie || c.shopId)) {
+      setValIfNotFocused('auth', c.auth);
+      setValIfNotFocused('cookie', c.cookie);
+      setValIfNotFocused('shopId', c.shopId);
+      const t = c.updatedAt ? new Date(c.updatedAt).toLocaleString() : '';
+      if (st) st.textContent = '✓ 已自动获取凭证' + (t ? '（' + t + '）' : '');
+      if (!quiet) saveCreds();
+    } else if (st) {
+      st.textContent = '尚未抓取到凭证，请安装扩展并在短视频页手动上传一次';
+    }
+  } catch (e) { /* 服务未启动忽略 */ }
+}
+document.getElementById('refreshCredsBtn').addEventListener('click', async () => {
+  const b = document.getElementById('refreshCredsBtn');
+  b.disabled = true;
+  const orig = b.textContent;
+  b.textContent = '刷新中…';
+  await loadCredsFromServer(false);
+  b.disabled = false;
+  b.textContent = orig;
+});
+loadCredsFromServer(true);
+setInterval(() => loadCredsFromServer(true), 5000);
+
+// 列名匹配
+const KEY_PATH = ['视频路径', '路径', '视频', 'videopath', 'videofile', 'path', '文件', '文件路徑'];
+const KEY_CAPTION = ['视频说明', '说明', '描述', '标题', 'caption', 'description', '备注', '视频描述'];
+const KEY_PRODUCT = ['商品编码', '编码', '商品', 'sku', 'item', 'product', '货号', '商品id', 'itemid', '商品編碼'];
+
+let RAW_ROWS = [];     // 原始对象数组
+let HEADERS = [];      // 表头
+let MAPPED = [];       // 映射后的 {path, caption, product}
+
+function matchKey(headers, keys) {
+  for (const k of keys) {
+    const hit = headers.find((h) => (h || '').toString().trim().toLowerCase() === k.toLowerCase());
+    if (hit) return hit;
+  }
+  for (const k of keys) {
+    const hit = headers.find((h) => (h || '').toString().toLowerCase().includes(k.toLowerCase()));
+    if (hit) return hit;
+  }
+  return headers[0] || '';
+}
+
+function buildSelect(id, selected) {
+  const sel = document.getElementById(id);
+  sel.innerHTML = '';
+  HEADERS.forEach((h) => {
+    const o = document.createElement('option');
+    o.value = h; o.textContent = h || '(空)';
+    if (h === selected) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function parseCSV(text) {
+  const rows = [];
+  let row = [], cur = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+      else cur += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === ',') { row.push(cur); cur = ''; }
+      else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+      else if (c === '\r') { /* skip */ }
+      else cur += c;
+    }
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  if (!rows.length) return [];
+  const head = rows[0];
+  return rows.slice(1).map((r) => {
+    const o = {}; head.forEach((h, i) => (o[h] = (r[i] ?? '').trim())); return o;
+  });
+}
+
+function downloadTemplate() {
+  if (!window.XLSX) { alert('SheetJS 未加载，无法生成模板'); return; }
+  const aoa = [
+    ['视频路径', '视频说明', '商品编码'],
+    ['C:\\Users\\84463\\Videos\\video1.mp4', '夏季新款连衣裙展示', '18673144460'],
+    ['C:\\Users\\84463\\Videos\\video2.mp4', '男士运动鞋开箱', '18673144461'],
+    ['C:\\Users\\84463\\Videos\\video3.mp4', '', ''],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '视频上传');
+  XLSX.writeFile(wb, '视频批量上传模板.xlsx');
+}
+
+document.getElementById('tplBtn').addEventListener('click', downloadTemplate);
+
+document.getElementById('parseBtn').addEventListener('click', async () => {
+  const file = document.getElementById('file').files[0];
+  if (!file) { alert('请先选择表格文件'); return; }
+  if (/\.xlsx?$/i.test(file.name) && !window.XLSX) {
+    alert('SheetJS 未加载，请确认 public/xlsx.full.min.js 存在'); return;
+  }
+  const buf = await file.arrayBuffer();
+  let rows = [];
+  if (/\.xlsx?$/i.test(file.name) && window.XLSX) {
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  } else {
+    rows = parseCSV(new TextDecoder('utf-8').decode(buf));
+  }
+  if (!rows.length) { alert('未解析到数据'); return; }
+  RAW_ROWS = rows;
+  HEADERS = Object.keys(rows[0]);
+  const p = matchKey(HEADERS, KEY_PATH);
+  const c = matchKey(HEADERS, KEY_CAPTION);
+  const pr = matchKey(HEADERS, KEY_PRODUCT);
+  buildSelect('mapPath', p);
+  buildSelect('mapCaption', c);
+  buildSelect('mapProduct', pr);
+  document.getElementById('mapping').style.display = 'block';
+
+  // 预览
+  MAPPED = RAW_ROWS.map((r) => {
+    const path = (r[document.getElementById('mapPath').value] || '').toString().trim();
+    const caption = (r[document.getElementById('mapCaption').value] || '').toString().trim();
+    const product = (r[document.getElementById('mapProduct').value] || '').toString().trim();
+    return { path, caption, product, error: validateRow({ path, caption }) };
+  });
+  renderPreview();
+  document.getElementById('startBtn').disabled = MAPPED.length === 0;
+});
+
+function renderPreview() {
+  const box = document.getElementById('previewBox');
+  const t = document.getElementById('preview');
+  let html = '<tr><th>#</th><th>视频路径</th><th>视频说明</th><th>商品编码</th><th>状态</th></tr>';
+  MAPPED.forEach((r, i) => {
+    const st = r.error
+      ? `<span class="status s-err" id="st-${i}" title="${esc(r.error)}">${esc(r.error)}</span>`
+      : `<span class="status s-wait" id="st-${i}">等待</span>`;
+    html += `<tr><td>${i + 1}</td><td>${esc(r.path)}</td><td>${esc(r.caption)}</td><td>${esc(r.product)}</td><td>${st}</td></tr>`;
+  });
+  t.innerHTML = html;
+  box.style.display = 'block';
+}
+
+function esc(s) { return (s || '').toString().replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m])); }
+
+// 日志
+let autoScroll = true;
+document.getElementById('pauseBtn').addEventListener('click', () => {
+  autoScroll = !autoScroll;
+  document.getElementById('pauseBtn').textContent = autoScroll ? '暂停滚动' : '继续滚动';
+  if (autoScroll) {
+    const el = document.getElementById('log');
+    el.scrollTop = el.scrollHeight;
+  }
+});
+function log(msg, cls) {
+  const el = document.getElementById('log');
+  const line = document.createElement('div');
+  line.className = 'log-line' + (cls ? ' ' + cls : '');
+  const t = new Date().toLocaleTimeString();
+  line.textContent = `[${t}] ${msg}`;
+  el.appendChild(line);
+  if (autoScroll) el.scrollTop = el.scrollHeight;
+}
+
+// 行级校验：视频路径、视频说明（提示文案）长度与禁用词
+function validateRow({ path, caption }) {
+  if (!path) return '缺少视频路径';
+  if (caption && caption.length > 250) return '视频说明超过250字符，请精简';
+  if (caption && /tiktok/i.test(caption)) return '视频说明不能包含 tiktok 字样';
+  return '';
+}
+
+// SSE
+let es = null;
+document.getElementById('startBtn').addEventListener('click', () => {
+  saveCreds();
+  const auth = document.getElementById('auth').value.trim();
+  const cookie = document.getElementById('cookie').value.trim();
+  const shopId = document.getElementById('shopId').value.trim();
+  // Authorization 可留空：服务端会用 Cookie 调用 authorization 接口自动换取新 token
+  if (!cookie || !shopId) { alert('请先填写 Cookie 与 Shop ID（Authorization 可留空，会自动获取）'); return; }
+
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('startBtn').textContent = '上传中…';
+  document.getElementById('log').innerHTML = '';
+  log('开始批量上传，共 ' + MAPPED.length + ' 个任务', 'ok');
+
+  fetch('/api/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows: MAPPED, auth, cookie, shopId }),
+  })
+    .then((r) => r.json())
+    .then(({ jobId }) => {
+      es = new EventSource('/api/events?jobId=' + jobId);
+      let done = 0, ok = 0, fail = 0, total = 0;
+      const updateSummary = () => {
+        document.getElementById('summary').textContent =
+          `进度：${done} / ${total}　成功 ${ok} / 失败 ${fail}`;
+      };
+      es.onmessage = (ev) => {
+        const d = JSON.parse(ev.data);
+        if (d.type === 'row-start') {
+          total = d.total;
+          updateSummary();
+          const st = document.getElementById('st-' + d.index);
+          if (st) { st.className = 'status s-run'; st.textContent = '上传中'; }
+          log(`▶ 任务 ${d.index + 1}/${d.total}: ${esc(d.row.path)}`);
+        } else if (d.type === 'step') {
+          log(`    [${d.index + 1}] (${d.step}) ${d.msg}`);
+        } else if (d.type === 'row-done') {
+          done++; ok++;
+          updateSummary();
+          const st = document.getElementById('st-' + d.index);
+          if (st) { st.className = 'status s-ok'; st.textContent = '成功'; }
+          log(`  ✓ 任务 ${d.index + 1} 完成 → vid=${d.result.vid}` + (d.result.itemId ? ` item_id=${d.result.itemId}` : ''), 'ok');
+        } else if (d.type === 'row-error') {
+          done++; fail++;
+          updateSummary();
+          const st = document.getElementById('st-' + d.index);
+          if (st) { st.className = 'status s-err'; st.textContent = '失败'; }
+          log(`  ✗ 任务 ${d.index + 1} 失败: ${d.error}`, 'err');
+        } else if (d.type === 'finished') {
+          log(`全部完成：成功 ${ok}，失败 ${fail}，共 ${d.total}`, ok ? 'ok' : 'err');
+          document.getElementById('summary').textContent = `已完成：成功 ${ok} / 失败 ${fail}`;
+          document.getElementById('startBtn').disabled = false;
+          document.getElementById('startBtn').textContent = '开始上传';
+          if (es) es.close();
+        } else if (d.type === 'fatal') {
+          log('致命错误: ' + d.error, 'err');
+          document.getElementById('startBtn').disabled = false;
+          document.getElementById('startBtn').textContent = '开始上传';
+        }
+      };
+      es.onerror = () => { log('SSE 连接中断', 'err'); document.getElementById('startBtn').disabled = false; document.getElementById('startBtn').textContent = '开始上传'; };
+    })
+    .catch((e) => { log('启动失败: ' + e.message, 'err'); document.getElementById('startBtn').disabled = false; document.getElementById('startBtn').textContent = '开始上传'; });
+});
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  document.getElementById('log').innerHTML = '';
+});
+</script>
+</body>
+</html>

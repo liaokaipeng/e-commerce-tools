@@ -35,8 +35,12 @@
     .btn-refresh {
       border: 1px solid #ccc; background: #fff; color: #333;
       padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+      transition: background .15s, opacity .15s;
     }
-    .btn-refresh:hover { background: #f5f5f5; }
+    .btn-refresh:hover:not(:disabled) { background: #f5f5f5; }
+    .btn-refresh:disabled { opacity: .6; cursor: not-allowed; }
+    .status-bar.flash { animation: flashBg 1s ease; }
+    @keyframes flashBg { 0% { background: #fff8e1; } 100% { background: transparent; } }
 
     /* 店铺选择 */
     .cat-group { margin-bottom: 18px; }
@@ -73,6 +77,22 @@
     .btn-export:disabled { background: #ccc; cursor: not-allowed; }
     .sel-count { font-size: 13px; color: #666; }
 
+    /* 保存位置 */
+    .dir-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .dir-field { flex: 1; min-width: 280px; }
+    .dir-field label { display: block; font-size: 13px; color: #888; margin-bottom: 6px; }
+    .dir-field input {
+      width: 100%; border: 1px solid #e5e5e5; border-radius: 8px;
+      padding: 10px 12px; font-size: 13.5px; transition: border-color .15s;
+    }
+    .dir-field input:focus { outline: none; border-color: #ee4d2d; }
+    .btn-secondary {
+      background: #f5f5f5; color: #333; border: 1px solid #e5e5e5;
+      padding: 10px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
+      font-family: inherit; transition: background .15s;
+    }
+    .btn-secondary:hover { background: #ececec; }
+
     /* 日志 */
     #log {
       background: #1e1e1e; color: #d4d4d4; font-family: Consolas, monospace;
@@ -92,7 +112,7 @@
     <!-- 登录状态 -->
     <div class="card">
       <h2>① 登录（Cookie）</h2>
-      <div class="status-bar">
+      <div class="status-bar" id="statusBar">
         <span class="badge err" id="statusBadge"><span class="dot"></span><span id="statusText">检查中…</span></span>
         <span class="status-tip" id="statusTip">请先打开卖家中心并保持登录，再点击浏览器扩展发送登录信息。</span>
         <button class="btn-refresh" id="btnRefresh">刷新状态</button>
@@ -105,9 +125,22 @@
       <div id="storeList">加载店铺中…</div>
     </div>
 
+    <!-- 保存位置 -->
+    <div class="card">
+      <h2>③ 保存位置</h2>
+      <div class="dir-row">
+        <div class="dir-field">
+          <label>保存目录（不存在将自动创建）</label>
+          <input type="text" id="dir" placeholder="例如 D:\data\竞价导出">
+        </div>
+        <button class="btn-secondary" id="btnSetDefault">设为默认目录</button>
+        <button class="btn-secondary" id="btnOpenDir">打开目录</button>
+      </div>
+    </div>
+
     <!-- 导出 -->
     <div class="card">
-      <h2>③ 导出</h2>
+      <h2>④ 导出</h2>
       <div class="actions">
         <button class="btn-export" id="btnExport" disabled>开始导出</button>
         <button class="btn-refresh" id="btnClearAll">清空选择</button>
@@ -123,7 +156,23 @@
     const selected = new Set();
 
     // ---------- 登录状态 ----------
-    async function refreshStatus() {
+    let refreshing = false;
+    function flashBar() {
+      const bar = $('statusBar');
+      bar.classList.remove('flash');
+      void bar.offsetWidth; // 重启动画
+      bar.classList.add('flash');
+    }
+    async function refreshStatus(manual = false) {
+      if (refreshing) return;
+      refreshing = true;
+      const btn = $('btnRefresh');
+      if (manual) {
+        btn.disabled = true;
+        btn.textContent = '刷新中…';
+      }
+      $('statusBadge').className = 'badge err';
+      $('statusText').textContent = '检查中…';
       try {
         const r = await fetch('/api/status');
         const s = await r.json();
@@ -131,16 +180,26 @@
         if (s.loggedIn) {
           badge.className = 'badge ok';
           $('statusText').textContent = `已登录（${s.cookieCount} 个 Cookie）`;
-          $('statusTip').textContent = 'Cookie 已就绪，可直接选择店铺导出。如登录过期，请重新点扩展推送。';
+          const saved = s.savedAt
+            ? `最近推送时间：${new Date(s.savedAt).toLocaleString()}。`
+            : '';
+          $('statusTip').textContent = `Cookie 已就绪，可直接选择店铺导出。${saved}如登录过期，请重新点扩展推送。`;
         } else {
           badge.className = 'badge err';
           $('statusText').textContent = '未登录';
-          $('statusTip').textContent = '请先登录 seller.shopee.cn，再点击浏览器扩展 [Shopee 竞价导出助手] → [发送登录信息到本地工具]，然后点「刷新状态」。';
+          $('statusTip').textContent = '请先登录 seller.shopee.cn，再点击浏览器扩展 [KP工具合集助手] → [发送登录信息到本地工具]，然后点「刷新状态」。';
         }
       } catch (e) {
         $('statusBadge').className = 'badge err';
         $('statusText').textContent = '无法连接服务';
         $('statusTip').textContent = '请确认本地服务已启动（双击 启动.bat），并刷新本页。';
+      } finally {
+        refreshing = false;
+        if (manual) {
+          btn.textContent = '刷新状态';
+          btn.disabled = false;
+          flashBar();
+        }
       }
     }
 
@@ -218,6 +277,58 @@
       }
     }
 
+    // ---------- 保存位置 ----------
+    let hasDefault = false;
+
+    // 读取默认目录：首次未设置则留空（要求用户自选），设置过则回显
+    async function loadDirSettings() {
+      try {
+        const r = await fetch('/api/settings');
+        const s = await r.json();
+        const d = s.defaults && s.defaults.bidding;
+        if (d) { $('dir').value = d; hasDefault = true; }
+      } catch {}
+    }
+
+    async function setDefaultDir(dir) {
+      try {
+        const r = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tool: 'bidding', dir }),
+        });
+        const d = await r.json();
+        if (d.ok) { hasDefault = true; log('已设为默认目录：' + dir, 'ok'); return true; }
+        log('设置默认目录失败：' + (d.message || '未知错误'), 'err');
+        return false;
+      } catch {
+        log('设置默认目录失败：连接服务失败', 'err');
+        return false;
+      }
+    }
+
+    $('btnSetDefault').addEventListener('click', async () => {
+      const dir = $('dir').value.trim();
+      if (!dir) { alert('请先填写保存目录'); return; }
+      await setDefaultDir(dir);
+    });
+
+    $('btnOpenDir').addEventListener('click', async () => {
+      const dir = $('dir').value.trim();
+      if (!dir) { alert('请先填写保存目录'); return; }
+      try {
+        const r = await fetch('/api/open-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dir }),
+        });
+        const d = await r.json();
+        if (!d.ok) log('无法打开目录：' + d.message, 'err');
+      } catch {
+        log('无法打开目录：连接服务失败', 'err');
+      }
+    });
+
     // ---------- 导出 ----------
     function log(msg, cls) {
       const el = $('log');
@@ -229,31 +340,73 @@
     }
 
     async function doExport() {
+      const dir = $('dir').value.trim();
+      if (!dir) {
+        log('请先设置保存目录', 'err');
+        alert('请先设置保存目录');
+        return;
+      }
+      // 首次设置目录后，询问是否设为默认目录（下次打开自动回显）
+      if (!hasDefault) {
+        if (confirm(`是否将「${dir}」设为默认目录？\n下次打开会自动使用该目录。`)) {
+          await setDefaultDir(dir);
+        }
+      }
       const btn = $('btnExport');
       btn.disabled = true;
+      btn.textContent = '导出中…';
       $('log').innerHTML = '';
       log('开始导出，共 ' + selected.size + ' 个店铺…', 'info');
       try {
         const resp = await fetch('/api/export', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ shopIds: [...selected] }),
+          body: JSON.stringify({ shopIds: [...selected], dir }),
         });
-        const text = await resp.text();
-        text.split('\n').forEach(l => {
-          if (!l) return;
-          const cls = l.includes('✕') || l.includes('失败') ? 'err' : (l.includes('完成') ? 'info' : 'ok');
-          log(l, cls);
-        });
+        if (!resp.ok || !resp.body) {
+          const err = await resp.json().catch(() => ({}));
+          log(err.msg || err.message || '请求失败', 'err');
+          return;
+        }
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split('\n\n');
+          buf = parts.pop();
+          for (const part of parts) {
+            const line = part.split('\n').find(l => l.startsWith('data: '));
+            if (!line) continue;
+            let ev;
+            try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+            if (ev.type === 'start') {
+              log(`▶ ${ev.name}（${ev.shopId}）导出中…`, 'info');
+            } else if (ev.type === 'done') {
+              if (ev.ok) {
+                log(`✓ ${ev.name}（${ev.shopId}）导出成功：${ev.rows} 条 → ${ev.file}`, 'ok');
+              } else {
+                log(`✕ ${ev.name}（${ev.shopId}）失败：${ev.msg}`, 'err');
+              }
+            } else if (ev.type === 'summary') {
+              log(`完成：成功 ${ev.success} / 失败 ${ev.failed} / 共 ${ev.total} 个店铺。`, 'info');
+            } else if (ev.type === 'fatal') {
+              log(ev.msg, 'err');
+            }
+          }
+        }
       } catch (e) {
         log('导出请求失败：' + e.message, 'err');
       } finally {
+        btn.textContent = '开始导出';
         syncUI();
       }
     }
 
     // ---------- 事件绑定 ----------
-    $('btnRefresh').addEventListener('click', refreshStatus);
+    $('btnRefresh').addEventListener('click', () => refreshStatus(true));
     $('btnExport').addEventListener('click', doExport);
     $('btnClearAll').addEventListener('click', () => {
       selected.clear();
@@ -267,6 +420,7 @@
     // 每 15 秒自动刷新一次登录状态
     refreshStatus();
     loadStores();
+    loadDirSettings();
     setInterval(refreshStatus, 15000);
   </script>
 </body>
