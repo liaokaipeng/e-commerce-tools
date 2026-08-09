@@ -347,7 +347,9 @@ async function uploadOne(row, creds, log) {
   let { auth, cookie, shopId } = creds;
   const filePath = row.path;
   if (!filePath) throw new Error('缺少视频路径');
-  if (!fs.existsSync(filePath)) throw new Error(`文件不存在: ${filePath}`);
+  if (row.caption && row.caption.length > 250) throw new Error('视频说明超过250字符，请精简后再上传');
+  if (row.caption && /tiktok/i.test(row.caption)) throw new Error('视频说明不能包含 tiktok 字样');
+  if (!fs.existsSync(filePath)) throw new Error(`表格中填写的视频文件不存在，请检查路径是否正确: ${filePath}`);
 
   log('read', `读取文件: ${filePath}`);
   const fileBuf = fs.readFileSync(filePath);
