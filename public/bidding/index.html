@@ -133,6 +133,7 @@
           <label>保存目录（不存在将自动创建）</label>
           <input type="text" id="dir" placeholder="例如 D:\data\竞价导出">
         </div>
+        <button class="btn-secondary" id="btnBrowse">浏览</button>
         <button class="btn-secondary" id="btnSetDefault">设为默认目录</button>
         <button class="btn-secondary" id="btnOpenDir">打开目录</button>
       </div>
@@ -150,6 +151,7 @@
     </div>
   </div>
 
+  <script src="/common/dirpicker.js"></script>
   <script>
     const $ = id => document.getElementById(id);
     let stores = [];
@@ -311,6 +313,10 @@
       const dir = $('dir').value.trim();
       if (!dir) { alert('请先填写保存目录'); return; }
       await setDefaultDir(dir);
+    });
+
+    $('btnBrowse').addEventListener('click', () => {
+      openDirPicker((dir) => { $('dir').value = dir; });
     });
 
     $('btnOpenDir').addEventListener('click', async () => {

@@ -88,6 +88,15 @@ async function main() {
       t('POST /api/settings 非法工具返回 400', invalid.status === 400);
     }
 
+    console.log('===== 目录浏览 API =====');
+    {
+      const r = await req('GET', '/api/browse');
+      const j = JSON.parse(r.text);
+      t('GET /api/browse 返回 ok 且含 dirs', r.status === 200 && j.ok === true && Array.isArray(j.dirs));
+      const bad = await req('GET', '/api/browse?path=' + encodeURIComponent('Z:\\不存在的盘或目录\\x'));
+      t('GET /api/browse 无效路径返回 400', bad.status === 400);
+    }
+
     console.log('===== 竞价导出 API =====');
     {
       const r = await req('GET', '/api/status');

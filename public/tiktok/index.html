@@ -205,6 +205,7 @@
         <label>保存目录（不存在将自动创建）</label>
         <input type="text" id="dir" placeholder="例如 D:\videos\tiktok">
       </div>
+      <button class="btn btn-secondary" id="btnBrowse">浏览</button>
       <button class="btn btn-secondary" id="btnSetDefault">设为默认目录</button>
       <button class="btn btn-secondary" id="btnOpenDir">打开目录</button>
     </div>
@@ -224,6 +225,7 @@
   <div class="footer">提示：下载失败的网络错误通常需要开启 VPN 后重试；单个链接失效或受限会自动跳过，不影响其他视频。</div>
 </div>
 
+<script src="/common/dirpicker.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 
@@ -298,6 +300,10 @@ $('btnSetDefault').onclick = async () => {
   const dir = $('dir').value.trim();
   if (!dir) { alert('请先填写保存目录'); return; }
   await setDefaultDir(dir);
+};
+
+$('btnBrowse').onclick = () => {
+  openDirPicker((dir) => { $('dir').value = dir; });
 };
 
 $('btnOpenDir').onclick = async () => {
