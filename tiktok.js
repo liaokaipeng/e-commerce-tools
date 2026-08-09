@@ -107,9 +107,10 @@ function extractVideoIdFromUrl(url) {
 }
 
 /** 解析单个视频页，返回无水印地址 + cookie */
-async function parseVideo(url, { agent, onLog = () => {} }) {
+async function parseVideo(url, { agent, session = {}, onLog = () => {} }) {
   let lastError = null;
-  let cookies = '';
+  // 优先复用跨视频共享的会话 Cookie（ttwid 等），降低被风控识别为陌生批量请求的概率
+  let cookies = session.cookies || '';
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
       let page = await httpsGet(url, {
@@ -123,8 +124,11 @@ async function parseVideo(url, { agent, onLog = () => {} }) {
         },
       });
       if (page.status !== 200) throw new Error('页面返回 HTTP ' + page.status);
-      // 保留上一次响应中的 cookie，重试时携带（更接近真实浏览器行为）
-      if (page.cookies) cookies = page.cookies;
+      // 保留最近一次响应的 cookie，重试及后续视频复用（更接近真实浏览器行为）
+      if (page.cookies) {
+        cookies = page.cookies;
+        session.cookies = page.cookies;
+      }
 
       const start = page.body.indexOf(REHYDRATION_MARKER);
       // 无视频数据：TikTok 风控会返回约 43KB 的空壳页（无 ttwid、含 pumbaa 验证脚本），
@@ -168,6 +172,9 @@ async function parseVideo(url, { agent, onLog = () => {} }) {
 function downloadFile(url, destPath, cookies, agent, redirects = 5) {
   return new Promise((resolve, reject) => {
     const out = fs.createWriteStream(destPath);
+    // 立即挂载写流错误监听：文件创建失败（权限/磁盘满/被占用等）时 error 会异步立即触发，
+    // 若等响应回调里才挂监听，就会变成未处理的 'error' 事件导致整个 node 进程崩溃（SSE 断流）。
+    out.on('error', reject);
     const req = https.request(url, {
       agent,
       headers: {
@@ -194,7 +201,6 @@ function downloadFile(url, destPath, cookies, agent, redirects = 5) {
       }
       res.pipe(out);
       out.on('finish', () => resolve({ bytes: fs.statSync(destPath).size }));
-      out.on('error', reject);
     });
     req.on('timeout', () => req.destroy(new Error('timeout')));
     req.on('error', reject);
@@ -246,13 +252,15 @@ async function runBatch(urls, saveDir, emit) {
   let success = 0;
   let failed = 0;
   let networkError = false;
+  // 跨视频共享的会话状态（复用 ttwid，降低风控概率）
+  const session = {};
 
   for (let i = 0; i < urls.length; i++) {
     const url = urls[i];
     emit({ type: 'start', index: i + 1, total: urls.length, url });
 
     try {
-      const v = await parseVideo(url, { agent, onLog: (m) => emit({ type: 'log', url, message: m }) });
+      const v = await parseVideo(url, { agent, session, onLog: (m) => emit({ type: 'log', url, message: m }) });
       emit({ type: 'log', url, message: `解析成功：视频ID ${v.videoId}` });
 
       const filePath = path.join(dir, `${v.videoId}.mp4`);
@@ -300,8 +308,8 @@ async function runBatch(urls, saveDir, emit) {
         network: isNetworkError(e),
       });
     }
-    // 间隔请求，降低被风控概率
-    if (i < urls.length - 1) await sleep(1500);
+    // 间隔请求 + 随机抖动，降低被风控识别为批量脚本的概率
+    if (i < urls.length - 1) await sleep(3000 + Math.floor(Math.random() * 1500));
   }
 
   emit({

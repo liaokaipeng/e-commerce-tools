@@ -1,4 +1,8 @@
 node_modules/
+frontend/node_modules/
+frontend/dist/
+_diag.js
+_diag*.js
 
 *.log
 server.log

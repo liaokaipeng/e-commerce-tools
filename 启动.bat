@@ -21,13 +21,32 @@ if errorlevel 1 (
 
 rem Install dependencies on first run
 if not exist "node_modules" (
-    echo First run: installing dependencies, please wait...
+    echo First run: installing server dependencies, please wait...
     call npm install
     if errorlevel 1 (
         echo [ERROR] Dependency installation failed. Please check your network.
         pause
         exit /b 1
     )
+)
+
+rem Build frontend (Vite) on first run
+if not exist "frontend\dist" (
+    echo First run: installing and building frontend, please wait...
+    cd /d "%~dp0frontend"
+    call npm install
+    if errorlevel 1 (
+        echo [ERROR] Frontend dependency installation failed.
+        pause
+        exit /b 1
+    )
+    call npm run build
+    if errorlevel 1 (
+        echo [ERROR] Frontend build failed.
+        pause
+        exit /b 1
+    )
+    cd /d "%~dp0"
 )
 
 rem Check if port 8765 is already in use (service may already be running)
