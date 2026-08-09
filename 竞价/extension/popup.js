@@ -48,14 +48,14 @@ document.getElementById('send').addEventListener('click', async () => {
     });
     const text = await resp.text();
     if (resp.ok && text.includes('ok')) {
-      status.textContent = '✅ 发送成功！请回到命令行查看结果。';
+      status.textContent = '✅ 发送成功！请到本地网页（http://127.0.0.1:8765）查看并导出。';
       status.className = 'ok';
     } else {
-      status.textContent = `发送失败（${resp.status}）：${text}。请先运行 node main.js login`;
+      status.textContent = `发送失败（${resp.status}）：${text}。请先双击 启动.bat，再点此按钮`;
       status.className = 'err';
     }
   } catch (e) {
-    status.textContent = `发送失败：${e.message}。请先运行 node main.js login 启动本地服务`;
+    status.textContent = `发送失败：${e.message}。请先双击 启动.bat 启动本地服务`;
     status.className = 'err';
   } finally {
     btn.disabled = false;

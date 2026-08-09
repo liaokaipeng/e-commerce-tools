@@ -20,5 +20,7 @@ if not exist node_modules\exceljs (
     )
 )
 
-node main.js run
+echo [INFO] Starting server, opening browser...
+start "" http://127.0.0.1:8765
+node main.js
 pause

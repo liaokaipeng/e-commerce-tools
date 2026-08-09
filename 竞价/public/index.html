@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shopee 竞价导出工具</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+      background: #f4f5f7; color: #333; padding: 24px;
+    }
+    .container { max-width: 860px; margin: 0 auto; }
+    h1 { font-size: 22px; color: #ee4d2d; margin-bottom: 4px; }
+    .sub { color: #888; font-size: 13px; margin-bottom: 20px; }
+
+    .card {
+      background: #fff; border-radius: 10px; padding: 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 16px;
+    }
+    .card h2 { font-size: 16px; margin-bottom: 12px; color: #222; }
+
+    /* 登录状态 */
+    .status-bar {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: 600;
+    }
+    .badge.ok { background: #e8f5e9; color: #2e7d32; }
+    .badge.err { background: #fdecea; color: #c62828; }
+    .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .status-tip { font-size: 13px; color: #666; flex: 1; min-width: 200px; }
+    .btn-refresh {
+      border: 1px solid #ccc; background: #fff; color: #333;
+      padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    }
+    .btn-refresh:hover { background: #f5f5f5; }
+
+    /* 店铺选择 */
+    .cat-group { margin-bottom: 18px; }
+    .cat-head {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+      font-weight: 600; font-size: 14px;
+    }
+    .cat-head input { cursor: pointer; }
+    .cat-count { color: #999; font-weight: 400; font-size: 12px; }
+    .store-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 8px;
+    }
+    .store-item {
+      display: flex; align-items: center; gap: 8px;
+      border: 1px solid #e5e5e5; border-radius: 8px; padding: 10px 12px;
+      cursor: pointer; transition: border-color .15s, background .15s;
+    }
+    .store-item:hover { border-color: #ee4d2d; }
+    .store-item.selected { border-color: #ee4d2d; background: #fff5f3; }
+    .store-item input { cursor: pointer; accent-color: #ee4d2d; flex-shrink: 0; }
+    .store-meta { line-height: 1.35; min-width: 0; }
+    .store-name { font-size: 13px; font-weight: 600; }
+    .store-id { font-size: 12px; color: #999; }
+
+    /* 操作 */
+    .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .btn-export {
+      background: #ee4d2d; color: #fff; border: none; padding: 12px 28px;
+      border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-export:hover { background: #d7441f; }
+    .btn-export:disabled { background: #ccc; cursor: not-allowed; }
+    .sel-count { font-size: 13px; color: #666; }
+
+    /* 日志 */
+    #log {
+      background: #1e1e1e; color: #d4d4d4; font-family: Consolas, monospace;
+      border-radius: 8px; padding: 14px; font-size: 13px; line-height: 1.6;
+      max-height: 260px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+    }
+    #log .ok { color: #7ee787; }
+    #log .err { color: #ff7b72; }
+    #log .info { color: #79c0ff; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Shopee 竞价导出工具</h1>
+    <div class="sub">按「分类 / 店铺简称 / 店铺 ID」选择店铺，一键导出获胜竞价数据到 Excel</div>
+
+    <!-- 登录状态 -->
+    <div class="card">
+      <h2>① 登录（Cookie）</h2>
+      <div class="status-bar">
+        <span class="badge err" id="statusBadge"><span class="dot"></span><span id="statusText">检查中…</span></span>
+        <span class="status-tip" id="statusTip">请先打开卖家中心并保持登录，再点击浏览器扩展发送登录信息。</span>
+        <button class="btn-refresh" id="btnRefresh">刷新状态</button>
+      </div>
+    </div>
+
+    <!-- 店铺选择 -->
+    <div class="card">
+      <h2>② 选择店铺</h2>
+      <div id="storeList">加载店铺中…</div>
+    </div>
+
+    <!-- 导出 -->
+    <div class="card">
+      <h2>③ 导出</h2>
+      <div class="actions">
+        <button class="btn-export" id="btnExport" disabled>开始导出</button>
+        <button class="btn-refresh" id="btnClearAll">清空选择</button>
+        <span class="sel-count" id="selCount">已选 0 个店铺</span>
+      </div>
+      <div id="log" style="margin-top:14px;">等待操作…</div>
+    </div>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    let stores = [];
+    const selected = new Set();
+
+    // ---------- 登录状态 ----------
+    async function refreshStatus() {
+      try {
+        const r = await fetch('/api/status');
+        const s = await r.json();
+        const badge = $('statusBadge');
+        if (s.loggedIn) {
+          badge.className = 'badge ok';
+          $('statusText').textContent = `已登录（${s.cookieCount} 个 Cookie）`;
+          $('statusTip').textContent = 'Cookie 已就绪，可直接选择店铺导出。如登录过期，请重新点扩展推送。';
+        } else {
+          badge.className = 'badge err';
+          $('statusText').textContent = '未登录';
+          $('statusTip').textContent = '请先登录 seller.shopee.cn，再点击浏览器扩展 [Shopee 竞价导出助手] → [发送登录信息到本地工具]，然后点「刷新状态」。';
+        }
+      } catch (e) {
+        $('statusBadge').className = 'badge err';
+        $('statusText').textContent = '无法连接服务';
+        $('statusTip').textContent = '请确认本地服务已启动（双击 启动.bat），并刷新本页。';
+      }
+    }
+
+    // ---------- 店铺列表 ----------
+    function renderStores() {
+      const cats = [...new Set(stores.map(s => s.category))];
+      const box = $('storeList');
+      box.innerHTML = '';
+      cats.forEach(cat => {
+        const list = stores.filter(s => s.category === cat);
+        const group = document.createElement('div');
+        group.className = 'cat-group';
+        const head = document.createElement('div');
+        head.className = 'cat-head';
+        head.innerHTML = `<input type="checkbox" class="cat-all" data-cat="${cat}"><span>${cat}</span><span class="cat-count">${list.length} 个店铺</span>`;
+        const grid = document.createElement('div');
+        grid.className = 'store-grid';
+        list.forEach(s => {
+          const item = document.createElement('label');
+          item.className = 'store-item';
+          item.dataset.id = s.id;
+          item.innerHTML = `<input type="checkbox" value="${s.id}" data-cat="${cat}">
+            <span class="store-meta"><span class="store-name">${s.name}</span><br><span class="store-id">ID: ${s.id}</span></span>`;
+          grid.appendChild(item);
+        });
+        group.appendChild(head);
+        group.appendChild(grid);
+        box.appendChild(group);
+      });
+
+      // 分类全选
+      box.querySelectorAll('.cat-all').forEach(cb => {
+        cb.addEventListener('change', () => {
+          const cat = cb.dataset.cat;
+          const checked = cb.checked;
+          box.querySelectorAll(`.store-item[data-cat="${cat}"] input`).forEach(i => {
+            i.checked = checked;
+            if (checked) selected.add(i.value); else selected.delete(i.value);
+          });
+          syncUI();
+        });
+      });
+
+      // 单个店铺
+      box.querySelectorAll('.store-item input').forEach(i => {
+        i.addEventListener('change', () => {
+          if (i.checked) selected.add(i.value); else selected.delete(i.value);
+          i.closest('.store-item').classList.toggle('selected', i.checked);
+          syncUI();
+        });
+      });
+    }
+
+    function syncUI() {
+      $('selCount').textContent = `已选 ${selected.size} 个店铺`;
+      $('btnExport').disabled = selected.size === 0;
+      // 更新分类全选状态
+      const box = $('storeList');
+      box.querySelectorAll('.cat-all').forEach(cb => {
+        const cat = cb.dataset.cat;
+        const inputs = box.querySelectorAll(`.store-item[data-cat="${cat}"] input`);
+        cb.checked = inputs.length > 0 && [...inputs].every(i => i.checked);
+        cb.indeterminate = !cb.checked && [...inputs].some(i => i.checked);
+      });
+    }
+
+    async function loadStores() {
+      try {
+        const r = await fetch('/api/stores');
+        stores = await r.json();
+        renderStores();
+        syncUI();
+      } catch (e) {
+        $('storeList').textContent = '加载店铺失败，请确认服务已启动。';
+      }
+    }
+
+    // ---------- 导出 ----------
+    function log(msg, cls) {
+      const el = $('log');
+      const line = document.createElement('div');
+      if (cls) line.className = cls;
+      line.textContent = msg;
+      el.appendChild(line);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    async function doExport() {
+      const btn = $('btnExport');
+      btn.disabled = true;
+      $('log').innerHTML = '';
+      log('开始导出，共 ' + selected.size + ' 个店铺…', 'info');
+      try {
+        const resp = await fetch('/api/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ shopIds: [...selected] }),
+        });
+        const text = await resp.text();
+        text.split('\n').forEach(l => {
+          if (!l) return;
+          const cls = l.includes('✕') || l.includes('失败') ? 'err' : (l.includes('完成') ? 'info' : 'ok');
+          log(l, cls);
+        });
+      } catch (e) {
+        log('导出请求失败：' + e.message, 'err');
+      } finally {
+        syncUI();
+      }
+    }
+
+    // ---------- 事件绑定 ----------
+    $('btnRefresh').addEventListener('click', refreshStatus);
+    $('btnExport').addEventListener('click', doExport);
+    $('btnClearAll').addEventListener('click', () => {
+      selected.clear();
+      $('storeList').querySelectorAll('.store-item').forEach(el => {
+        el.classList.remove('selected');
+        el.querySelector('input').checked = false;
+      });
+      syncUI();
+    });
+
+    // 每 15 秒自动刷新一次登录状态
+    refreshStatus();
+    loadStores();
+    setInterval(refreshStatus, 15000);
+  </script>
+</body>
+</html>
