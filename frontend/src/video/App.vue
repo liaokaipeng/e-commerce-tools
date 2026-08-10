@@ -33,10 +33,10 @@ function shopNameOf(id) {
   return s ? s.name : '';
 }
 const shopName = computed(() => shopNameOf(shopId.value));
-const shopOptions = computed(() => cnShops.value.map((s) => ({
-  value: s.shopId,
-  label: shopNameOf(s.shopId) ? `${shopNameOf(s.shopId)}（${s.shopId}）` : `店铺 ${s.shopId}`,
-})));
+const shopOptions = computed(() => cnShops.value.map((s) => {
+  const base = shopNameOf(s.shopId) ? `${shopNameOf(s.shopId)}（${s.shopId}）` : `店铺 ${s.shopId}`;
+  return { value: s.shopId, label: s.hasCred ? base : `${base}（无凭证，需上传一次）` };
+}));
 function applyShop(id) {
   const s = cnShops.value.find((x) => x.shopId === String(id));
   if (!s) return;
@@ -45,6 +45,9 @@ function applyShop(id) {
   shopId.value = s.shopId;
   userid.value = s.userid || '';
   saveCreds();
+  if (!s.hasCred) {
+    ElMessage.warning(`店铺 ${s.shopId} 暂无有效凭证，请登录该店铺短视频页手动上传一次以抓取凭证`);
+  }
 }
 
 function saveCreds() {
@@ -56,6 +59,15 @@ function saveCreds() {
 function loadLocalCreds() {
   let c = {};
   try { c = JSON.parse(localStorage.getItem(`shopee_creds_${site.value}`) || '{}'); } catch (e) { c = {}; }
+  // 跨境 cn 多店铺：不预选、不预填，由用户手动选择店铺后再填入凭证
+  if (!isPh.value) {
+    auth.value = '';
+    cookie.value = '';
+    shopId.value = '';
+    userid.value = '';
+    selectedShopId.value = '';
+    return;
+  }
   auth.value = c.auth || '';
   cookie.value = c.cookie || '';
   shopId.value = c.shopId || '';
@@ -94,28 +106,34 @@ async function loadCredsFromServer(quiet) {
       }
     } else {
       const shopsMap = (sites.cn && sites.cn.shops) || {};
+      // 保留服务端全部已知店铺，无凭证的也展示（标注），避免店铺“悄悄消失”
       const list = Object.entries(shopsMap)
-        .map(([id, v]) => ({
-          shopId: id,
-          auth: (v && v.auth) || '',
-          cookie: (v && v.cookie) || '',
-          userid: (v && v.userid) || '',
-          updatedAt: (v && v.updatedAt) || 0,
-        }))
-        .filter((x) => x.cookie || x.auth);
+        .map(([id, v]) => {
+          const auth = (v && v.auth) || '';
+          const cookie = (v && v.cookie) || '';
+          return {
+            shopId: id,
+            auth,
+            cookie,
+            userid: (v && v.userid) || '',
+            updatedAt: (v && v.updatedAt) || 0,
+            hasCred: !!(auth || cookie),
+          };
+        })
+        .sort((a, b) => Number(b.hasCred) - Number(a.hasCred));
       cnShops.value = list;
       if (list.length) {
         const cur = selectedShopId.value && list.find((x) => x.shopId === selectedShopId.value);
-        if (!cur) {
-          selectedShopId.value = list[0].shopId;
-          applyShop(list[0].shopId);
-        } else {
+        if (cur) {
           setValIfNotFocused('auth', cur.auth);
           setValIfNotFocused('cookie', cur.cookie);
           setValIfNotFocused('shopId', cur.shopId);
           setValIfNotFocused('userid', cur.userid);
         }
-        credsStatus.value = `已获取「${siteLabel()}」${list.length} 个店铺凭证，请在上方选择店铺`;
+        const credCount = list.filter((x) => x.hasCred).length;
+        const noCredCount = list.length - credCount;
+        credsStatus.value = `已识别「${siteLabel()}」${list.length} 家店铺，其中 ${credCount} 家有凭证`
+          + (noCredCount ? `，${noCredCount} 家暂无凭证（需重新上传）` : '') + '；请在上方选择店铺';
         if (!quiet) saveCreds();
       } else {
         credsStatus.value = '尚未抓取到「' + siteLabel() + '」凭证，请安装扩展并分别登录各店铺短视频页手动上传一次';

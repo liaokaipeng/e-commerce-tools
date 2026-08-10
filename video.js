@@ -145,7 +145,12 @@ async function refreshAuthToken(cookie, shopId) {
     const jwt = text.match(/eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}/);
     if (jwt) token = 'NTAwMDcyMjU6' + jwt[0];
   }
-  return { token, resp };
+  // 解析授权状态，用于区分「Cookie 失效」与「店铺短视频上传授权被拒」两类失败
+  const data = (resp.json && resp.json.data) || {};
+  const manual = data.manual || {};
+  const automatic = data.automatic || {};
+  const authStatus = manual.authorization_status || automatic.authorization_status || '';
+  return { token, resp, site: data.site || '', authStatus };
 }
 
 function md5hex(buf) { return crypto.createHash('md5').update(buf).digest('hex'); }
@@ -441,6 +446,7 @@ async function uploadOneCn(row, creds, site, log) {
   const wholeEtag = etagOf(fileBuf);
   const videoSizeKB = Math.round(fsize / 1024);
 
+  let authFail = null; // 记录 token 刷新失败时的授权诊断信息
   if (cookie && shopId) {
     log('auth', '刷新上传凭证(token)...');
     try {
@@ -450,6 +456,7 @@ async function uploadOneCn(row, creds, site, log) {
         setCnShop(shopId, { auth });
         log('auth', `token 刷新成功: ${auth.slice(0, 26)}...`);
       } else {
+        authFail = fr;
         log('auth', `token 刷新失败(HTTP ${fr.resp.status})，回退使用现有 Authorization。响应: ${fr.resp.text.slice(0, 200)}`);
       }
     } catch (e) {
@@ -473,6 +480,9 @@ async function uploadOneCn(row, creds, site, log) {
   log('preupload', `vid=${vid} downDomain=${downDomain || '(空)'} bucket=${bucket}`);
 
   if (!auth) {
+    if (authFail && authFail.authStatus === 'Rejected') {
+      throw new Error(`店铺(Shop ID ${shopId})在站点 ${authFail.site || '跨境(.cn)'} 的短视频上传授权状态为「已拒绝(Rejected)」，无法获取上传凭证。这通常发生在店铺切换国家/站点后，需在卖家中心重新完成短视频上传授权：登录卖家中心，打开「短视频上传」页面手动上传一次视频，让扩展抓取最新 Cookie 后再试。`);
+    }
     throw new Error('未获取到有效的 Authorization（上传凭证）。自动刷新 token 失败，很可能是 Cookie 已失效。请重新登录卖家中心，打开「短视频上传」页面手动上传一次视频，让扩展抓取最新 Cookie 后再试。');
   }
 
