@@ -49,9 +49,11 @@ const SITES = {
 
 // ------- 自动凭证存储（浏览器扩展推送，网页读取） -------
 // 出站请求统一走 lib/http 的 request（useJar=true 由 lib 内部按 host 维护分片会话 Cookie 罐）。
-// 凭证按站点区分：storedCreds[site] = { auth, cookie, shopId, userid, updatedAt }
+// 跨境 cn 支持多店铺：storedCreds.cn = { shops: { [shopId]: { auth, cookie, userid, updatedAt } } }
+// 本土 ph 保持单店铺：storedCreds.ph = { auth, cookie, shopId, userid, updatedAt }
 const CREDS_FILE = path.join(__dirname, 'video-session.json');
-let storedCreds = {}; // site -> { auth, cookie, shopId, userid, updatedAt }
+let storedCreds = {}; // site -> creds
+
 function loadCredsFile() {
   let raw = {};
   try {
@@ -60,15 +62,23 @@ function loadCredsFile() {
     console.warn('读取视频凭证文件失败:', e.message);
     return;
   }
-  // 兼容旧格式：顶层 {auth,cookie,shopId} 视为跨境 cn
+  // 兼容旧格式：顶层 {auth,cookie,shopId} 视为跨境 cn → 归入 shops
   if (raw.auth || raw.cookie || raw.shopId) {
-    storedCreds.cn = {
-      auth: raw.auth || '', cookie: raw.cookie || '', shopId: raw.shopId || '',
-      userid: raw.userid || '', updatedAt: raw.updatedAt || 0,
-    };
+    const flat = { auth: raw.auth || '', cookie: raw.cookie || '', shopId: raw.shopId || '', userid: raw.userid || '', updatedAt: raw.updatedAt || 0 };
+    if (flat.shopId) storedCreds.cn = { shops: { [String(flat.shopId)]: flat } };
   }
   for (const s of Object.keys(SITES)) {
-    if (raw[s] && (raw[s].cookie || raw[s].auth || raw[s].shopId)) storedCreds[s] = raw[s];
+    const v = raw[s];
+    if (!v || typeof v !== 'object') continue;
+    if (s === 'cn') {
+      if (v.shops && typeof v.shops === 'object') storedCreds.cn = { shops: v.shops };
+      else if (v.cookie || v.auth || v.shopId) {
+        const flat = { auth: v.auth || '', cookie: v.cookie || '', shopId: v.shopId || '', userid: v.userid || '', updatedAt: v.updatedAt || 0 };
+        if (flat.shopId) storedCreds.cn = { shops: { [String(flat.shopId)]: flat } };
+      }
+    } else if (v.cookie || v.auth || v.shopId || v.userid) {
+      storedCreds[s] = v;
+    }
   }
 }
 function saveCredsFile() {
@@ -80,6 +90,20 @@ function getCreds(site) {
 }
 function setCredsFor(site, patch) {
   storedCreds[site] = Object.assign(getCreds(site), patch, { updatedAt: Date.now() });
+  saveCredsFile();
+}
+// 跨境 cn 多店铺存取
+function cnShops() {
+  return (storedCreds.cn && storedCreds.cn.shops) || {};
+}
+function getCnShop(shopId) {
+  return cnShops()[String(shopId)] || { auth: '', cookie: '', userid: '' };
+}
+function setCnShop(shopId, patch) {
+  const id = String(shopId);
+  const shops = cnShops();
+  shops[id] = Object.assign(getCnShop(id), patch, { updatedAt: Date.now() });
+  storedCreds.cn = Object.assign(storedCreds.cn || {}, { shops });
   saveCredsFile();
 }
 loadCredsFile();
@@ -423,7 +447,7 @@ async function uploadOneCn(row, creds, site, log) {
       const fr = await refreshAuthToken(cookie, shopId);
       if (fr.token) {
         auth = fr.token;
-        setCredsFor(site, { auth });
+        setCnShop(shopId, { auth });
         log('auth', `token 刷新成功: ${auth.slice(0, 26)}...`);
       } else {
         log('auth', `token 刷新失败(HTTP ${fr.resp.status})，回退使用现有 Authorization。响应: ${fr.resp.text.slice(0, 200)}`);
@@ -447,6 +471,10 @@ async function uploadOneCn(row, creds, site, log) {
   const downDomain = (svc.domain || '').replace(/\/+$/, '');
   const bucket = svc.bucket || String(BIZ);
   log('preupload', `vid=${vid} downDomain=${downDomain || '(空)'} bucket=${bucket}`);
+
+  if (!auth) {
+    throw new Error('未获取到有效的 Authorization（上传凭证）。自动刷新 token 失败，很可能是 Cookie 已失效。请重新登录卖家中心，打开「短视频上传」页面手动上传一次视频，让扩展抓取最新 Cookie 后再试。');
+  }
 
   const totalChunks = Math.max(1, Math.ceil(fsize / CHUNK_SIZE));
   const fids = [];
@@ -813,23 +841,51 @@ function register({ get, post }) {
         const p = JSON.parse(body);
         // 扩展单条推送：{ site, auth, cookie, shopId, userid }
         if (p.site && SITES[p.site]) {
-          const patch = {};
-          if (p.auth && p.auth.startsWith('NTAw')) patch.auth = p.auth;
-          if (p.cookie && p.cookie.length > 80) patch.cookie = p.cookie;
-          if (p.shopId) patch.shopId = String(p.shopId);
-          if (p.userid) patch.userid = String(p.userid);
-          setCredsFor(p.site, patch);
+          if (p.site === 'cn' && p.shopId) {
+            const patch = {};
+            if (p.auth && p.auth.startsWith('NTAw')) patch.auth = p.auth;
+            if (p.cookie && p.cookie.length > 80) patch.cookie = p.cookie;
+            if (p.userid) patch.userid = String(p.userid);
+            setCnShop(p.shopId, patch);
+          } else {
+            const patch = {};
+            if (p.auth && p.auth.startsWith('NTAw')) patch.auth = p.auth;
+            if (p.cookie && p.cookie.length > 80) patch.cookie = p.cookie;
+            if (p.shopId) patch.shopId = String(p.shopId);
+            if (p.userid) patch.userid = String(p.userid);
+            setCredsFor(p.site, patch);
+          }
         }
-        // 扩展批量推送：{ sites: { cn: {...}, ph: {...} } }
+        // 扩展批量推送：{ sites: { cn: { shops: {...} }, ph: {...} } }
         if (p.sites && typeof p.sites === 'object') {
           for (const [s, v] of Object.entries(p.sites)) {
-            if (!SITES[s]) continue;
-            const patch = {};
-            if (v.auth && v.auth.startsWith('NTAw')) patch.auth = v.auth;
-            if (v.cookie && v.cookie.length > 80) patch.cookie = v.cookie;
-            if (v.shopId) patch.shopId = String(v.shopId);
-            if (v.userid) patch.userid = String(v.userid);
-            setCredsFor(s, patch);
+            if (!SITES[s] || !v || typeof v !== 'object') continue;
+            if (s === 'cn') {
+              if (v.shops && typeof v.shops === 'object') {
+                for (const [shopId, sv] of Object.entries(v.shops)) {
+                  if (!sv || typeof sv !== 'object') continue;
+                  const patch = {};
+                  if (sv.auth && sv.auth.startsWith('NTAw')) patch.auth = sv.auth;
+                  if (sv.cookie && sv.cookie.length > 80) patch.cookie = sv.cookie;
+                  if (sv.userid) patch.userid = String(sv.userid);
+                  setCnShop(shopId, patch);
+                }
+              } else if (v.shopId) {
+                // 兼容旧扁平批量格式：{ cn: { auth, cookie, shopId, userid } } → 归入该店铺
+                const patch = {};
+                if (v.auth && v.auth.startsWith('NTAw')) patch.auth = v.auth;
+                if (v.cookie && v.cookie.length > 80) patch.cookie = v.cookie;
+                if (v.userid) patch.userid = String(v.userid);
+                setCnShop(v.shopId, patch);
+              }
+            } else {
+              const patch = {};
+              if (v.auth && v.auth.startsWith('NTAw')) patch.auth = v.auth;
+              if (v.cookie && v.cookie.length > 80) patch.cookie = v.cookie;
+              if (v.shopId) patch.shopId = String(v.shopId);
+              if (v.userid) patch.userid = String(v.userid);
+              setCredsFor(s, patch);
+            }
           }
         }
       } catch (e) { /* ignore */ }
@@ -853,13 +909,25 @@ function register({ get, post }) {
       if (!Array.isArray(rows) || !rows.length) {
         res.writeHead(400); res.end('缺少 rows'); return;
       }
-      // 优先用前端传入的凭证，其次用本机已存储的该站点凭证
-      const creds = {
-        auth: auth || getCreds(siteKey).auth,
-        cookie: cookie || getCreds(siteKey).cookie,
-        shopId: shopId || getCreds(siteKey).shopId,
-        userid: userid || getCreds(siteKey).userid || '',
-      };
+      // 优先用前端传入的凭证，其次用本机已存储的该站点凭证。
+      // 跨境 cn 支持多店铺：按 shopId 取对应店铺存根。
+      let creds;
+      if (siteKey === 'cn' && shopId) {
+        const shop = getCnShop(shopId);
+        creds = {
+          auth: auth || shop.auth,
+          cookie: cookie || shop.cookie,
+          shopId: String(shopId),
+          userid: userid || shop.userid || '',
+        };
+      } else {
+        creds = {
+          auth: auth || getCreds(siteKey).auth,
+          cookie: cookie || getCreds(siteKey).cookie,
+          shopId: shopId || getCreds(siteKey).shopId,
+          userid: userid || getCreds(siteKey).userid || '',
+        };
+      }
       const jobId = crypto.randomBytes(8).toString('hex');
       clients.set(jobId, new Set());
       res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -22,14 +22,30 @@ const userid = ref('');
 const credsStatus = ref('');
 const refreshingCreds = ref(false);
 
+// 跨境 cn 多店铺：有凭证的店铺列表与当前选中店铺
+const cnShops = ref([]); // [{ shopId, auth, cookie, userid, updatedAt }]
+const selectedShopId = ref('');
+
 // 店铺列表（复用 stores.json，用于把 shopId 展示成店名，参考竞价导出）
 const stores = ref([]);
-const shopName = computed(() => {
-  const id = shopId.value.trim();
-  if (!id) return '';
-  const s = stores.value.find((x) => String(x.id) === id);
+function shopNameOf(id) {
+  const s = stores.value.find((x) => String(x.id) === String(id));
   return s ? s.name : '';
-});
+}
+const shopName = computed(() => shopNameOf(shopId.value));
+const shopOptions = computed(() => cnShops.value.map((s) => ({
+  value: s.shopId,
+  label: shopNameOf(s.shopId) ? `${shopNameOf(s.shopId)}（${s.shopId}）` : `店铺 ${s.shopId}`,
+})));
+function applyShop(id) {
+  const s = cnShops.value.find((x) => x.shopId === String(id));
+  if (!s) return;
+  auth.value = s.auth || '';
+  cookie.value = s.cookie || '';
+  shopId.value = s.shopId;
+  userid.value = s.userid || '';
+  saveCreds();
+}
 
 function saveCreds() {
   localStorage.setItem(`shopee_creds_${site.value}`, JSON.stringify({
@@ -44,6 +60,7 @@ function loadLocalCreds() {
   cookie.value = c.cookie || '';
   shopId.value = c.shopId || '';
   userid.value = c.userid || '';
+  selectedShopId.value = c.shopId || '';
 }
 
 function setValIfNotFocused(id, v) {
@@ -61,17 +78,48 @@ async function loadCredsFromServer(quiet) {
   try {
     const r = await fetch('/api/creds');
     const c = await r.json();
-    const cur = (c && c.sites && c.sites[site.value]) || null;
-    if (cur && (cur.auth || cur.cookie || cur.shopId || cur.userid)) {
-      setValIfNotFocused('auth', cur.auth);
-      setValIfNotFocused('cookie', cur.cookie);
-      setValIfNotFocused('shopId', cur.shopId);
-      setValIfNotFocused('userid', cur.userid);
-      const t = cur.updatedAt ? new Date(cur.updatedAt).toLocaleString() : '';
-      credsStatus.value = '已自动获取「' + siteLabel() + '」凭证' + (t ? '（' + t + '）' : '');
-      if (!quiet) saveCreds();
+    const sites = (c && c.sites) || {};
+    if (isPh.value) {
+      const cur = sites.ph || null;
+      if (cur && (cur.auth || cur.cookie || cur.shopId || cur.userid)) {
+        setValIfNotFocused('auth', cur.auth);
+        setValIfNotFocused('cookie', cur.cookie);
+        setValIfNotFocused('shopId', cur.shopId);
+        setValIfNotFocused('userid', cur.userid);
+        const t = cur.updatedAt ? new Date(cur.updatedAt).toLocaleString() : '';
+        credsStatus.value = '已自动获取「' + siteLabel() + '」凭证' + (t ? '（' + t + '）' : '');
+        if (!quiet) saveCreds();
+      } else {
+        credsStatus.value = '尚未抓取到「' + siteLabel() + '」凭证，请安装扩展并在该站点短视频页手动上传一次';
+      }
     } else {
-      credsStatus.value = '尚未抓取到「' + siteLabel() + '」凭证，请安装扩展并在该站点短视频页手动上传一次';
+      const shopsMap = (sites.cn && sites.cn.shops) || {};
+      const list = Object.entries(shopsMap)
+        .map(([id, v]) => ({
+          shopId: id,
+          auth: (v && v.auth) || '',
+          cookie: (v && v.cookie) || '',
+          userid: (v && v.userid) || '',
+          updatedAt: (v && v.updatedAt) || 0,
+        }))
+        .filter((x) => x.cookie || x.auth);
+      cnShops.value = list;
+      if (list.length) {
+        const cur = selectedShopId.value && list.find((x) => x.shopId === selectedShopId.value);
+        if (!cur) {
+          selectedShopId.value = list[0].shopId;
+          applyShop(list[0].shopId);
+        } else {
+          setValIfNotFocused('auth', cur.auth);
+          setValIfNotFocused('cookie', cur.cookie);
+          setValIfNotFocused('shopId', cur.shopId);
+          setValIfNotFocused('userid', cur.userid);
+        }
+        credsStatus.value = `已获取「${siteLabel()}」${list.length} 个店铺凭证，请在上方选择店铺`;
+        if (!quiet) saveCreds();
+      } else {
+        credsStatus.value = '尚未抓取到「' + siteLabel() + '」凭证，请安装扩展并分别登录各店铺短视频页手动上传一次';
+      }
     }
   } catch (e) {
     /* 服务未启动忽略 */
@@ -378,6 +426,13 @@ onMounted(() => {
               </el-select>
             </div>
             <div v-if="!isPh" class="row" style="margin-top: 8px">
+              <span class="site-label">选择店铺</span>
+              <el-select v-model="selectedShopId" style="min-width: 280px" placeholder="选择有凭证的店铺" @change="applyShop">
+                <el-option v-for="o in shopOptions" :key="o.value" :value="o.value" :label="o.label" />
+              </el-select>
+              <span class="hint" style="margin: 0 0 0 8px; align-self: center">每个店铺需分别登录并手动上传一次以抓取凭证</span>
+            </div>
+            <div v-if="!isPh" class="row" style="margin-top: 8px">
               <el-input id="auth" v-model="auth" placeholder="可留空，自动获取">
                 <template #label>Authorization（跨境分片上传用，可留空，服务端自动获取）</template>
               </el-input>
@@ -404,8 +459,9 @@ onMounted(() => {
             </div>
             <div class="hint">
               选择站点后，安装「凭证抓取」浏览器扩展，并登录对应站点卖家中心，在短视频上传页手动上传一次视频，扩展会自动抓取该站点的
-              Cookie 与 User ID 并填入。Authorization 时效很短，无需手动抓取——服务端上传前会自动换取。切换站点会自动切换对应凭证。Cookie
-              失效时（上传报 token is expired）重新登录并在短视频页上传一次即可。若 User ID 未自动抓到，请手动填写：打开短视频上传页按
+              Cookie 与 User ID 并填入。跨境（.cn）支持多店铺：切换店铺并各手动上传一次，即可在上方「选择店铺」中挑选对应店铺上传。
+              Authorization 时效很短，无需手动抓取——服务端上传前会自动换取。切换站点会自动切换对应凭证。Cookie
+              失效时（上传报 token is expired 或 Authorization can't be empty）重新登录并在短视频页上传一次即可。若 User ID 未自动抓到，请手动填写：打开短视频上传页按
               F12 → Network → 筛选 <b>report/add</b> → 点请求看 Payload 里的 <b>userId=后面那串数字</b>。
             </div>
           </el-collapse-item>

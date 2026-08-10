@@ -1,9 +1,10 @@
 // KP工具合集助手 - 后台服务（视频上传凭证抓取）
-// 监听 Shopee 请求，自动抓取 Authorization/Cookie/ShopID 并推送到本地工具 http://localhost:8765/api/creds
+// 监听 Shopee 请求，自动抓取 Authorization/Cookie/ShopID/UserId 并推送到本地工具 http://localhost:8765/api/creds
 // 凭证按站点区分：跨境 shopee.cn 与本土各 shopee.{cc}（如菲律宾 shopee.ph）。
+// 跨境 cn 支持多店铺：每个店铺（shopId）独立保存 cookie/auth。切换店铺后手动上传一次即可新增/更新该店铺凭证。
 // 凭证缓存到 chrome.storage.local，本地服务未启动时抓取的凭证不会丢失，下次抓到新请求时自动补推。
 const LOCAL = 'http://localhost:8765/api/creds';
-const credsBySite = {}; // site -> { auth, cookie, shopId }
+const credsBySite = {}; // site -> { shops: { [shopId]: {auth,cookie,userid,updatedAt} }, curShopId, pending }
 let pushing = false;
 
 // 从请求 URL 识别站点：shopee.{cc} 的后缀。海岛默认忽略路由域名 seller.shopee.sg。
@@ -15,9 +16,36 @@ function detectSite(url) {
   return cc; // cn / ph / my / ...
 }
 
+// 确保站点对象存在，返回它
+function siteObj(site) {
+  if (!credsBySite[site]) credsBySite[site] = { shops: {}, curShopId: null, pending: null };
+  return credsBySite[site];
+}
+// 获取（必要时创建）某店铺凭证对象
+function shopObj(site, shopId) {
+  const c = siteObj(site);
+  const id = String(shopId);
+  if (!c.shops[id]) c.shops[id] = { auth: '', cookie: '', userid: '', updatedAt: 0 };
+  return c.shops[id];
+}
+
 // 启动时恢复上次缓存的凭证（auth 时效短，主要靠 cookie 长效；cookie 由服务端自动换新 token）
 chrome.storage.local.get('credsBySite', (r) => {
-  if (r && r.credsBySite) Object.assign(credsBySite, r.credsBySite);
+  if (r && r.credsBySite) {
+    for (const [site, c] of Object.entries(r.credsBySite)) {
+      if (!c || typeof c !== 'object') continue;
+      if (c.shopId && !c.shops) {
+        // 旧扁平格式 { auth, cookie, shopId, userid } → 迁移到 shops
+        credsBySite[site] = {
+          shops: { [String(c.shopId)]: { auth: c.auth || '', cookie: c.cookie || '', userid: c.userid || '', updatedAt: c.updatedAt || 0 } },
+          curShopId: String(c.shopId),
+          pending: null,
+        };
+      } else {
+        credsBySite[site] = c;
+      }
+    }
+  }
 });
 
 function persist() {
@@ -26,10 +54,15 @@ function persist() {
 
 function push() {
   if (pushing) return;
-  const entries = Object.entries(credsBySite).filter(([, c]) => c.cookie || c.auth || c.shopId);
-  if (!entries.length) return;
+  const sites = {};
+  for (const [site, c] of Object.entries(credsBySite)) {
+    const shops = c.shops || {};
+    const entries = Object.entries(shops).filter(([, s]) => s && (s.cookie || s.auth || s.userid));
+    if (!entries.length) continue;
+    sites[site] = { shops: Object.fromEntries(entries) };
+  }
+  if (!Object.keys(sites).length) return;
   pushing = true;
-  const sites = Object.fromEntries(entries);
   fetch(LOCAL, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -52,31 +85,47 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
       if (!site) return;
       const onSol = /solutions\.shopee\.cn|creator\.shopee\.|mms\.shopee\./i.test(u); // 卖家/创作者后台 → 取 Cookie / shop_id
       const hs = d.requestHeaders || [];
-      let changed = false;
-      if (!credsBySite[site]) credsBySite[site] = { auth: '', cookie: '', shopId: '' };
-      const creds = credsBySite[site];
+      const c = siteObj(site);
+      let auth = '', cookie = '';
       for (const h of hs) {
         const n = (h.name || '').toLowerCase();
         const v = h.value || '';
         // Authorization：跨境 VOD 上传 token，形如 NTAwMDcyMjU6...
-        if (n === 'authorization' && v.startsWith('NTAw') && v !== creds.auth) {
-          creds.auth = v; changed = true;
-        }
+        if (n === 'authorization' && v.startsWith('NTAw')) auth = v;
         // Cookie：只从卖家/创作者后台域抓取，优先含 video_upload_session_id 的（更完整）
-        if (n === 'cookie' && onSol && v.length > 80) {
-          if ((v.includes('video_upload_session_id') || !creds.cookie) && v !== creds.cookie) {
-            creds.cookie = v; changed = true;
-          }
-        }
+        if (n === 'cookie' && onSol && v.length > 80) cookie = v;
       }
-      // shop_id：从 item/list 的 URL 参数取（跨境）
+      // shop_id：从 item/list 的 URL 参数取（跨境），并据此确定当前店铺
+      let shopId = null;
       if (onSol && /item\/list/.test(u)) {
         const m = u.match(/[?&]shop_id=(\d+)/);
-        if (m && m[1] !== creds.shopId) { creds.shopId = m[1]; changed = true; }
+        if (m) shopId = m[1];
       }
-      if (changed) {
-        persist();
-        push();
+      let target = null;
+      if (shopId) {
+        c.curShopId = String(shopId);
+        target = shopObj(site, shopId);
+        if (c.pending) { Object.assign(target, c.pending); c.pending = null; }
+      } else if (c.curShopId) {
+        target = shopObj(site, c.curShopId);
+      } else if (auth || cookie) {
+        // 尚不知当前店铺，先缓存待定，待 shop_id 出现时归入对应店铺
+        if (!c.pending) c.pending = {};
+        if (auth) c.pending.auth = auth;
+        if (cookie && (cookie.includes('video_upload_session_id') || !c.pending.cookie)) c.pending.cookie = cookie;
+        target = null;
+      }
+      if (target) {
+        let changed = false;
+        if (auth && auth !== target.auth) { target.auth = auth; changed = true; }
+        if (cookie && (cookie.includes('video_upload_session_id') || !target.cookie) && cookie !== target.cookie) {
+          target.cookie = cookie; changed = true;
+        }
+        if (changed) {
+          target.updatedAt = Date.now();
+          persist();
+          push();
+        }
       }
     } catch (e) { /* ignore */ }
   },
@@ -107,9 +156,11 @@ chrome.webRequest.onBeforeRequest.addListener(
       }
       const m = text.match(/userId=(\d+)/) || text.match(/"userId":\s*"?(\d+)/);
       if (m && m[1]) {
-        if (!credsBySite[site]) credsBySite[site] = { auth: '', cookie: '', shopId: '', userid: '' };
-        if (credsBySite[site].userid !== m[1]) {
-          credsBySite[site].userid = m[1];
+        const c = siteObj(site);
+        let target = c.pending || (c.pending = {});
+        if (c.curShopId) target = shopObj(site, c.curShopId);
+        if (target.userid !== m[1]) {
+          target.userid = m[1];
           persist();
           push();
         }
