@@ -33,7 +33,6 @@ async function refreshStatus(manual = false) {
     refreshing.value = false;
     if (manual) {
       flash.value = false;
-      void 0;
       flash.value = true;
     }
   }
@@ -243,10 +242,6 @@ onUnmounted(() => {
 
 <template>
   <div class="page">
-    <div class="header">
-      <h1>Shopee 竞价导出工具</h1>
-      <p>按「分类 / 店铺简称 / 店铺 ID」选择店铺，一键导出获胜竞价数据到 Excel</p>
-    </div>
     <div class="container">
 
       <el-card shadow="never" class="card">
@@ -335,13 +330,6 @@ onUnmounted(() => {
   padding: 28px 20px 0;
   box-sizing: border-box;
 }
-.header {
-  max-width: 900px;
-  margin: 0 auto;
-  padding-bottom: 20px;
-}
-.header h1 { font-size: 22px; font-weight: 700; color: #1f2330; margin: 0; }
-.header p { font-size: 13px; color: #6b7280; margin: 4px 0 0; }
 .container { max-width: 900px; margin: 0 auto; padding-bottom: 60px; }
 .card { margin-bottom: 18px; border-radius: 14px; }
 .status-bar {

@@ -247,11 +247,6 @@ onMounted(() => {
 
 <template>
   <div class="page">
-    <div class="header">
-      <h1>TikTok 无水印视频批量下载工具</h1>
-      <p>支持批量输入多个视频链接 · 以视频 ID 命名 · 自动跳过失效链接</p>
-    </div>
-
     <div class="container">
       <el-alert :class="proxyConnected ? 'proxy-on' : 'proxy-off'" :closable="false" type="info" show-icon>
         <template #title>
@@ -269,9 +264,7 @@ onMounted(() => {
       </el-alert>
 
       <el-card shadow="never" class="card">
-        <template #header>
-          <span class="step-num">1</span> 输入 TikTok 视频链接
-        </template>
+        <template #header>① 输入 TikTok 视频链接</template>
         <el-input
           v-model="urls"
           type="textarea"
@@ -282,9 +275,7 @@ onMounted(() => {
       </el-card>
 
       <el-card shadow="never" class="card">
-        <template #header>
-          <span class="step-num">2</span> 选择保存位置
-        </template>
+        <template #header>② 选择保存位置</template>
         <div class="dir-row">
           <el-input v-model="dir" placeholder="例如 D:\videos\tiktok" class="dir-field">
             <template #prepend>保存目录（不存在将自动创建）</template>
@@ -304,9 +295,7 @@ onMounted(() => {
       </el-card>
 
       <el-card shadow="never" class="card">
-        <template #header>
-          <span class="step-num">3</span> 下载日志
-        </template>
+        <template #header>③ 下载日志</template>
         <div v-if="progress.show" class="progress-line">
           进度：{{ progress.done }} / {{ progress.total }}
           <span class="ok">成功 {{ progress.ok }}</span>
@@ -320,8 +309,6 @@ onMounted(() => {
           </div>
         </div>
       </el-card>
-
-      <div class="footer">提示：下载失败的网络错误通常需要开启 VPN 后重试；单个链接失效或受限会自动跳过，不影响其他视频。</div>
     </div>
 
     <DirPicker v-model="dirPickerVisible" @select="(v) => (dir = v)" />
@@ -337,27 +324,8 @@ onMounted(() => {
   padding: 28px 20px 0;
   box-sizing: border-box;
 }
-.header {
-  max-width: 900px;
-  margin: 0 auto;
-  padding-bottom: 20px;
-}
-.header h1 { font-size: 22px; font-weight: 700; color: #1f2330; margin: 0; }
-.header p { font-size: 13px; color: #6b7280; margin: 4px 0 0; }
 .container { max-width: 900px; margin: 0 auto; padding-bottom: 60px; }
 .card { margin-bottom: 20px; border-radius: 14px; }
-.step-num {
-  background: #ee4d2d;
-  color: #fff;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  font-size: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 8px;
-}
 .proxy-on { margin-bottom: 20px; }
 .proxy-off { margin-bottom: 20px; }
 .dot {
@@ -401,10 +369,4 @@ onMounted(() => {
 .log-err { color: #ff7b72; }
 .log-network { color: #ff9d5c; font-weight: 600; }
 .log-title { color: #7d8aff; font-weight: 600; }
-.footer {
-  text-align: center;
-  color: #767b8a;
-  font-size: 12px;
-  padding: 20px 0 30px;
-}
 </style>

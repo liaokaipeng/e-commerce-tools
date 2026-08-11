@@ -433,15 +433,10 @@ onMounted(() => {
 
 <template>
   <div class="wrap">
-    <div class="header">
-      <h1>Shopee 视频批量上传</h1>
-      <p>根据抓包接口还原的本地上传工具 · 视频路径/说明/商品编码存于表格，按行批量上传并关联商品</p>
-    </div>
     <div class="container">
 
     <!-- 凭证 -->
     <el-card shadow="never" class="card">
-      <template #header>
         <el-collapse style="border: none">
           <el-collapse-item title="上传站点与凭证（扩展自动抓取，无需手填）" name="creds">
             <div class="row">
@@ -455,7 +450,6 @@ onMounted(() => {
               <el-select v-model="selectedShopId" style="min-width: 280px" placeholder="选择有凭证的店铺" @change="applyShop">
                 <el-option v-for="o in shopOptions" :key="o.value" :value="o.value" :label="o.label" />
               </el-select>
-              <span class="hint" style="margin: 0 0 0 8px; align-self: center">跨境上传凭证账号级通用，任一店铺手动上传一次即可</span>
             </div>
             <div v-if="!isPh" class="row" style="margin-top: 8px">
               <el-input id="shopId" v-model="shopId" style="max-width: 220px" placeholder="Shop ID">
@@ -473,14 +467,10 @@ onMounted(() => {
               <span class="hint creds-status">{{ credsStatus }}</span>
             </div>
             <div class="hint">
-              选择站点后，安装「KP工具合集助手」浏览器扩展，并登录对应站点卖家中心，在短视频上传页手动上传一次视频，扩展会自动抓取并保存所需凭证（无需手动填写）。
-              跨境（.cn）支持多店铺：上传凭证为账号级通用，在任一店铺手动上传一次后，即可在上方「选择店铺」中挑选同账号下任意店铺上传。
-              凭证失效时（上传报 token is expired 等）重新登录并在短视频页上传一次即可。切换站点会自动切换对应凭证。若本土站点 User ID
-              未自动抓到，请手动填写：打开短视频上传页按 F12 → Network → 筛选 <b>report/add</b> → 点请求看 Payload 里的 <b>userId=后面那串数字</b>。
+              凭证由「KP工具合集助手」扩展自动抓取，无需手填；跨境凭证账号级通用，任一店铺上传一次即可供同账号所有店铺使用。凭证失效（报 token is expired）时重新登录并在短视频页上传一次即可。
             </div>
           </el-collapse-item>
         </el-collapse>
-      </template>
     </el-card>
 
     <!-- 表格 -->
@@ -492,7 +482,7 @@ onMounted(() => {
       <div class="file-row">
         <input ref="fileInput" type="file" accept=".xlsx,.xls" class="file-input" />
         <div class="hint">
-          使用 <b>.xlsx</b> 表格。表头需包含：<b>视频路径</b>（本地文件完整路径）、<b>视频说明</b>（caption）、<b>商品编码</b>（用于查询并关联商品）。如列名不同，可在下方手动映射。
+          表头需包含：<b>视频路径</b>、<b>视频说明</b>、<b>商品编码</b>；如列名不同，可在下方手动映射。
         </div>
       </div>
 
@@ -569,13 +559,6 @@ onMounted(() => {
   padding: 28px 20px 0;
   box-sizing: border-box;
 }
-.header {
-  max-width: 900px;
-  margin: 0 auto;
-  padding-bottom: 20px;
-}
-.header h1 { font-size: 22px; font-weight: 700; color: #1f2330; margin: 0; }
-.header p { font-size: 13px; color: #6b7280; margin: 4px 0 0; }
 .container { max-width: 900px; margin: 0 auto; padding-bottom: 60px; }
 .card { margin-bottom: 18px; border-radius: 14px; }
 .pill { margin-left: 8px; }
