@@ -109,7 +109,29 @@ function setCnShop(shopId, patch) {
 loadCredsFile();
 
 // 统一出站请求：视频上传各步骤依赖跨请求的会话 Cookie，故 useJar=true
-const call = (opts) => request(Object.assign({ useJar: true }, opts));
+// 对网络错误 / 超时 / 5xx 做指数退避重试；4xx 等业务错不重试（避免重复副作用）。
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function call(opts) {
+  const maxAttempts = (opts && opts.retries != null ? opts.retries : 2) + 1;
+  const base = { useJar: true, timeout: 120000 };
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const resp = await request(Object.assign({}, base, opts));
+      if (resp.status >= 500 && resp.status < 600 && attempt < maxAttempts) {
+        await sleep(Math.min(1000 * Math.pow(2, attempt - 1), 8000));
+        continue;
+      }
+      return resp;
+    } catch (e) {
+      if (attempt < maxAttempts) {
+        await sleep(Math.min(1000 * Math.pow(2, attempt - 1), 8000));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error('请求重试后仍失败');
+}
 
 // ------- 店铺列表（复用 stores.json，用于展示 shopId 对应店名，参考竞价导出） -------
 function loadStores() {
@@ -244,7 +266,15 @@ function awsSigV4(o) {
   };
 }
 
-async function preupload(auth) {
+// ------- 公共行校验（cn / ph 共用） -------
+function validateUploadRow(row) {
+  if (!row.path) return '缺少视频路径';
+  if (row.caption && row.caption.length > 250) return '视频说明超过250字符，请精简后再上传';
+  if (row.caption && /tiktok/i.test(row.caption)) return '视频说明不能包含 tiktok 字样';
+  if (!fs.existsSync(row.path)) return `表格中填写的视频文件不存在，请检查路径是否正确: ${row.path}`;
+  return '';
+}
+async function preupload() {
   const resp = await call({
     method: 'POST',
     url: `${MMS}/uploadapi/api/v1/vod/preupload`,
@@ -434,10 +464,8 @@ function probeVideo(buf) {
 async function uploadOneCn(row, creds, site, log) {
   let { auth, cookie, shopId } = creds;
   const filePath = row.path;
-  if (!filePath) throw new Error('缺少视频路径');
-  if (row.caption && row.caption.length > 250) throw new Error('视频说明超过250字符，请精简后再上传');
-  if (row.caption && /tiktok/i.test(row.caption)) throw new Error('视频说明不能包含 tiktok 字样');
-  if (!fs.existsSync(filePath)) throw new Error(`表格中填写的视频文件不存在，请检查路径是否正确: ${filePath}`);
+  const rowErr = validateUploadRow(row);
+  if (rowErr) throw new Error(rowErr);
 
   log('read', `读取文件: ${filePath}`);
   const fileBuf = fs.readFileSync(filePath);
@@ -466,8 +494,16 @@ async function uploadOneCn(row, creds, site, log) {
     log('auth', '缺少 Cookie/ShopId，无法自动刷新 token，使用现有 Authorization');
   }
 
+  // token 刷新失败且无可用 Authorization 时提前报错，避免 preupload 白跑再暴露
+  if (!auth) {
+    if (authFail && authFail.authStatus === 'Rejected') {
+      throw new Error(`店铺(Shop ID ${shopId})在站点 ${authFail.site || '跨境(.cn)'} 的短视频上传授权状态为「已拒绝(Rejected)」，无法获取上传凭证。这通常发生在店铺切换国家/站点后，需在卖家中心重新完成短视频上传授权：登录卖家中心，打开「短视频上传」页面手动上传一次视频，让扩展抓取最新 Cookie 后再试。`);
+    }
+    throw new Error('未获取到有效的 Authorization（上传凭证）。自动刷新 token 失败，很可能是 Cookie 已失效。请重新登录卖家中心，打开「短视频上传」页面手动上传一次视频，让扩展抓取最新 Cookie 后再试。');
+  }
+
   log('preupload', '申请上传...');
-  const pre = await preupload(auth);
+  const pre = await preupload();
   const preData = (pre.json && (pre.json.data || pre.json)) || {};
   const vid = preData.vid;
   if (!vid) {
@@ -478,13 +514,6 @@ async function uploadOneCn(row, creds, site, log) {
   const downDomain = (svc.domain || '').replace(/\/+$/, '');
   const bucket = svc.bucket || String(BIZ);
   log('preupload', `vid=${vid} downDomain=${downDomain || '(空)'} bucket=${bucket}`);
-
-  if (!auth) {
-    if (authFail && authFail.authStatus === 'Rejected') {
-      throw new Error(`店铺(Shop ID ${shopId})在站点 ${authFail.site || '跨境(.cn)'} 的短视频上传授权状态为「已拒绝(Rejected)」，无法获取上传凭证。这通常发生在店铺切换国家/站点后，需在卖家中心重新完成短视频上传授权：登录卖家中心，打开「短视频上传」页面手动上传一次视频，让扩展抓取最新 Cookie 后再试。`);
-    }
-    throw new Error('未获取到有效的 Authorization（上传凭证）。自动刷新 token 失败，很可能是 Cookie 已失效。请重新登录卖家中心，打开「短视频上传」页面手动上传一次视频，让扩展抓取最新 Cookie 后再试。');
-  }
 
   const totalChunks = Math.max(1, Math.ceil(fsize / CHUNK_SIZE));
   const fids = [];
@@ -530,13 +559,23 @@ async function uploadOneCn(row, creds, site, log) {
   let itemId = null;
   if (row.product) {
     log('item', `查询商品编码: ${row.product}`);
+    const isCode = /^\d+$/.test(String(row.product).trim());
     const il = await itemList(row.product, cookie, shopId);
-    const ids = findItemIds(il.json || {});
-    if (ids.length) {
-      itemId = ids[0];
+    const items = (il.json && il.json.data && il.json.data.items) || [];
+    const hit = isCode
+      ? items.find((it) => String(it.item_id ?? it.itemId) === String(row.product).trim())
+      : items[0];
+    if (hit) {
+      itemId = hit.item_id ?? hit.itemId;
       log('item', `匹配到 item_id=${itemId}`);
     } else {
-      log('item', `未匹配到商品，响应: ${il.text.slice(0, 300)}`);
+      const ids = findItemIds(il.json || {});
+      if (ids.length) {
+        itemId = ids[0];
+        log('item', `匹配到 item_id=${itemId}（模糊）`);
+      } else {
+        log('item', `未匹配到商品，响应: ${il.text.slice(0, 300)}`);
+      }
     }
   } else {
     log('item', '未提供商品编码，仅上传视频不关联商品');
@@ -544,6 +583,7 @@ async function uploadOneCn(row, creds, site, log) {
 
   log('create', '创建视频并发布...');
   const meta = probeVideo(fileBuf);
+  if (!meta.width || !meta.height || !meta.duration) log('create', '警告: 未能完整解析视频宽高/时长，将提交解析值');
   log('create', `视频元信息: ${meta.width}x${meta.height}, ${meta.duration}ms`);
   const vc = await videoCreate({
     cookie,
@@ -560,6 +600,10 @@ async function uploadOneCn(row, creds, site, log) {
   if (vc.status !== 200 && vc.status !== 201) {
     throw new Error(`video/create 失败 (${vc.status}): ${vc.text.slice(0, 500)}`);
   }
+  const createCode = vc.json ? (vc.json.errorCode ?? vc.json.code) : null;
+  if (createCode != null && createCode !== 0) {
+    throw new Error(`video/create 业务失败 (errorCode=${createCode}): ${vc.text.slice(0, 500)}`);
+  }
   log('create', '发布成功');
   return { vid, videourl, itemId, response: vc.text.slice(0, 300) };
 }
@@ -572,10 +616,8 @@ async function uploadOnePh(row, creds, site, log) {
   const S = SITES[site];
   const cookie = creds.cookie || '';
   const filePath = row.path;
-  if (!filePath) throw new Error('缺少视频路径');
-  if (row.caption && row.caption.length > 250) throw new Error('视频说明超过250字符，请精简后再上传');
-  if (row.caption && /tiktok/i.test(row.caption)) throw new Error('视频说明不能包含 tiktok 字样');
-  if (!fs.existsSync(filePath)) throw new Error(`表格中填写的视频文件不存在，请检查路径是否正确: ${filePath}`);
+  const rowErr = validateUploadRow(row);
+  if (rowErr) throw new Error(rowErr);
 
   // MMS 上传接口（preupload/reportupload）不带 Cookie：带上会返回跨区 uploaddomain 导致 400
   const mmsH = {
@@ -621,8 +663,9 @@ async function uploadOnePh(row, creds, site, log) {
   const token = pre0.token ? decryptVodToken(pre0.token, S.biz) : '';
   const uploaddomain = (pre0.uploaddomain || '').replace(/\/+$/, '');
   const urlformat = pre0.urlformat || '';
-  if (!vid || !accessKey || !uploaddomain) {
-    throw new Error(`preupload 未返回 vid/access_key/uploaddomain。响应: ${preResp.text.slice(0, 500)}`);
+  const secretKey = pre0.secret_key || '';
+  if (!vid || !accessKey || !secretKey || !token || !uploaddomain) {
+    throw new Error(`preupload 未返回完整凭证(vid/access_key/secret_key/token/uploaddomain)。响应: ${preResp.text.slice(0, 500)}`);
   }
   // 调试：打印 preupload 返回的关键字段（凭证截断），便于核对
   const pre0Debug = Object.assign({}, pre0, { token: token.slice(0, 20) + '...', access_key: accessKey.slice(0, 20) + '...' });
@@ -658,7 +701,7 @@ async function uploadOnePh(row, creds, site, log) {
     extraHeaders: metaHeaders,
     body: fileBuf,
     accessKey,
-    secretKey: pre0.secret_key,
+    secretKey,
     sessionToken: '',
     region: S.region,
     service: 's3',
@@ -667,6 +710,7 @@ async function uploadOnePh(row, creds, site, log) {
   const putResp = await call({
     method: 'PUT',
     url: `${uploaddomain}${objectKey}?x-id=PutObject`,
+    timeout: 300000,
     headers: Object.assign(
       {
         'Content-Type': 'video/mp4',
@@ -743,6 +787,7 @@ async function uploadOnePh(row, creds, site, log) {
 
   // 6. 本地探测视频元信息
   const meta = probeVideo(fileBuf);
+  if (!meta.width || !meta.height || !meta.duration) log('edit', '警告: 未能完整解析视频宽高/时长，将提交解析值');
   log('edit', `视频元信息: ${meta.width}x${meta.height}, ${meta.duration}ms`);
 
   // 7. task/edit 写入标题/商品/元信息
@@ -787,7 +832,10 @@ function broadcast(jobId, data) {
   const set = clients.get(jobId);
   if (!set) return;
   const payload = `data: ${JSON.stringify(data)}\n\n`;
-  for (const res of set) res.write(payload);
+  for (const res of set) {
+    // 连接可能已关闭，避免 write 抛错被误记为上传失败
+    try { if (!res.writableEnded) res.write(payload); } catch (e) { /* 忽略写错误 */ }
+  }
 }
 
 async function processJob(jobId, rows, creds, site, uploadOne) {
@@ -805,6 +853,8 @@ async function processJob(jobId, rows, creds, site, uploadOne) {
     }
   }
   broadcast(jobId, { type: 'finished', total });
+  // 任务结束即清理，防止 clients 长期累积
+  clients.delete(jobId);
 }
 
 // ============ 路由注册 ============
@@ -822,7 +872,10 @@ function register({ get, post }) {
     res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
     req.on('close', () => {
       const set = clients.get(jobId);
-      if (set) set.delete(res);
+      if (set) {
+        set.delete(res);
+        if (!set.size) clients.delete(jobId);
+      }
     });
   });
 

@@ -53,6 +53,8 @@ shopee/
 | bidding.js | `GET /api/status`、`GET /api/stores`、`POST /api/export`、`POST /api/cookie` |
 | video.js | `POST /api/start`、`GET /api/events`（SSE）、`GET/POST /api/creds`、`GET /api/stores` |
 
+视频上传模块内置健壮性处理：出站请求对网络错误 / 超时 / 5xx 自动指数退避重试（最多 3 次，4xx 业务错不重试，避免重复副作用）；凭证缺失或 token 刷新失败会提前给出明确提示；发布（`video/create` / `task/edit` / `task/post`）会校验业务错误码，不再把「HTTP 200 但业务失败」误报为成功；跨境商品匹配对纯数字编码优先作精确匹配。
+
 ## 浏览器扩展
 
 `extension/` 一个扩展同时负责：

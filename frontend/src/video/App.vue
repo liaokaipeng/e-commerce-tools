@@ -319,6 +319,10 @@ const summary = ref('');
 let es = null;
 
 function startUpload() {
+  if (!rows.value.length) {
+    ElMessage.warning('请先解析并导入表格');
+    return;
+  }
   saveCreds();
   const authV = auth.value.trim();
   const cookieV = cookie.value.trim();
