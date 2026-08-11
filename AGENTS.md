@@ -12,8 +12,8 @@
 
 - 后端一律 **CommonJS**（`require`/`module.exports`）；前端用 **Vue3 SFC**。改代码时保持文件原有风格，不混用。
 - 后端依赖仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端仅 `vue` / `element-plus` / `vite`。
-- 视频上传支持多站点（cn 跨境分片+merge / ph 菲律宾单次 PUT+task），凭证按站点存 `video-session.json`；跨境需 Shop ID、菲律宾需 User ID。
-- 扩展「KP工具合集助手」（MV3）负责竞价 Cookie 推送（`/api/cookie`）与视频上传凭证按站点抓取（`/api/creds`）。
+- 视频上传支持多站点（cn 跨境分片+merge / ph 菲律宾单次 PUT+task），凭证按站点存 `video-session.json`；跨境选店铺即可（凭证账号级通用，经 `resolveCnAuth` 统一解析）、菲律宾需 User ID。注意：solutions 接口成功码为 200000（非 0），有 post_id 即发布成功。
+- 扩展「KP工具合集助手」（MV3）负责竞价 Cookie 推送（`/api/cookie`）与视频上传凭证按站点抓取（`/api/creds`）；凭证缓存在 `chrome.storage.local`，抓到新请求时整包重推（故 `video-session.json` 清空后会被自动写回）。页面已不展示 Cookie/Authorization 输入框，凭证全靠扩展自动抓取。
 
 ## 约定与约束
 
@@ -28,5 +28,5 @@
 
 ## 测试
 
-- `node test.js`：冒烟测试（临时端口 8865，验页面与 API 路由，不访问真实站点），全部通过即正常。
+- `node test.js`：冒烟测试（临时端口 8865，验页面与 API 路由，不访问真实站点；session 凭证文件测试前备份、结束后原样恢复），全部通过即正常。
 - 其余无自动化：TikTok 下载 / 竞价导出 / 视频上传按真实流程手测。

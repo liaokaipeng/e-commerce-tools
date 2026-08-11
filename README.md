@@ -33,7 +33,7 @@ shopee/
   video.js          Shopee 视频上传模块（多站点上传链路）
   tiktok.js         TikTok 下载核心模块
   stores.json       竞价店铺列表（分类/名称/ID，可直接增删）
-  test.js           冒烟测试（临时端口 8865）
+  test.js           冒烟测试（临时端口 8865，session 凭证文件原样备份恢复）
   lib/
     http-utils.js   通用 HTTP 工具（sendJson / serveStatic / readBody）
     http.js         统一出站请求封装（按 host 维护 Cookie 罐）
@@ -53,14 +53,16 @@ shopee/
 | bidding.js | `GET /api/status`、`GET /api/stores`、`POST /api/export`、`POST /api/cookie` |
 | video.js | `POST /api/start`、`GET /api/events`（SSE）、`GET/POST /api/creds`、`GET /api/stores` |
 
-视频上传模块内置健壮性处理：出站请求对网络错误 / 超时 / 5xx 自动指数退避重试（最多 3 次，4xx 业务错不重试，避免重复副作用）；凭证缺失或 token 刷新失败会提前给出明确提示；发布（`video/create` / `task/edit` / `task/post`）会校验业务错误码，不再把「HTTP 200 但业务失败」误报为成功；跨境商品匹配对纯数字编码优先作精确匹配。
+视频上传模块内置健壮性处理：出站请求对网络错误 / 超时 / 5xx 自动指数退避重试（最多 3 次，4xx 业务错不重试，避免重复副作用）；发布（`video/create` / `task/edit` / `task/post`）会校验业务错误码，不再把「HTTP 200 但业务失败」误报为成功（solutions 接口成功码为 200000）；跨境商品匹配对纯数字编码优先作精确匹配。
+
+凭证由扩展自动抓取保存，页面无需手填：跨境（.cn）上传凭证为账号级通用（任一店铺手动上传一次即可供同账号所有店铺使用），统一经 `resolveCnAuth` 解析（优先本地已抓凭证中有效期最长者 → 兜底 Cookie 换取 → 报错引导手动上传）。
 
 ## 浏览器扩展
 
 `extension/` 一个扩展同时负责：
 
 - **竞价**：popup 点「发送登录信息到本地工具」→ 推 Cookie 到 `/api/cookie`。
-- **视频上传**：background 监听 `webRequest`，按站点（跨境 .cn / 本土 .ph 等）抓取凭证 → 推 `/api/creds`，存 `video-session.json`。host_permissions 覆盖 `shopee.ph / shopee.sg / shopee.com.my / usercontent.com` 等域。
+- **视频上传**：background 监听 `webRequest`，按站点（跨境 .cn / 本土 .ph 等）抓取凭证 → 推 `/api/creds`，存 `video-session.json`。凭证同时缓存在 `chrome.storage.local`，本地服务未启动时不丢，下次抓到新请求时**整包重推全部站点/店铺**（因此手动清空 `video-session.json` 后一刷新虾皮页面会被自动写回）。host_permissions 覆盖 `shopee.ph / shopee.sg / shopee.com.my / usercontent.com` 等域。
 
 ## 约定
 

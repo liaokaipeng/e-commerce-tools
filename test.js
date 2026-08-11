@@ -53,6 +53,10 @@ async function main() {
   const settingsFile = path.join(__dirname, 'settings.json');
   const settingsBackup = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile) : null;
 
+  // 备份测试前已存在的 session 文件（内含用户真实凭证，测试结束必须原样恢复，不能删除）
+  const sessionFiles = ['bidding-session.json', 'video-session.json'].map((f) => path.join(__dirname, f));
+  const sessionBackups = sessionFiles.map((fp) => (fs.existsSync(fp) ? fs.readFileSync(fp) : null));
+
   try {
     if (!(await waitReady())) {
       console.log('\n服务未能启动，无法执行接口测试。stderr:\n' + childErr);
@@ -146,11 +150,11 @@ async function main() {
     }
   } finally {
     child.kill();
-    // 清理测试产生的 session 文件
-    for (const f of ['bidding-session.json', 'video-session.json']) {
-      const fp = path.join(__dirname, f);
-      if (fs.existsSync(fp)) fs.unlinkSync(fp);
-    }
+    // 清理测试产生的 session 文件；测试前已存在的原样恢复（内含用户真实凭证）
+    sessionFiles.forEach((fp, i) => {
+      if (sessionBackups[i]) fs.writeFileSync(fp, sessionBackups[i]);
+      else if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    });
     // 恢复测试前被改动的默认目录配置
     if (settingsBackup) fs.writeFileSync(settingsFile, settingsBackup);
     else if (fs.existsSync(settingsFile)) fs.unlinkSync(settingsFile);

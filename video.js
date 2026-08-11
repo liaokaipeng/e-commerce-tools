@@ -145,6 +145,8 @@ function loadStores() {
 const STORES = loadStores();
 
 // ------- 上传流程各步骤 -------
+// 用 Cookie 尝试从授权接口换取新上传凭证，换到返回 token，换不到返回空字符串。
+// 注意：部分账号类型的授权接口不返回可换取的凭证，此时依赖扩展在手动上传时抓取的凭证（账号级通用）。
 async function refreshAuthToken(cookie, shopId) {
   const resp = await call({
     method: 'GET',
@@ -159,20 +161,53 @@ async function refreshAuthToken(cookie, shopId) {
   });
   // 优先直接匹配响应文本中的 VOD token（形如 NTAw...），其次兜底 JWT 前缀拼接
   const text = typeof resp.text === 'string' ? resp.text : JSON.stringify(resp.json);
-  let token = '';
   const m = text.match(/NTAw[A-Za-z0-9_\-=]{20,}/);
-  if (m) {
-    token = m[0];
-  } else {
-    const jwt = text.match(/eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}/);
-    if (jwt) token = 'NTAwMDcyMjU6' + jwt[0];
+  if (m) return m[0];
+  const jwt = text.match(/eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}/);
+  return jwt ? 'NTAwMDcyMjU6' + jwt[0] : '';
+}
+
+// 解析 Authorization（base64("50007225:<jwt>")）里 JWT 的 exp（秒级时间戳），解析失败返回 0
+function authExpOf(auth) {
+  try {
+    const dec = Buffer.from(auth, 'base64').toString('utf8');
+    const jwt = dec.includes(':') ? dec.split(':').slice(1).join(':') : dec;
+    const payload = JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8'));
+    return Number(payload.exp) || 0;
+  } catch (e) {
+    return 0;
   }
-  // 解析授权状态，用于区分「Cookie 失效」与「店铺短视频上传授权被拒」两类失败
-  const data = (resp.json && resp.json.data) || {};
-  const manual = data.manual || {};
-  const automatic = data.automatic || {};
-  const authStatus = manual.authorization_status || automatic.authorization_status || '';
-  return { token, resp, site: data.site || '', authStatus };
+}
+
+// 跨境凭证统一解析（唯一入口），优先级：本地已抓凭证（账号级通用，取有效期最长的）→ Cookie 换取 → 报错引导手动上传
+async function resolveCnAuth(creds, log) {
+  const nowSec = Date.now() / 1000;
+  const candidates = [];
+  if (creds.auth) candidates.push({ from: '当前所选', auth: creds.auth });
+  for (const [id, s] of Object.entries(cnShops())) {
+    if (s && s.auth) candidates.push({ from: `店铺 ${id}`, auth: s.auth });
+  }
+  candidates.sort((a, b) => authExpOf(b.auth) - authExpOf(a.auth));
+  const best = candidates.find((c) => authExpOf(c.auth) > nowSec + 60);
+  if (best) {
+    const exp = authExpOf(best.auth);
+    log('auth', `使用已抓取的上传凭证（${best.from}，到期 ${new Date(exp * 1000).toLocaleString('zh-CN', { hour12: false })}）`);
+    return best.auth;
+  }
+  if (creds.cookie && creds.shopId) {
+    log('auth', '本地无有效凭证，尝试用 Cookie 换取新凭证...');
+    try {
+      const token = await refreshAuthToken(creds.cookie, creds.shopId);
+      if (token) {
+        setCnShop(creds.shopId, { auth: token });
+        log('auth', '凭证换取成功');
+        return token;
+      }
+    } catch (e) {
+      log('auth', `凭证换取异常: ${e.message}`);
+    }
+  }
+  throw new Error('无可用上传凭证（Authorization 缺失或已过期）。请登录卖家中心，在任一跨境店铺的「短视频上传」页面手动上传一次视频，扩展抓到凭证后，同账号下所有店铺（含不同国家站点）均可直接批量上传。');
 }
 
 function md5hex(buf) { return crypto.createHash('md5').update(buf).digest('hex'); }
@@ -474,33 +509,8 @@ async function uploadOneCn(row, creds, site, log) {
   const wholeEtag = etagOf(fileBuf);
   const videoSizeKB = Math.round(fsize / 1024);
 
-  let authFail = null; // 记录 token 刷新失败时的授权诊断信息
-  if (cookie && shopId) {
-    log('auth', '刷新上传凭证(token)...');
-    try {
-      const fr = await refreshAuthToken(cookie, shopId);
-      if (fr.token) {
-        auth = fr.token;
-        setCnShop(shopId, { auth });
-        log('auth', `token 刷新成功: ${auth.slice(0, 26)}...`);
-      } else {
-        authFail = fr;
-        log('auth', `token 刷新失败(HTTP ${fr.resp.status})，回退使用现有 Authorization。响应: ${fr.resp.text.slice(0, 200)}`);
-      }
-    } catch (e) {
-      log('auth', `token 刷新异常: ${e.message}，回退使用现有 Authorization`);
-    }
-  } else {
-    log('auth', '缺少 Cookie/ShopId，无法自动刷新 token，使用现有 Authorization');
-  }
-
-  // token 刷新失败且无可用 Authorization 时提前报错，避免 preupload 白跑再暴露
-  if (!auth) {
-    if (authFail && authFail.authStatus === 'Rejected') {
-      throw new Error(`店铺(Shop ID ${shopId})在站点 ${authFail.site || '跨境(.cn)'} 的短视频上传授权状态为「已拒绝(Rejected)」，无法获取上传凭证。这通常发生在店铺切换国家/站点后，需在卖家中心重新完成短视频上传授权：登录卖家中心，打开「短视频上传」页面手动上传一次视频，让扩展抓取最新 Cookie 后再试。`);
-    }
-    throw new Error('未获取到有效的 Authorization（上传凭证）。自动刷新 token 失败，很可能是 Cookie 已失效。请重新登录卖家中心，打开「短视频上传」页面手动上传一次视频，让扩展抓取最新 Cookie 后再试。');
-  }
+  // 凭证统一由 resolveCnAuth 解析：优先本地已抓凭证中有效期最长的（账号级通用）→ 兜底 Cookie 换取 → 报错引导手动上传
+  auth = await resolveCnAuth({ auth, cookie, shopId }, log);
 
   log('preupload', '申请上传...');
   const pre = await preupload();
@@ -601,11 +611,13 @@ async function uploadOneCn(row, creds, site, log) {
     throw new Error(`video/create 失败 (${vc.status}): ${vc.text.slice(0, 500)}`);
   }
   const createCode = vc.json ? (vc.json.errorCode ?? vc.json.code) : null;
-  if (createCode != null && createCode !== 0) {
+  const postId = (vc.json && vc.json.data && (vc.json.data.post_id ?? vc.json.data.postId)) || null;
+  // solutions 接口成功码为 200000（msg="成功"，返回 post_id）；旧版接口可能用 0。有 post_id 即视为发布成功
+  if (createCode != null && createCode !== 0 && createCode !== 200000 && !postId) {
     throw new Error(`video/create 业务失败 (errorCode=${createCode}): ${vc.text.slice(0, 500)}`);
   }
-  log('create', '发布成功');
-  return { vid, videourl, itemId, response: vc.text.slice(0, 300) };
+  log('create', `发布成功${postId ? `（post_id=${postId}）` : ''}`);
+  return { vid, videourl, itemId, postId, response: vc.text.slice(0, 300) };
 }
 
 // ------- 单个视频的完整上传（本土菲律宾 .ph） -------

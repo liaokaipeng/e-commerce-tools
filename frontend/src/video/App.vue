@@ -46,7 +46,7 @@ function applyShop(id) {
   userid.value = s.userid || '';
   saveCreds();
   if (!s.hasCred) {
-    ElMessage.warning(`店铺 ${s.shopId} 暂无有效凭证，请登录该店铺短视频页手动上传一次以抓取凭证`);
+    ElMessage.warning(`店铺 ${s.shopId} 暂无有效凭证，请登录同账号下任一店铺短视频页手动上传一次以抓取凭证（凭证账号级通用）`);
   }
 }
 
@@ -76,12 +76,10 @@ function loadLocalCreds() {
 }
 
 function setValIfNotFocused(id, v) {
-  // 不覆盖正在编辑的输入框
+  // 不覆盖正在编辑的输入框（auth/cookie 已不在页面展示，仅同步 shopId/userid）
   const el = document.getElementById(id);
   if (el && v && document.activeElement !== el) {
-    if (id === 'auth') auth.value = v;
-    else if (id === 'cookie') cookie.value = v;
-    else if (id === 'shopId') shopId.value = v;
+    if (id === 'shopId') shopId.value = v;
     else if (id === 'userid') userid.value = v;
   }
 }
@@ -94,8 +92,9 @@ async function loadCredsFromServer(quiet) {
     if (isPh.value) {
       const cur = sites.ph || null;
       if (cur && (cur.auth || cur.cookie || cur.shopId || cur.userid)) {
-        setValIfNotFocused('auth', cur.auth);
-        setValIfNotFocused('cookie', cur.cookie);
+        // auth/cookie 已无可见输入框，不会被用户编辑，直接从服务端同步
+        if (cur.auth) auth.value = cur.auth;
+        if (cur.cookie) cookie.value = cur.cookie;
         setValIfNotFocused('shopId', cur.shopId);
         setValIfNotFocused('userid', cur.userid);
         const t = cur.updatedAt ? new Date(cur.updatedAt).toLocaleString() : '';
@@ -125,8 +124,8 @@ async function loadCredsFromServer(quiet) {
       if (list.length) {
         const cur = selectedShopId.value && list.find((x) => x.shopId === selectedShopId.value);
         if (cur) {
-          setValIfNotFocused('auth', cur.auth);
-          setValIfNotFocused('cookie', cur.cookie);
+          if (cur.auth) auth.value = cur.auth;
+          if (cur.cookie) cookie.value = cur.cookie;
           setValIfNotFocused('shopId', cur.shopId);
           setValIfNotFocused('userid', cur.userid);
         }
@@ -136,7 +135,7 @@ async function loadCredsFromServer(quiet) {
           + (noCredCount ? `，${noCredCount} 家暂无凭证（需重新上传）` : '') + '；请在上方选择店铺';
         if (!quiet) saveCreds();
       } else {
-        credsStatus.value = '尚未抓取到「' + siteLabel() + '」凭证，请安装扩展并分别登录各店铺短视频页手动上传一次';
+        credsStatus.value = '尚未抓取到「' + siteLabel() + '」凭证，请安装扩展并在任一店铺短视频页手动上传一次（凭证账号级通用）';
       }
     }
   } catch (e) {
@@ -328,8 +327,12 @@ function startUpload() {
   const cookieV = cookie.value.trim();
   const shopIdV = shopId.value.trim();
   const useridV = userid.value.trim();
-  if (!cookieV) {
-    ElMessage.warning('请先填写 Cookie');
+  if (isPh.value && !cookieV) {
+    ElMessage.warning('尚未获取到该站点凭证：请安装扩展，登录卖家中心并在短视频页手动上传一次以自动抓取');
+    return;
+  }
+  if (!isPh.value && !cnShops.value.some((s) => s.hasCred)) {
+    ElMessage.warning('尚未获取到跨境凭证：请安装扩展，在任一店铺短视频页手动上传一次以自动抓取（凭证账号级通用）');
     return;
   }
   if (isPh.value && !useridV) {
@@ -440,7 +443,7 @@ onMounted(() => {
     <el-card shadow="never" class="card">
       <template #header>
         <el-collapse style="border: none">
-          <el-collapse-item title="接口凭证（可留空，服务端会用 Cookie 自动换取所需凭证）" name="creds">
+          <el-collapse-item title="上传站点与凭证（扩展自动抓取，无需手填）" name="creds">
             <div class="row">
               <span class="site-label">上传站点</span>
               <el-select v-model="site" style="max-width: 260px">
@@ -452,17 +455,7 @@ onMounted(() => {
               <el-select v-model="selectedShopId" style="min-width: 280px" placeholder="选择有凭证的店铺" @change="applyShop">
                 <el-option v-for="o in shopOptions" :key="o.value" :value="o.value" :label="o.label" />
               </el-select>
-              <span class="hint" style="margin: 0 0 0 8px; align-self: center">每个店铺需分别登录并手动上传一次以抓取凭证</span>
-            </div>
-            <div v-if="!isPh" class="row" style="margin-top: 8px">
-              <el-input id="auth" v-model="auth" placeholder="可留空，自动获取">
-                <template #label>Authorization（跨境分片上传用，可留空，服务端自动获取）</template>
-              </el-input>
-            </div>
-            <div class="row" style="margin-top: 8px">
-              <el-input id="cookie" v-model="cookie" type="textarea" :rows="3" placeholder="Cookie（含 video_upload_session_id 等）">
-                <template #label>Cookie</template>
-              </el-input>
+              <span class="hint" style="margin: 0 0 0 8px; align-self: center">跨境上传凭证账号级通用，任一店铺手动上传一次即可</span>
             </div>
             <div v-if="!isPh" class="row" style="margin-top: 8px">
               <el-input id="shopId" v-model="shopId" style="max-width: 220px" placeholder="Shop ID">
@@ -480,11 +473,10 @@ onMounted(() => {
               <span class="hint creds-status">{{ credsStatus }}</span>
             </div>
             <div class="hint">
-              选择站点后，安装「凭证抓取」浏览器扩展，并登录对应站点卖家中心，在短视频上传页手动上传一次视频，扩展会自动抓取该站点的
-              Cookie 与 User ID 并填入。跨境（.cn）支持多店铺：切换店铺并各手动上传一次，即可在上方「选择店铺」中挑选对应店铺上传。
-              Authorization 时效很短，无需手动抓取——服务端上传前会自动换取。切换站点会自动切换对应凭证。Cookie
-              失效时（上传报 token is expired 或 Authorization can't be empty）重新登录并在短视频页上传一次即可。若 User ID 未自动抓到，请手动填写：打开短视频上传页按
-              F12 → Network → 筛选 <b>report/add</b> → 点请求看 Payload 里的 <b>userId=后面那串数字</b>。
+              选择站点后，安装「KP工具合集助手」浏览器扩展，并登录对应站点卖家中心，在短视频上传页手动上传一次视频，扩展会自动抓取并保存所需凭证（无需手动填写）。
+              跨境（.cn）支持多店铺：上传凭证为账号级通用，在任一店铺手动上传一次后，即可在上方「选择店铺」中挑选同账号下任意店铺上传。
+              凭证失效时（上传报 token is expired 等）重新登录并在短视频页上传一次即可。切换站点会自动切换对应凭证。若本土站点 User ID
+              未自动抓到，请手动填写：打开短视频上传页按 F12 → Network → 筛选 <b>report/add</b> → 点请求看 Payload 里的 <b>userId=后面那串数字</b>。
             </div>
           </el-collapse-item>
         </el-collapse>
