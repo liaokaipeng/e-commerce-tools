@@ -52,7 +52,7 @@ const SITES = {
 // 出站请求统一走 lib/http 的 request（useJar=true 由 lib 内部按 host 维护分片会话 Cookie 罐）。
 // 跨境 cn 支持多店铺：storedCreds.cn = { shops: { [shopId]: { auth, cookie, userid, updatedAt } } }
 // 本土 ph 保持单店铺：storedCreds.ph = { auth, cookie, shopId, userid, updatedAt }
-const CREDS_FILE = path.join(__dirname, 'video-session.json');
+const CREDS_FILE = path.join(__dirname, 'data', 'video-session.json');
 let storedCreds = {}; // site -> creds
 
 // 旧扁平凭证格式 {auth,cookie,shopId,userid,updatedAt} → 统一结构（字段缺省为空）
@@ -104,7 +104,10 @@ function loadCredsFile() {
   }
 }
 function saveCredsFile() {
-  try { fs.writeFileSync(CREDS_FILE, JSON.stringify(storedCreds, null, 2)); }
+  try {
+    fs.mkdirSync(path.dirname(CREDS_FILE), { recursive: true });
+    fs.writeFileSync(CREDS_FILE, JSON.stringify(storedCreds, null, 2));
+  }
   catch (e) { console.warn('保存视频凭证文件失败:', e.message); }
 }
 function getCreds(site) {

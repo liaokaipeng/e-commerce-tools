@@ -61,6 +61,6 @@ if %errorlevel%==0 (
 
 rem Start service, open browser after 2 seconds
 start "" /b powershell -NoProfile -Command "Start-Sleep -Seconds 2; Start-Process 'http://127.0.0.1:8765'"
-node main.js
+node server\main.js
 
 pause

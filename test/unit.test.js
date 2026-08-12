@@ -19,16 +19,16 @@ const {
   probeVideo,
   probeVideoFile,
   validateUploadRow,
-} = require('../lib/video-utils');
-const video = require('../video');
+} = require('../server/lib/video-utils');
+const video = require('../server/video');
 const {
   extractUrls,
   extractVideoIdFromUrl,
   isNetworkError,
   detectProxy,
   createAgent,
-} = require('../tiktok');
-const { toAmount } = require('../bidding');
+} = require('../server/tiktok');
+const { toAmount } = require('../server/bidding');
 
 // ---------- 合成一个可被 probeVideo 解析的 MP4（仅盒结构，无真实媒体数据） ----------
 function box(type, payload) {

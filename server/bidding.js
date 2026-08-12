@@ -9,14 +9,14 @@ const path = require('path');
 const { request } = require('./lib/http');
 const { sendJson, readBody } = require('./lib/http-utils');
 
-const SESSION_FILE = path.join(__dirname, 'bidding-session.json');
+const SESSION_FILE = path.join(__dirname, 'data', 'bidding-session.json');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 // ============ 店铺列表（分类 / 店铺简称 / 店铺 ID）============
 // 从 stores.json 读取，便于非技术用户直接增删店铺，无需改代码。
 function loadStores() {
   try {
-    return JSON.parse(fs.readFileSync(path.join(__dirname, 'stores.json'), 'utf8'));
+    return JSON.parse(fs.readFileSync(path.join(__dirname, 'config', 'stores.json'), 'utf8'));
   } catch (e) {
     console.warn('读取 stores.json 失败:', e.message);
     return [];
@@ -176,6 +176,7 @@ async function handleCookie(req, res) {
       res.end('no cookies');
       return;
     }
+    fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
     fs.writeFileSync(SESSION_FILE, JSON.stringify(payload, null, 2));
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');

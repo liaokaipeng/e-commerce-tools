@@ -14,5 +14,8 @@ bidding-session.json
 video-session.json
 settings.json
 
+# 运行时生成的凭证/设置文件统一放在 server/data/
+server/data/
+
 .DS_Store
 Thumbs.db

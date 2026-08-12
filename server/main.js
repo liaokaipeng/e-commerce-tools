@@ -19,7 +19,7 @@ const video = require('./video');
 
 const PORT = process.env.PORT || 8765;
 // 前端为 Vite 构建产物（frontend/dist），由 main.js 托管
-const PUBLIC_DIR = path.join(__dirname, 'frontend', 'dist');
+const PUBLIC_DIR = path.join(__dirname, '..', 'frontend', 'dist');
 
 // ============ 简易路由表 ============
 const routes = [];

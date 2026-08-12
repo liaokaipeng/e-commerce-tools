@@ -41,7 +41,7 @@ async function waitReady() {
 // 启动被测服务（临时端口），并备份测试期间可能被改写的 session/settings 文件，
 // stop() 时原样恢复（内含用户真实凭证，不能删除）。
 function startServer() {
-  const child = spawn(process.execPath, ['main.js'], {
+  const child = spawn(process.execPath, ['server/main.js'], {
     cwd: ROOT,
     env: { ...process.env, PORT: String(PORT) },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -49,9 +49,9 @@ function startServer() {
   let childErr = '';
   child.stderr.on('data', (d) => { childErr += d.toString(); });
 
-  const settingsFile = path.join(ROOT, 'settings.json');
+  const settingsFile = path.join(ROOT, 'server', 'data', 'settings.json');
   const settingsBackup = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile) : null;
-  const sessionFiles = ['bidding-session.json', 'video-session.json'].map((f) => path.join(ROOT, f));
+  const sessionFiles = ['bidding-session.json', 'video-session.json'].map((f) => path.join(ROOT, 'server', 'data', f));
   const sessionBackups = sessionFiles.map((fp) => (fs.existsSync(fp) ? fs.readFileSync(fp) : null));
 
   return {
