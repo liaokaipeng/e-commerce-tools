@@ -1,4 +1,5 @@
 // TikTok 无水印视频下载核心模块
+'use strict';
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
@@ -10,6 +11,7 @@ const { getDefault } = require('./lib/settings');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const REHYDRATION_MARKER = '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- 代理检测 ----------
 
@@ -61,19 +63,18 @@ function createAgent(proxy) {
 
 // ---------- HTTP 请求 ----------
 
-function httpsGet(url, { agent, headers = {}, method = 'GET', timeout = 30000, redirects = 5, onResponse, signal } = {}) {
+function httpsGet(url, { agent, headers = {}, method = 'GET', timeout = 30000, redirects = 5, signal } = {}) {
   return new Promise((resolve, reject) => {
     const req = https.request(url, { agent, headers, method, timeout }, (res) => {
       // 重定向处理
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects > 0) {
         res.resume();
         const nextUrl = new URL(res.headers.location, url).toString();
-        httpsGet(nextUrl, { agent, headers, method, timeout, redirects: redirects - 1, onResponse, signal })
+        httpsGet(nextUrl, { agent, headers, method, timeout, redirects: redirects - 1, signal })
           .then(resolve, reject);
         return;
       }
       const cookies = (res.headers['set-cookie'] || []).map(c => c.split(';')[0]).join('; ');
-      if (onResponse) { onResponse(res, cookies); return; }
       let data = '';
       res.setEncoding('utf8');
       res.on('data', (c) => data += c);
@@ -301,8 +302,6 @@ function isNetworkError(e) {
 
 // ---------- 下载任务 ----------
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 /**
  * 批量下载
  * @param {string[]} urls 链接列表
@@ -492,4 +491,11 @@ function register({ get, post }) {
   post('/api/download', handleDownload);
 }
 
-module.exports = { extractUrls, register };
+module.exports = {
+  extractUrls,
+  extractVideoIdFromUrl,
+  isNetworkError,
+  detectProxy,
+  createAgent,
+  register,
+};

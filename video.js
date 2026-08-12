@@ -9,6 +9,16 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { request } = require('./lib/http');
+const {
+  md5hex,
+  etagOf,
+  decryptVodToken,
+  awsSigV4,
+  authExpOf,
+  findItemIds,
+  probeVideo,
+  validateUploadRow,
+} = require('./lib/video-utils');
 
 const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB 分片（与抓包一致）
 
@@ -168,16 +178,7 @@ async function refreshAuthToken(cookie, shopId) {
 }
 
 // 解析 Authorization（base64("50007225:<jwt>")）里 JWT 的 exp（秒级时间戳），解析失败返回 0
-function authExpOf(auth) {
-  try {
-    const dec = Buffer.from(auth, 'base64').toString('utf8');
-    const jwt = dec.includes(':') ? dec.split(':').slice(1).join(':') : dec;
-    const payload = JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8'));
-    return Number(payload.exp) || 0;
-  } catch (e) {
-    return 0;
-  }
-}
+// （实现见 lib/video-utils.js 的 authExpOf）
 
 // 跨境凭证统一解析（唯一入口），优先级：本地已抓凭证（账号级通用，取有效期最长的）→ Cookie 换取 → 报错引导手动上传
 async function resolveCnAuth(creds, log) {
@@ -210,105 +211,7 @@ async function resolveCnAuth(creds, log) {
   throw new Error('无可用上传凭证（Authorization 缺失或已过期）。请登录卖家中心，在任一跨境店铺的「短视频上传」页面手动上传一次视频，扩展抓到凭证后，同账号下所有店铺（含不同国家站点）均可直接批量上传。');
 }
 
-function md5hex(buf) { return crypto.createHash('md5').update(buf).digest('hex'); }
-function etagOf(buf) {
-  const sha1 = crypto.createHash('sha1').update(buf).digest();
-  return Buffer.concat([Buffer.from([0x16]), sha1]).toString('base64url');
-}
-
-const hmac = (key, data) => crypto.createHmac('sha256', key).update(data).digest();
-const sha256hex = (data) => crypto.createHash('sha256').update(data).digest('hex');
-
-/**
- * 解密 preupload 返回的加密凭证（token / access_key）。
- * 前端 MMS SDK 逻辑：AES-128-CBC，key="shopee_vod_"+biz 左补 0 到 5 位，iv 固定，PKCS7。
- * 解密失败时返回原值兜底。
- */
-function decryptVodToken(b64, biz) {
-  try {
-    const key = Buffer.from('shopee_vod_' + String(biz).padStart(5, '0'));
-    const iv = Buffer.from('1234567887654321');
-    const d = crypto.createDecipheriv('aes-128-cbc', key, iv);
-    return Buffer.concat([d.update(Buffer.from(b64, 'base64')), d.final()]).toString('utf8');
-  } catch (e) {
-    return b64;
-  }
-}
-
-/**
- * AWS SigV4 签名（S3/COS 兼容，PH 本土 vod 上传使用）。
- * @param {object} o { method, host, path, query, headers, body, accessKey, secretKey, sessionToken, region, service }
- * @returns {object} 需要追加到请求里的签名头（Authorization / x-amz-date / x-amz-security-token / x-amz-content-sha256）
- */
-function awsSigV4(o) {
-  const now = new Date();
-  const amzDate = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
-  const dateStamp = amzDate.slice(0, 8);
-  const region = o.region || 'us-east-1';
-  const service = o.service || 's3';
-
-  const payloadHash = sha256hex(o.body || Buffer.alloc(0));
-
-  // 组装要参与签名的头（小写名 -> 值），固定 host 与关键 x-amz/内容头
-  const signed = {
-    host: o.host,
-    'x-amz-content-sha256': payloadHash,
-    'x-amz-date': amzDate,
-    'content-type': o.headers['Content-Type'] || '',
-  };
-  if (o.sessionToken) signed['x-amz-security-token'] = o.sessionToken;
-  // 按需加入其它头（保持值原样）
-  for (const [k, v] of Object.entries(o.extraHeaders || {})) {
-    if (v !== undefined && v !== null && v !== '') signed[k.toLowerCase()] = String(v);
-  }
-
-  const keys = Object.keys(signed).sort();
-  const canonicalHeaders = keys.map((k) => `${k}:${signed[k]}\n`).join('');
-  const signedHeaders = keys.join(';');
-
-  const canonicalQuery = Object.keys(o.query || {})
-    .sort()
-    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(o.query[k])}`)
-    .join('&');
-
-  const canonicalRequest = [
-    o.method,
-    o.path || '/',
-    canonicalQuery,
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash,
-  ].join('\n');
-
-  const scope = `${dateStamp}/${region}/${service}/aws4_request`;
-  const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${sha256hex(canonicalRequest)}`;
-
-  const kDate = hmac(('AWS4' + o.secretKey), dateStamp);
-  const kRegion = hmac(kDate, region);
-  const kService = hmac(kRegion, service);
-  const kSigning = hmac(kService, 'aws4_request');
-  const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
-
-  const authorization =
-    `AWS4-HMAC-SHA256 Credential=${o.accessKey}/${scope}, ` +
-    `SignedHeaders=${signedHeaders}, Signature=${signature}`;
-
-  return {
-    Authorization: authorization,
-    'x-amz-date': amzDate,
-    'x-amz-security-token': o.sessionToken || '',
-    'x-amz-content-sha256': payloadHash,
-  };
-}
-
-// ------- 公共行校验（cn / ph 共用） -------
-function validateUploadRow(row) {
-  if (!row.path) return '缺少视频路径';
-  if (row.caption && row.caption.length > 250) return '视频说明超过250字符，请精简后再上传';
-  if (row.caption && /tiktok/i.test(row.caption)) return '视频说明不能包含 tiktok 字样';
-  if (!fs.existsSync(row.path)) return `表格中填写的视频文件不存在，请检查路径是否正确: ${row.path}`;
-  return '';
-}
+// ------- 公共行校验（cn / ph 共用，实现见 lib/video-utils.js 的 validateUploadRow） -------
 async function preupload() {
   const resp = await call({
     method: 'POST',
@@ -439,61 +342,7 @@ async function videoCreate({ cookie, shopId, vid, videourl, caption, itemId, vid
   return resp;
 }
 
-function findItemIds(obj, acc = []) {
-  if (Array.isArray(obj)) {
-    obj.forEach((o) => findItemIds(o, acc));
-  } else if (obj && typeof obj === 'object') {
-    for (const k of Object.keys(obj)) {
-      if (/item_?id/i.test(k) && (typeof obj[k] === 'number' || typeof obj[k] === 'string')) {
-        acc.push(obj[k]);
-      } else {
-        findItemIds(obj[k], acc);
-      }
-    }
-  }
-  return acc;
-}
-
-function probeVideo(buf) {
-  const r = { width: 0, height: 0, duration: 0 };
-  function iter(start, end, cb) {
-    let p = start;
-    while (p + 8 <= end) {
-      let size = buf.readUInt32BE(p);
-      const type = buf.toString('latin1', p + 4, p + 8);
-      let body = p + 8;
-      if (size === 1) { if (p + 16 > end) break; size = Number(buf.readBigUInt64BE(p + 8)); body = p + 16; }
-      else if (size === 0) { size = end - p; }
-      if (size < 8 || p + size > end) break;
-      cb(type, body, p + size);
-      p += size;
-    }
-  }
-  try {
-    let moovB = -1, moovE = -1;
-    iter(0, buf.length, (t, b, e) => { if (t === 'moov') { moovB = b; moovE = e; } });
-    if (moovB < 0) return r;
-    iter(moovB, moovE, (t, b, e) => {
-      if (t === 'mvhd') {
-        const ver = buf.readUInt8(b);
-        let ts, dur;
-        if (ver === 1) { ts = buf.readUInt32BE(b + 4 + 8 + 8); dur = Number(buf.readBigUInt64BE(b + 4 + 8 + 8 + 4)); }
-        else { ts = buf.readUInt32BE(b + 4 + 4 + 4); dur = buf.readUInt32BE(b + 4 + 4 + 4 + 4); }
-        if (ts > 0) r.duration = Math.round((dur / ts) * 1000);
-      } else if (t === 'trak' && r.width === 0) {
-        iter(b, e, (t2, b2) => {
-          if (t2 === 'tkhd') {
-            const ver = buf.readUInt8(b2);
-            const off = ver === 1 ? b2 + 4 + 32 + 16 + 36 : b2 + 4 + 20 + 16 + 36;
-            r.width = Math.round(buf.readUInt32BE(off) / 65536);
-            r.height = Math.round(buf.readUInt32BE(off + 4) / 65536);
-          }
-        });
-      }
-    });
-  } catch (e) { /* 解析失败则保持 0，不影响上传 */ }
-  return r;
-}
+// item 匹配辅助与视频元信息探测实现见 lib/video-utils.js（findItemIds / probeVideo）
 
 // ------- 单个视频的完整上传（跨境 .cn） -------
 async function uploadOneCn(row, creds, log) {
@@ -839,8 +688,25 @@ async function uploadOnePh(row, creds, site, log) {
 
 // ------- Job / SSE -------
 const clients = new Map(); // jobId -> Set(res)
+// jobId -> [event, ...]：任务已产生的事件，供“迟到连接”回放。
+// 任务可能在 SSE 连接建立前就结束（如首行校验秒失败），没有回放会让前端一直卡在“上传中”。
+const jobEvents = new Map();
+const JOB_EVENT_CAP = 20; // 本地工具场景，最多缓存最近 20 个任务的事件
+const JOB_EVENT_MAX = 200; // 单个任务最多保留 200 条事件
+
+function keepJobEvents(jobId, data) {
+  if (!jobEvents.has(jobId)) jobEvents.set(jobId, []);
+  const arr = jobEvents.get(jobId);
+  arr.push(data);
+  if (arr.length > JOB_EVENT_MAX) arr.splice(0, arr.length - JOB_EVENT_MAX);
+  if (jobEvents.size > JOB_EVENT_CAP) {
+    const first = jobEvents.keys().next().value;
+    jobEvents.delete(first);
+  }
+}
 
 function broadcast(jobId, data) {
+  keepJobEvents(jobId, data);
   const set = clients.get(jobId);
   if (!set) return;
   const payload = `data: ${JSON.stringify(data)}\n\n`;
@@ -879,9 +745,19 @@ function register({ get, post }) {
       Connection: 'keep-alive',
       'Access-Control-Allow-Origin': '*',
     });
+    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+    // 迟到连接：任务已产生过事件（可能已结束）则回放，若已 finished 直接关闭
+    const past = jobEvents.get(jobId) || [];
+    for (const ev of past) {
+      if (res.writableEnded) break;
+      res.write(`data: ${JSON.stringify(ev)}\n\n`);
+    }
+    if (past.length && past[past.length - 1].type === 'finished') {
+      res.end();
+      return;
+    }
     if (!clients.has(jobId)) clients.set(jobId, new Set());
     clients.get(jobId).add(res);
-    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
     req.on('close', () => {
       const set = clients.get(jobId);
       if (set) {

@@ -256,4 +256,4 @@ function register({ get, post }) {
   });
 }
 
-module.exports = { register };
+module.exports = { register, toAmount };

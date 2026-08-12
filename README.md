@@ -2,7 +2,7 @@
 
 单服务、单端口（8765）、单网页，提供三个工具：**TikTok 视频下载**、**Shopee 竞价导出**、**Shopee 视频批量上传**（门户页按站点拆分为「跨境视频上传」「本土视频上传」两个 Tab）。
 
-> 面向最终用户的操作教程见《[新手入门指南](新手入门指南.md)》。本文档面向开发者。
+> 面向最终用户的操作教程见《[新手入门指南](新手入门指南.md)》，面向开发者的架构与约定见《[开发指南](docs/开发指南.md)》。本文件为仓库概览。
 
 ## 技术栈
 
@@ -16,7 +16,7 @@
 ```bash
 npm i
 node main.js                      # 后端 http://127.0.0.1:8765
-node test.js                      # 冒烟测试（临时端口 8865）
+node test.js                      # 测试（单元 + 接口冒烟，临时端口 8865）
 
 cd frontend && npm install && npm run dev    # 前端开发 http://localhost:5173（/api 代理到 8765）
 cd frontend && npm run build                 # 构建到 frontend/dist，由 main.js 托管
@@ -30,16 +30,19 @@ cd frontend && npm run build                 # 构建到 frontend/dist，由 mai
 shopee/
   main.js           后端入口（单端口路由 + 静态托管 + 目录浏览/默认目录设置）
   bidding.js        Shopee 竞价导出模块
-  video.js          Shopee 视频上传模块（多站点上传链路）
+  video.js          Shopee 视频上传模块（多站点上传链路 + SSE 任务流）
   tiktok.js         TikTok 下载核心模块
   stores.json       竞价店铺列表（分类/名称/ID，可直接增删）
-  test.js           冒烟测试（临时端口 8865，session 凭证文件原样备份恢复）
+  test.js           测试入口（单元 + 接口冒烟，临时端口 8865，session 凭证文件原样备份恢复）
+  test/             测试拆分：helpers.js（共享工具）/ unit.test.js（纯函数）/ api.test.js（路由冒烟）
   lib/
     http-utils.js   通用 HTTP 工具（sendJson / serveStatic / readBody）
     http.js         统一出站请求封装（按 host 维护 Cookie 罐）
     settings.js     默认目录持久化（运行时生成 settings.json，不入库）
+    video-utils.js  视频上传纯函数（哈希/etag/SigV4/AES 解密/MP4 探测/行校验，可独立单测）
   extension/        浏览器扩展（manifest / background / popup）
   frontend/         Vue 多页前端工程（portal/tiktok/bidding/video + dist；页面通用逻辑见 src/composables/useToolPage.js）
+  docs/开发指南.md   面向开发者的架构、模块约定、扩展与测试说明
   新手入门指南.md   面向最终用户的操作教程
   启动.bat          一键启动
 ```
@@ -53,7 +56,7 @@ shopee/
 | bidding.js | `GET /api/status`、`GET /api/stores`、`POST /api/export`、`POST /api/cookie` |
 | video.js | `POST /api/start`、`GET /api/events`（SSE）、`GET/POST /api/creds` |
 
-视频上传模块内置健壮性处理：出站请求对网络错误 / 超时 / 5xx 自动指数退避重试（最多 3 次，4xx 业务错不重试，避免重复副作用）；发布（`video/create` / `task/edit` / `task/post`）会校验业务错误码，不再把「HTTP 200 但业务失败」误报为成功（solutions 接口成功码为 200000）；跨境商品匹配对纯数字编码优先作精确匹配。
+视频上传模块内置健壮性处理：出站请求对网络错误 / 超时 / 5xx 自动指数退避重试（最多 3 次，4xx 业务错不重试，避免重复副作用）；发布（`video/create` / `task/edit` / `task/post`）会校验业务错误码，不再把「HTTP 200 但业务失败」误报为成功（solutions 接口成功码为 200000）；跨境商品匹配对纯数字编码优先作精确匹配；SSE 任务事件按 job 缓存，迟到连接自动回放（任务先于浏览器连接结束也不丢事件，避免前端卡住）。
 
 凭证由扩展自动抓取保存，页面无需手填：跨境（.cn）上传凭证为账号级通用（任一店铺手动上传一次即可供同账号所有店铺使用），统一经 `resolveCnAuth` 解析（优先本地已抓凭证中有效期最长者 → 兜底 Cookie 换取 → 报错引导手动上传）。
 
