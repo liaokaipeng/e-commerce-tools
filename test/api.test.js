@@ -1,6 +1,9 @@
 'use strict';
 // 接口冒烟测试：临时端口 8865，不访问真实站点（TikTok/Shopee）。
 // 只验证合并服务的路由、静态托管与本地逻辑；session 凭证文件测试前备份、结束后原样恢复。
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
 const { BASE, t, req, startServer } = require('./helpers');
 
 // 读取 SSE 流直至出现指定类型事件，返回全部已收到的事件
@@ -166,6 +169,37 @@ async function run() {
       // SSE 连接即发 connected，然后断开
       const events = await readSSEUntil('/api/events?jobId=conn-test', ['connected']);
       t('GET /api/events 首事件为 connected', events.some((e) => e.type === 'connected'), JSON.stringify(events));
+    }
+
+    console.log('  -- 任务取消 API --');
+    {
+      const miss = await fetch(BASE + '/api/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      t('POST /api/cancel 缺 jobId 返回 400', miss.status === 400, `status=${miss.status}`);
+      const notFound = await fetch(BASE + '/api/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: 'no-such-job' }) });
+      const nfText = await notFound.text();
+      t('POST /api/cancel 不存在任务返回 404', notFound.status === 404 && JSON.parse(nfText).ok === false, `status=${notFound.status} ${nfText}`);
+    }
+    {
+      // 取消进行中任务：行指向真实存在的 20MB 稀疏文件，每行流式哈希耗时足以让 cancel 稳定到达；
+      // 取消后任务在下一行停止，SSE（含迟到回放）应收到 cancelled 而非 finished。
+      const tmp = path.join(os.tmpdir(), `kp_cancel_${Date.now()}.mp4`);
+      const fd = fs.openSync(tmp, 'w');
+      fs.ftruncateSync(fd, 20 * 1024 * 1024);
+      fs.closeSync(fd);
+      try {
+        const rows = Array.from({ length: 3 }, () => ({ path: tmp, caption: '', product: '' }));
+        const r = await req('POST', '/api/start', { site: 'cn', rows });
+        const { jobId } = JSON.parse(r.text);
+        const c = await fetch(BASE + '/api/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId }) });
+        const cj = await c.json();
+        t('POST /api/cancel 取消进行中任务返回 ok', cj.ok === true, JSON.stringify(cj));
+        if (jobId && cj.ok) {
+          const events = await readSSEUntil('/api/events?jobId=' + jobId, ['cancelled', 'finished']);
+          t('取消后 SSE 收到 cancelled（而非 finished）', events.some((e) => e.type === 'cancelled'), JSON.stringify(events.slice(-3)));
+        }
+      } finally {
+        fs.unlinkSync(tmp);
+      }
     }
 
     console.log('  -- 404 兜底 --');

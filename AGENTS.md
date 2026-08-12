@@ -15,6 +15,8 @@
 - 前端 tiktok/bidding 两页共用逻辑抽在 `frontend/src/composables/useToolPage.js`（默认目录设置 / 日志自动滚动 / SSE 流读取），改动时优先复用，不重复实现。
 - 视频上传支持多站点（cn 跨境分片+merge / ph 菲律宾单次 PUT+task），凭证按站点存 `video-session.json`；跨境默认自动选定已抓凭证的店铺、可用「选择店铺」下拉框改选（凭证账号级通用，经 `resolveCnAuth` 统一解析）、菲律宾需 User ID。注意：solutions 接口成功码为 200000（非 0），有 post_id 即发布成功。
 - 视频上传的纯函数（md5/etag/AES 解密/SigV4 签名/MP4 探测/行校验等）统一在 `lib/video-utils.js`，`video.js` 只管链路编排；新增此类逻辑放 lib 并补单测，不要塞回 video.js。
+- 视频大文件**流式处理**：哈希用 `streamHashes`（md5/sha1/sha256 一次遍历）、分片用 `readChunk` 按段流读、ph PUT 用读流作 body（sha256 经 `payloadSha256` 预计算）、MP4 元信息用 `probeVideoFile` 头尾采样探针——不得整文件 `readFileSync` 加载进内存。
+- 任务可取消：`POST /api/cancel` 标记 `abortedJobs` + `AbortController.abort()` 中断进行中的请求；`processJob` 每行开始前与行失败后检查取消标志，广播 `cancelled` 事件（含 done 计数）而非 `finished`；取消造成的中断在 `call` 里不重试。取消逻辑测试见 `test/unit.test.js`（用 `video._test` 确定性验证）。
 - SSE 任务事件按 job 缓存（`jobEvents`，上限 20 个任务），迟到连接自动回放：任务可能先于浏览器连接结束（如首行校验秒失败），无回放会让前端一直卡住。
 - 扩展「KP工具合集助手」（MV3）负责竞价 Cookie 推送（`/api/cookie`）与视频上传凭证按站点抓取（`/api/creds`）；凭证缓存在 `chrome.storage.local`，抓到新请求时整包重推（故 `video-session.json` 清空后会被自动写回）。页面已不展示 Cookie/Authorization 输入框，凭证全靠扩展自动抓取。
 
@@ -32,7 +34,7 @@
 ## 测试
 
 - `node test.js`（或 `npm test`）：分两类，全部通过即正常（退出码 0），**不访问真实站点**。
-  - **单元测试** `test/unit.test.js`：纯函数（`lib/video-utils.js` / tiktok 链接与代理 / 竞价金额换算），不启动服务。
-  - **接口冒烟测试** `test/api.test.js`：临时端口 8865，验页面与 API 路由、SSE 端到端（含迟到回放）；session 凭证文件测试前备份、结束后原样恢复。
+  - **单元测试** `test/unit.test.js`：纯函数（`lib/video-utils.js` 的哈希/etag/AES/SigV4/MP4 探测/行校验、流式哈希与文件探针、tiktok 链接与代理、竞价金额换算）与任务取消逻辑（`video._test`，确定性验证），不启动服务。
+  - **接口冒烟测试** `test/api.test.js`：临时端口 8865，验页面与 API 路由、SSE 端到端（含迟到回放）、任务取消（契约 + 进行中取消）、404 兜底；session 凭证文件测试前备份、结束后原样恢复。
   - 共享工具在 `test/helpers.js`（`t` 断言 / `req` 封装 / `startServer` 启动与凭证备份恢复）。
 - 其余无自动化：TikTok 下载 / 竞价导出 / 视频上传按真实流程手测。

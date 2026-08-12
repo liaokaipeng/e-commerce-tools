@@ -309,7 +309,24 @@ function clearLog() {
 // ---------- 上传 ----------
 const uploading = ref(false);
 const summary = ref('');
+const currentJobId = ref('');
+let cancelledFlag = false;
 let es = null;
+
+function cancelUpload() {
+  if (!currentJobId.value) return;
+  fetch('/api/cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jobId: currentJobId.value }),
+  })
+    .then((r) => r.json())
+    .then((d) => {
+      if (d.ok) log('正在取消…', 'err');
+      else log(`取消失败: ${d.message || '未知错误'}`, 'err');
+    })
+    .catch((e) => log('取消失败: ' + e.message, 'err'));
+}
 
 function startUpload() {
   if (!rows.value.length) {
@@ -339,6 +356,8 @@ function startUpload() {
   }
 
   uploading.value = true;
+  cancelledFlag = false;
+  currentJobId.value = '';
   logLines.value = [];
   summary.value = '';
   log(`开始批量上传（${siteLabel()}），共 ${rows.value.length} 个任务`, 'ok');
@@ -352,6 +371,7 @@ function startUpload() {
   })
     .then((r) => r.json())
     .then(({ jobId }) => {
+      currentJobId.value = jobId;
       es = new EventSource('/api/events?jobId=' + jobId);
       let done = 0,
         ok = 0,
@@ -388,15 +408,28 @@ function startUpload() {
           log(`全部完成：成功 ${ok}，失败 ${fail}，共 ${d.total}`, ok ? 'ok' : 'err');
           summary.value = `已完成：成功 ${ok} / 失败 ${fail}`;
           uploading.value = false;
+          currentJobId.value = '';
+          if (es) es.close();
+        } else if (d.type === 'cancelled') {
+          log(`已取消：已处理 ${d.done} / ${d.total}（成功 ${ok}，失败 ${fail}）`, 'err');
+          summary.value = `已取消：成功 ${ok} / 失败 ${fail}`;
+          uploading.value = false;
+          currentJobId.value = '';
+          cancelledFlag = true;
           if (es) es.close();
         } else if (d.type === 'fatal') {
           log('致命错误: ' + d.error, 'err');
           uploading.value = false;
+          currentJobId.value = '';
+          if (es) es.close();
         }
       };
       es.onerror = () => {
+        // 取消后服务端主动断开连接，属正常流程，不当作错误
+        if (cancelledFlag) return;
         log('SSE 连接中断', 'err');
         uploading.value = false;
+        currentJobId.value = '';
       };
     })
     .catch((e) => {
@@ -505,6 +538,9 @@ onMounted(() => {
       <div class="btn-row">
         <el-button type="primary" :disabled="!hasRows" :loading="uploading" @click="startUpload">
           {{ uploading ? '上传中…' : '开始上传' }}
+        </el-button>
+        <el-button v-if="uploading" type="danger" plain :disabled="!currentJobId" @click="cancelUpload">
+          取消上传
         </el-button>
         <el-button @click="clearLog">清空日志</el-button>
         <el-button @click="autoScroll = !autoScroll">{{ autoScroll ? '暂停滚动' : '继续滚动' }}</el-button>

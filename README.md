@@ -54,9 +54,9 @@ shopee/
 | main.js | `GET/POST /api/settings`、`GET /api/browse` |
 | tiktok.js | `GET /api/tiktok/status`、`POST /api/download`、`POST /api/open-dir` |
 | bidding.js | `GET /api/status`、`GET /api/stores`、`POST /api/export`、`POST /api/cookie` |
-| video.js | `POST /api/start`、`GET /api/events`（SSE）、`GET/POST /api/creds` |
+| video.js | `POST /api/start`、`GET /api/events`（SSE）、`POST /api/cancel`、`GET/POST /api/creds` |
 
-视频上传模块内置健壮性处理：出站请求对网络错误 / 超时 / 5xx 自动指数退避重试（最多 3 次，4xx 业务错不重试，避免重复副作用）；发布（`video/create` / `task/edit` / `task/post`）会校验业务错误码，不再把「HTTP 200 但业务失败」误报为成功（solutions 接口成功码为 200000）；跨境商品匹配对纯数字编码优先作精确匹配；SSE 任务事件按 job 缓存，迟到连接自动回放（任务先于浏览器连接结束也不丢事件，避免前端卡住）。
+视频上传模块内置健壮性处理：出站请求对网络错误 / 超时 / 5xx 自动指数退避重试（最多 3 次，4xx 业务错不重试，避免重复副作用）；发布（`video/create` / `task/edit` / `task/post`）会校验业务错误码，不再把「HTTP 200 但业务失败」误报为成功（solutions 接口成功码为 200000）；跨境商品匹配对纯数字编码优先作精确匹配；SSE 任务事件按 job 缓存，迟到连接自动回放（任务先于浏览器连接结束也不丢事件，避免前端卡住）；**任务可取消**（`POST /api/cancel`：中断进行中的请求并停止后续行，前端上传中显示「取消上传」按钮）；**大文件流式读取**（哈希/分片/PUT 全程不整文件加载进内存，MP4 元信息用头尾采样探针解析）。
 
 凭证由扩展自动抓取保存，页面无需手填：跨境（.cn）上传凭证为账号级通用（任一店铺手动上传一次即可供同账号所有店铺使用），统一经 `resolveCnAuth` 解析（优先本地已抓凭证中有效期最长者 → 兜底 Cookie 换取 → 报错引导手动上传）。
 

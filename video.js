@@ -10,13 +10,14 @@ const path = require('path');
 const crypto = require('crypto');
 const { request } = require('./lib/http');
 const {
-  md5hex,
   etagOf,
+  etagFromSha1Hex,
+  streamHashes,
   decryptVodToken,
   awsSigV4,
   authExpOf,
   findItemIds,
-  probeVideo,
+  probeVideoFile,
   validateUploadRow,
 } = require('./lib/video-utils');
 
@@ -131,6 +132,7 @@ loadCredsFile();
 
 // 统一出站请求：视频上传各步骤依赖跨请求的会话 Cookie，故 useJar=true
 // 对网络错误 / 超时 / 5xx 做指数退避重试；4xx 等业务错不重试（避免重复副作用）。
+// opts.signal：任务取消时中断进行中的请求，且取消造成的中断不重试。
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function call(opts) {
   const maxAttempts = (opts && opts.retries != null ? opts.retries : 2) + 1;
@@ -144,6 +146,8 @@ async function call(opts) {
       }
       return resp;
     } catch (e) {
+      // 任务取消（signal.aborted）直接抛出，不重试、不混淆为行失败
+      if (opts.signal && opts.signal.aborted) throw e;
       if (attempt < maxAttempts) {
         await sleep(Math.min(1000 * Math.pow(2, attempt - 1), 8000));
         continue;
@@ -154,13 +158,25 @@ async function call(opts) {
   throw new Error('请求重试后仍失败');
 }
 
+// 按 [start, end) 读取文件的一段为 buffer（分片上传用，单片峰值 1MB，不整文件加载）
+function readChunk(filePath, start, end) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    const rs = fs.createReadStream(filePath, { start, end: end - 1 });
+    rs.on('data', (c) => chunks.push(c));
+    rs.on('end', () => resolve(Buffer.concat(chunks)));
+    rs.on('error', reject);
+  });
+}
+
 // ------- 上传流程各步骤 -------
 // 用 Cookie 尝试从授权接口换取新上传凭证，换到返回 token，换不到返回空字符串。
 // 注意：部分账号类型的授权接口不返回可换取的凭证，此时依赖扩展在手动上传时抓取的凭证（账号级通用）。
-async function refreshAuthToken(cookie, shopId) {
+async function refreshAuthToken(cookie, shopId, signal) {
   const resp = await call({
     method: 'GET',
     url: `${SOLUTIONS}/sellers/video-upload/api/v1/lib/authorization?shop_id=${encodeURIComponent(shopId)}`,
+    signal,
     headers: {
       accept: 'application/json, text/plain, */*',
       cookie,
@@ -181,7 +197,7 @@ async function refreshAuthToken(cookie, shopId) {
 // （实现见 lib/video-utils.js 的 authExpOf）
 
 // 跨境凭证统一解析（唯一入口），优先级：本地已抓凭证（账号级通用，取有效期最长的）→ Cookie 换取 → 报错引导手动上传
-async function resolveCnAuth(creds, log) {
+async function resolveCnAuth(creds, log, signal) {
   const nowSec = Date.now() / 1000;
   const candidates = [];
   if (creds.auth) candidates.push({ from: '当前所选', auth: creds.auth });
@@ -198,7 +214,7 @@ async function resolveCnAuth(creds, log) {
   if (creds.cookie && creds.shopId) {
     log('auth', '本地无有效凭证，尝试用 Cookie 换取新凭证...');
     try {
-      const token = await refreshAuthToken(creds.cookie, creds.shopId);
+      const token = await refreshAuthToken(creds.cookie, creds.shopId, signal);
       if (token) {
         setCnShop(creds.shopId, { auth: token });
         log('auth', '凭证换取成功');
@@ -212,10 +228,11 @@ async function resolveCnAuth(creds, log) {
 }
 
 // ------- 公共行校验（cn / ph 共用，实现见 lib/video-utils.js 的 validateUploadRow） -------
-async function preupload() {
+async function preupload(signal) {
   const resp = await call({
     method: 'POST',
     url: `${MMS}/uploadapi/api/v1/vod/preupload`,
+    signal,
     headers: {
       'content-type': 'application/json',
       accept: 'application/json, text/plain, */*',
@@ -233,10 +250,11 @@ async function preupload() {
   return resp;
 }
 
-async function uploadChunk(chunk, etag, auth) {
+async function uploadChunk(chunk, etag, auth, signal) {
   const resp = await call({
     method: 'POST',
     url: `${UPLOAD}/api/v2/upload/${BIZ}`,
+    signal,
     headers: {
       Authorization: auth,
       'Content-Type': 'application/octet-stream',
@@ -250,10 +268,11 @@ async function uploadChunk(chunk, etag, auth) {
   return resp;
 }
 
-async function mergeFiles(fids, auth, fileEtag) {
+async function mergeFiles(fids, auth, fileEtag, signal) {
   const resp = await call({
     method: 'POST',
     url: `${UPLOAD}/api/v2/mergeFiles/${BIZ}`,
+    signal,
     headers: {
       Authorization: auth,
       'Content-Type': 'video/mp4',
@@ -267,10 +286,11 @@ async function mergeFiles(fids, auth, fileEtag) {
   return resp;
 }
 
-async function reportUpload({ vid, extendid, fsize, md5hexval, videourl }) {
+async function reportUpload({ vid, extendid, fsize, md5hexval, videourl }, signal) {
   const resp = await call({
     method: 'POST',
     url: `${MMS}/uploadapi/api/v1/vod/reportupload`,
+    signal,
     headers: {
       'content-type': 'application/json',
       accept: 'application/json, text/plain, */*',
@@ -297,11 +317,12 @@ async function reportUpload({ vid, extendid, fsize, md5hexval, videourl }) {
   return resp;
 }
 
-async function itemList(keyword, cookie, shopId) {
+async function itemList(keyword, cookie, shopId, signal) {
   const url = `${SOLUTIONS}/sellers/video-upload/api/v1/item/list?shop_id=${shopId}&keyword=${encodeURIComponent(keyword)}&page_no=1&page_size=20`;
   const resp = await call({
     method: 'GET',
     url,
+    signal,
     headers: {
       accept: 'application/json, text/plain, */*',
       cookie,
@@ -312,10 +333,11 @@ async function itemList(keyword, cookie, shopId) {
   return resp;
 }
 
-async function videoCreate({ cookie, shopId, vid, videourl, caption, itemId, videoSizeKB, width, height, duration }) {
+async function videoCreate({ cookie, shopId, vid, videourl, caption, itemId, videoSizeKB, width, height, duration }, signal) {
   const resp = await call({
     method: 'POST',
     url: `${SOLUTIONS}/sellers/video-upload/api/v1/video/create`,
+    signal,
     headers: {
       'content-type': 'application/json',
       accept: 'application/json, text/plain, */*',
@@ -342,27 +364,27 @@ async function videoCreate({ cookie, shopId, vid, videourl, caption, itemId, vid
   return resp;
 }
 
-// item 匹配辅助与视频元信息探测实现见 lib/video-utils.js（findItemIds / probeVideo）
+// item 匹配辅助与视频元信息探测实现见 lib/video-utils.js（findItemIds / probeVideoFile）
 
 // ------- 单个视频的完整上传（跨境 .cn） -------
-async function uploadOneCn(row, creds, log) {
+async function uploadOneCn(row, creds, log, signal) {
   let { auth, cookie, shopId } = creds;
   const filePath = row.path;
   const rowErr = validateUploadRow(row);
   if (rowErr) throw new Error(rowErr);
 
   log('read', `读取文件: ${filePath}`);
-  const fileBuf = fs.readFileSync(filePath);
-  const fsize = fileBuf.length;
-  const wholeMd5hex = md5hex(fileBuf);
-  const wholeEtag = etagOf(fileBuf);
+  const hashes = await streamHashes(filePath);
+  const fsize = hashes.size;
+  const wholeMd5hex = hashes.md5;
+  const wholeEtag = etagFromSha1Hex(hashes.sha1);
   const videoSizeKB = Math.round(fsize / 1024);
 
   // 凭证统一由 resolveCnAuth 解析：优先本地已抓凭证中有效期最长的（账号级通用）→ 兜底 Cookie 换取 → 报错引导手动上传
-  auth = await resolveCnAuth({ auth, cookie, shopId }, log);
+  auth = await resolveCnAuth({ auth, cookie, shopId }, log, signal);
 
   log('preupload', '申请上传...');
-  const pre = await preupload();
+  const pre = await preupload(signal);
   const preData = (pre.json && (pre.json.data || pre.json)) || {};
   const vid = preData.vid;
   if (!vid) {
@@ -378,10 +400,11 @@ async function uploadOneCn(row, creds, log) {
   const fids = [];
   for (let i = 0; i < totalChunks; i++) {
     const start = i * CHUNK_SIZE;
-    const chunk = fileBuf.subarray(start, Math.min(start + CHUNK_SIZE, fsize));
+    const end = Math.min(start + CHUNK_SIZE, fsize);
+    const chunk = await readChunk(filePath, start, end);
     const etag = etagOf(chunk);
     log('upload', `上传分片 ${i + 1}/${totalChunks} (${chunk.length} bytes, etag=${etag.slice(0, 8)}...)`);
-    const up = await uploadChunk(chunk, etag, auth);
+    const up = await uploadChunk(chunk, etag, auth, signal);
     const upData = (up.json && (up.json.data || up.json)) || {};
     const fid = upData.fid || upData.fileId || upData.id;
     if (!fid) {
@@ -397,7 +420,7 @@ async function uploadOneCn(row, creds, log) {
   log('upload', `分片上传完成，共 ${fids.length} 片`);
 
   log('merge', '合并分片...');
-  const merge = await mergeFiles(fids, auth, wholeEtag);
+  const merge = await mergeFiles(fids, auth, wholeEtag, signal);
   const mergeData = (merge.json && (merge.json.data || merge.json)) || {};
   const mergeFid = mergeData.fid || mergeData.fileId || mergeData.id;
   if (!mergeFid) {
@@ -412,14 +435,14 @@ async function uploadOneCn(row, creds, log) {
   log('merge', `fid=${mergeFid} videourl=${videourl}`);
 
   log('report', '上报上传结果...');
-  const rep = await reportUpload({ vid, extendid: extendid || '', fsize, md5hexval: wholeMd5hex, videourl });
+  const rep = await reportUpload({ vid, extendid: extendid || '', fsize, md5hexval: wholeMd5hex, videourl }, signal);
   log('report', `响应: ${rep.text.slice(0, 300)}`);
 
   let itemId = null;
   if (row.product) {
     log('item', `查询商品编码: ${row.product}`);
     const isCode = /^\d+$/.test(String(row.product).trim());
-    const il = await itemList(row.product, cookie, shopId);
+    const il = await itemList(row.product, cookie, shopId, signal);
     const items = (il.json && il.json.data && il.json.data.items) || [];
     const hit = isCode
       ? items.find((it) => String(it.item_id ?? it.itemId) === String(row.product).trim())
@@ -441,7 +464,7 @@ async function uploadOneCn(row, creds, log) {
   }
 
   log('create', '创建视频并发布...');
-  const meta = probeVideo(fileBuf);
+  const meta = probeVideoFile(filePath);
   if (!meta.width || !meta.height || !meta.duration) log('create', '警告: 未能完整解析视频宽高/时长，将提交解析值');
   log('create', `视频元信息: ${meta.width}x${meta.height}, ${meta.duration}ms`);
   const vc = await videoCreate({
@@ -455,7 +478,7 @@ async function uploadOneCn(row, creds, log) {
     width: meta.width,
     height: meta.height,
     duration: meta.duration,
-  });
+  }, signal);
   if (vc.status !== 200 && vc.status !== 201) {
     throw new Error(`video/create 失败 (${vc.status}): ${vc.text.slice(0, 500)}`);
   }
@@ -473,7 +496,7 @@ async function uploadOneCn(row, creds, log) {
 // 链路：task/create -> vod/preupload -> 单次 PUT 整文件 -> vod/reportupload
 //       -> item/list 查商品 -> task/edit 写标题/商品 -> task/post 发布
 // 与跨境不同：无分片/merge，无 solutions 域名，biz=201，region=PH。
-async function uploadOnePh(row, creds, site, log) {
+async function uploadOnePh(row, creds, site, log, signal) {
   const S = SITES[site];
   const cookie = creds.cookie || '';
   const filePath = row.path;
@@ -492,13 +515,14 @@ async function uploadOnePh(row, creds, site, log) {
   const jsonH = Object.assign({ cookie }, mmsH);
 
   log('read', `读取文件: ${filePath}`);
-  const fileBuf = fs.readFileSync(filePath);
-  const fsize = fileBuf.length;
-  const wholeMd5hex = md5hex(fileBuf);
+  const hashes = await streamHashes(filePath);
+  const fsize = hashes.size;
+  const wholeMd5hex = hashes.md5;
+  const payloadSha256 = hashes.sha256;
 
   // 1. task/create 创建发布任务
   log('task', '创建发布任务(task/create)...');
-  const tc = await call({ method: 'POST', url: `${S.creator}/publish/pc/api/task/create`, headers: jsonH, body: '{}' });
+  const tc = await call({ method: 'POST', url: `${S.creator}/publish/pc/api/task/create`, headers: jsonH, body: '{}', signal });
   const tcData = (tc.json && tc.json.data) || {};
   const taskId = tcData.taskId;
   if (!taskId) throw new Error(`task/create 未返回 taskId。响应: ${tc.text.slice(0, 300)}`);
@@ -508,6 +532,7 @@ async function uploadOnePh(row, creds, site, log) {
   const preResp = await call({
     method: 'POST',
     url: `${S.mms}/uploadapi/api/v1/vod/preupload`,
+    signal,
     headers: Object.assign({ 'content-type': 'application/json;charset=UTF-8' }, mmsH),
     body: JSON.stringify({
       biz: S.biz,
@@ -560,7 +585,7 @@ async function uploadOnePh(row, creds, site, log) {
     query: { 'x-id': 'PutObject' },
     headers: { 'Content-Type': 'video/mp4' },
     extraHeaders: metaHeaders,
-    body: fileBuf,
+    payloadSha256,
     accessKey,
     secretKey,
     sessionToken: '',
@@ -572,6 +597,7 @@ async function uploadOnePh(row, creds, site, log) {
     method: 'PUT',
     url: `${uploaddomain}${objectKey}?x-id=PutObject`,
     timeout: 300000,
+    signal,
     headers: Object.assign(
       {
         'Content-Type': 'video/mp4',
@@ -585,7 +611,8 @@ async function uploadOnePh(row, creds, site, log) {
       sigHeaders['x-amz-security-token'] ? { 'x-amz-security-token': sigHeaders['x-amz-security-token'] } : {},
       metaHeaders
     ),
-    body: fileBuf,
+    // 流式上传：body 为读流，不整文件加载进内存（sha256 已通过 payloadSha256 预计算）
+    body: fs.createReadStream(filePath, { highWaterMark: 4 * 1024 * 1024 }),
   });
   if (putResp.status !== 200 && putResp.status !== 201) {
     throw new Error(`文件上传失败(HTTP ${putResp.status})。响应: ${putResp.text.slice(0, 300)}`);
@@ -599,6 +626,7 @@ async function uploadOnePh(row, creds, site, log) {
   const repResp = await call({
     method: 'POST',
     url: `${S.mms}/uploadapi/api/v1/vod/reportupload`,
+    signal,
     headers: mmsH,
     body: JSON.stringify({
       vid,
@@ -632,6 +660,7 @@ async function uploadOnePh(row, creds, site, log) {
       method: 'GET',
       url: `${S.creator}/publish/pc/api/item/list?${qs}`,
       headers: jsonH,
+      signal,
     });
     const items = (il.json && il.json.data && il.json.data.items) || [];
     const hit = isCode ? items.find((it) => String(it.itemId) === String(row.product).trim()) : items[0];
@@ -647,7 +676,7 @@ async function uploadOnePh(row, creds, site, log) {
   }
 
   // 6. 本地探测视频元信息
-  const meta = probeVideo(fileBuf);
+  const meta = probeVideoFile(filePath);
   if (!meta.width || !meta.height || !meta.duration) log('edit', '警告: 未能完整解析视频宽高/时长，将提交解析值');
   log('edit', `视频元信息: ${meta.width}x${meta.height}, ${meta.duration}ms`);
 
@@ -668,7 +697,7 @@ async function uploadOnePh(row, creds, site, log) {
     }],
   };
   log('edit', '写入标题/商品/信息(task/edit)...');
-  const editResp = await call({ method: 'POST', url: `${S.creator}/publish/pc/api/task/edit`, headers: jsonH, body: JSON.stringify(editBody) });
+  const editResp = await call({ method: 'POST', url: `${S.creator}/publish/pc/api/task/edit`, headers: jsonH, body: JSON.stringify(editBody), signal });
   const editTask = ((editResp.json && editResp.json.data && editResp.json.data.taskList) || [])[0] || {};
   if (editResp.status !== 200 || editTask.errorCode !== 0) {
     throw new Error(`task/edit 失败(${editResp.status})。响应: ${editResp.text.slice(0, 500)}`);
@@ -677,7 +706,7 @@ async function uploadOnePh(row, creds, site, log) {
 
   // 8. task/post 发布
   log('post', '发布(task/post)...');
-  const postResp = await call({ method: 'POST', url: `${S.creator}/publish/pc/api/task/post`, headers: jsonH, body: JSON.stringify({ taskIdList: [taskId] }) });
+  const postResp = await call({ method: 'POST', url: `${S.creator}/publish/pc/api/task/post`, headers: jsonH, body: JSON.stringify({ taskIdList: [taskId] }), signal });
   const postTask = ((postResp.json && postResp.json.data && postResp.json.data.taskList) || [])[0] || {};
   if (postResp.status !== 200 || postTask.errorCode !== 0) {
     throw new Error(`task/post 失败(${postResp.status})。响应: ${postResp.text.slice(0, 500)}`);
@@ -693,6 +722,10 @@ const clients = new Map(); // jobId -> Set(res)
 const jobEvents = new Map();
 const JOB_EVENT_CAP = 20; // 本地工具场景，最多缓存最近 20 个任务的事件
 const JOB_EVENT_MAX = 200; // 单个任务最多保留 200 条事件
+
+// 任务取消：jobControllers（jobId -> AbortController，中断进行中的请求）+ abortedJobs（取消标志）
+const jobControllers = new Map();
+const abortedJobs = new Set();
 
 function keepJobEvents(jobId, data) {
   if (!jobEvents.has(jobId)) jobEvents.set(jobId, []);
@@ -716,23 +749,45 @@ function broadcast(jobId, data) {
   }
 }
 
+// 任务收尾：中断请求、清取消标志、断开 SSE 连接（clients 由各连接 close 自行清理，这里兜底）
+function finishJob(jobId) {
+  const c = jobControllers.get(jobId);
+  if (c) { try { c.abort(); } catch (e) { /* ignore */ } jobControllers.delete(jobId); }
+  abortedJobs.delete(jobId);
+  clients.delete(jobId);
+}
+
 async function processJob(jobId, rows, creds, uploadOne) {
   const total = rows.length;
+  let done = 0;
   for (let i = 0; i < total; i++) {
+    if (abortedJobs.has(jobId)) {
+      broadcast(jobId, { type: 'cancelled', total, done });
+      finishJob(jobId);
+      return;
+    }
     const row = rows[i];
     broadcast(jobId, { type: 'row-start', index: i, total, row });
     try {
+      const signal = (jobControllers.get(jobId) || { signal: undefined }).signal;
       const result = await uploadOne(row, creds, (step, msg) =>
         broadcast(jobId, { type: 'step', index: i, step, msg })
-      );
+      , signal);
+      done++;
       broadcast(jobId, { type: 'row-done', index: i, result });
     } catch (e) {
+      // 取消触发的中断（如正在上传的请求被 abort）不当作行失败上报
+      if (abortedJobs.has(jobId)) {
+        broadcast(jobId, { type: 'cancelled', total, done });
+        finishJob(jobId);
+        return;
+      }
+      done++;
       broadcast(jobId, { type: 'row-error', index: i, error: e.message });
     }
   }
-  broadcast(jobId, { type: 'finished', total });
-  // 任务结束即清理，防止 clients 长期累积
-  clients.delete(jobId);
+  broadcast(jobId, { type: 'finished', total, done });
+  finishJob(jobId);
 }
 
 // ============ 路由注册 ============
@@ -851,16 +906,48 @@ function register({ get, post }) {
       }
       const jobId = crypto.randomBytes(8).toString('hex');
       clients.set(jobId, new Set());
+      jobControllers.set(jobId, new AbortController());
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ jobId }));
       const uploadOne = siteKey === 'ph'
-        ? (row, creds, log) => uploadOnePh(row, creds, siteKey, log)
-        : (row, creds, log) => uploadOneCn(row, creds, log);
+        ? (row, creds, log, signal) => uploadOnePh(row, creds, siteKey, log, signal)
+        : (row, creds, log, signal) => uploadOneCn(row, creds, log, signal);
       processJob(jobId, rows, creds, uploadOne).catch((e) =>
         broadcast(jobId, { type: 'fatal', error: e.message })
       );
     });
   });
+
+  // 取消任务：标记取消并中断进行中的请求；processJob 见取消标志后广播 cancelled 并收尾
+  post('/api/cancel', (req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      let jobId = '';
+      try { jobId = String((JSON.parse(body) || {}).jobId || ''); } catch (e) { jobId = ''; }
+      if (!jobId) {
+        res.writeHead(400); res.end(JSON.stringify({ ok: false, message: '缺少 jobId' })); return;
+      }
+      if (!jobControllers.has(jobId)) {
+        res.writeHead(404); res.end(JSON.stringify({ ok: false, message: '任务不存在或已结束' })); return;
+      }
+      abortedJobs.add(jobId);
+      const c = jobControllers.get(jobId);
+      if (c) c.abort();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+  });
 }
 
 module.exports = { register };
+
+// 仅供单元测试使用的内部状态与任务调度（无需启动服务即可确定性验证取消逻辑）
+module.exports._test = {
+  processJob,
+  jobEvents,
+  broadcast,
+  abortedJobs,
+  jobControllers,
+  finishJob,
+};

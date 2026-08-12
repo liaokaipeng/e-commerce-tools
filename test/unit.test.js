@@ -10,13 +10,17 @@ const { t } = require('./helpers');
 const {
   md5hex,
   etagOf,
+  etagFromSha1Hex,
+  streamHashes,
   decryptVodToken,
   awsSigV4,
   authExpOf,
   findItemIds,
   probeVideo,
+  probeVideoFile,
   validateUploadRow,
 } = require('../lib/video-utils');
+const video = require('../video');
 const {
   extractUrls,
   extractVideoIdFromUrl,
@@ -75,6 +79,23 @@ async function run() {
     const expect = Buffer.concat([Buffer.from([0x16]), crypto.createHash('sha1').update(buf).digest()]).toString('base64url');
     t('etagOf 拼接 0x16 + sha1 并 base64url', etagOf(buf) === expect);
     t('etagOf 确定性', etagOf(buf) === etagOf(buf));
+    t('etagFromSha1Hex 与 etagOf 一致', etagFromSha1Hex(crypto.createHash('sha1').update(buf).digest('hex')) === etagOf(buf));
+  }
+
+  // ===== streamHashes（流式哈希，不整文件加载） =====
+  {
+    const tmp = path.join(os.tmpdir(), `kp_hash_${Date.now()}.dat`);
+    const content = Buffer.from('stream-hash-test-content-流式哈希测试');
+    fs.writeFileSync(tmp, content);
+    try {
+      const h = await streamHashes(tmp);
+      t('streamHashes 返回正确 size', h.size === content.length, `size=${h.size}`);
+      t('streamHashes md5 与一次性计算一致', h.md5 === crypto.createHash('md5').update(content).digest('hex'));
+      t('streamHashes sha1 与一次性计算一致', h.sha1 === crypto.createHash('sha1').update(content).digest('hex'));
+      t('streamHashes sha256 与一次性计算一致', h.sha256 === crypto.createHash('sha256').update(content).digest('hex'));
+    } finally {
+      fs.unlinkSync(tmp);
+    }
   }
 
   // ===== decryptVodToken =====
@@ -117,6 +138,14 @@ async function run() {
     t('awsSigV4 日期为 YYYYMMDDTHHMMSSZ', /^\d{8}T\d{6}Z$/.test(s1['x-amz-date']));
     t('awsSigV4 相同输入输出确定', s1.Authorization === s2.Authorization);
   }
+  {
+    const o = {
+      method: 'PUT', host: 'up.example.com', path: '/a.mp4', headers: {},
+      payloadSha256: 'precomputed-hash', accessKey: 'ak', secretKey: 'sk', region: 'PH', service: 's3',
+    };
+    const s = awsSigV4(o);
+    t('awsSigV4 流式场景使用预计算 payloadSha256', s['x-amz-content-sha256'] === 'precomputed-hash');
+  }
 
   // ===== findItemIds =====
   {
@@ -133,6 +162,26 @@ async function run() {
     t('probeVideo 解析出时长 ms', r.duration === 5000, `duration=${r.duration}`);
     t('probeVideo 空输入返回 0', probeVideo(Buffer.alloc(0)).duration === 0);
     t('probeVideo 非 mp4 数据不抛错', probeVideo(Buffer.from('not an mp4 at all')).width === 0);
+  }
+
+  // ===== probeVideoFile（文件级采样探针） =====
+  {
+    const tmp = path.join(os.tmpdir(), `kp_probe_${Date.now()}.mp4`);
+    fs.writeFileSync(tmp, buildMp4());
+    try {
+      const r = probeVideoFile(tmp);
+      t('probeVideoFile 解析出宽高', r.width === 1920 && r.height === 1080, `${r.width}x${r.height}`);
+      t('probeVideoFile 解析出时长 ms', r.duration === 5000, `duration=${r.duration}`);
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+    const bad = path.join(os.tmpdir(), `kp_probe_bad_${Date.now()}.mp4`);
+    fs.writeFileSync(bad, 'not an mp4 at all');
+    try {
+      t('probeVideoFile 非 mp4 文件返回 0 不抛错', probeVideoFile(bad).width === 0);
+    } finally {
+      fs.unlinkSync(bad);
+    }
   }
 
   // ===== validateUploadRow =====
@@ -179,6 +228,36 @@ async function run() {
   t('toAmount 空值返回空串', toAmount(null) === '' && toAmount('0') === '');
   t('toAmount 分转元', toAmount(100000) === 1);
   t('toAmount 四舍五入到分', toAmount(12345678) === 123.46);
+
+  // ===== 任务取消（确定性验证，不依赖网络与服务） =====
+  {
+    const { processJob, jobEvents, abortedJobs, finishJob } = video._test;
+    // 场景 A：任务开始前已标记取消 → 一行都不执行，广播 cancelled
+    const jobA = 'cancel-test-a';
+    abortedJobs.add(jobA);
+    let callsA = 0;
+    await processJob(jobA, [{ path: 'x' }, { path: 'y' }], {}, async () => { callsA++; return {}; });
+    const evsA = jobEvents.get(jobA) || [];
+    t('取消：已标记任务不执行任何行', callsA === 0, `calls=${callsA}`);
+    t('取消：广播 cancelled 事件', evsA.some((e) => e.type === 'cancelled'), JSON.stringify(evsA));
+    t('取消：cancelled 携带 total', (evsA.find((e) => e.type === 'cancelled') || {}).total === 2);
+    t('取消：不再广播 finished', !evsA.some((e) => e.type === 'finished'));
+    finishJob(jobA);
+
+    // 场景 B：第一行完成后标记取消 → 停止后续行，广播 cancelled
+    const jobB = 'cancel-test-b';
+    let callsB = 0;
+    await processJob(jobB, [{ path: 'a' }, { path: 'b' }, { path: 'c' }], {}, async () => {
+      callsB++;
+      if (callsB === 1) abortedJobs.add(jobB);
+      return {};
+    });
+    const evsB = jobEvents.get(jobB) || [];
+    t('取消：中途取消停止后续行', callsB === 1, `calls=${callsB}`);
+    t('取消：中途取消收到 cancelled', evsB.some((e) => e.type === 'cancelled'), JSON.stringify(evsB));
+    t('取消：row-done 与 cancelled 同时存在', evsB.some((e) => e.type === 'row-done') && evsB.some((e) => e.type === 'cancelled'));
+    finishJob(jobB);
+  }
 }
 
 module.exports = { run };
