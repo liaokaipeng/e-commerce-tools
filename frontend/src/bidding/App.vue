@@ -1,7 +1,8 @@
 <script setup>
-import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import DirPicker from '../components/DirPicker.vue';
+import { useDirSettings, useLogScroll, readSSE } from '../composables/useToolPage.js';
 
 // ---------- 登录状态 ----------
 const status = reactive({ loggedIn: false, cookieCount: 0, savedAt: '', tip: '', checking: true });
@@ -86,78 +87,16 @@ function clearAll() {
 }
 
 // ---------- 保存位置 ----------
-const dir = ref('');
-const hasDefault = ref(false);
-const dirPickerVisible = ref(false);
-
-async function loadDirSettings() {
-  try {
-    const r = await fetch('/api/settings');
-    const s = await r.json();
-    const d = s.defaults && s.defaults.bidding;
-    if (d) {
-      dir.value = d;
-      hasDefault.value = true;
-    }
-  } catch {}
-}
-
-async function setDefaultDir(d) {
-  try {
-    const r = await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tool: 'bidding', dir: d }),
-    });
-    const res = await r.json();
-    if (res.ok) {
-      hasDefault.value = true;
-      log('已设为默认目录：' + d, 'ok');
-      return true;
-    }
-    log('设置默认目录失败：' + (res.message || '未知错误'), 'err');
-    return false;
-  } catch {
-    log('设置默认目录失败：连接服务失败', 'err');
-    return false;
-  }
-}
-
-async function openDir() {
-  const d = dir.value.trim();
-  if (!d) {
-    ElMessage.warning('请先填写保存目录');
-    return;
-  }
-  try {
-    const r = await fetch('/api/open-dir', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dir: d }),
-    });
-    const res = await r.json();
-    if (!res.ok) log('无法打开目录：' + res.message, 'err');
-  } catch {
-    log('无法打开目录：连接服务失败', 'err');
-  }
-}
+const { dir, hasDefault, dirPickerVisible, loadSettings: loadDirSettings, setDefaultDir, openDir } = useDirSettings('bidding', log);
 
 // ---------- 日志 ----------
 const logLines = ref([]);
-const logEl = ref(null);
+const { logEl } = useLogScroll(logLines);
 
 function log(msg, cls) {
   const time = new Date().toLocaleTimeString();
   logLines.value.push({ time, msg, cls });
 }
-
-watch(
-  () => logLines.value.length,
-  async () => {
-    await nextTick();
-    if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight;
-  }
-);
 
 // ---------- 导出 ----------
 const exporting = ref(false);
@@ -188,39 +127,21 @@ async function doExport() {
       log(err.msg || err.message || '请求失败', 'err');
       return;
     }
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const parts = buf.split('\n\n');
-      buf = parts.pop();
-      for (const part of parts) {
-        const line = part.split('\n').find((l) => l.startsWith('data: '));
-        if (!line) continue;
-        let ev;
-        try {
-          ev = JSON.parse(line.slice(6));
-        } catch {
-          continue;
+    await readSSE(resp, (ev) => {
+      if (ev.type === 'start') {
+        log(`▶ ${ev.name}（${ev.shopId}）导出中…`, 'info');
+      } else if (ev.type === 'done') {
+        if (ev.ok) {
+          log(`✓ ${ev.name}（${ev.shopId}）导出成功：${ev.rows} 条 → ${ev.file}`, 'ok');
+        } else {
+          log(`✕ ${ev.name}（${ev.shopId}）失败：${ev.msg}`, 'err');
         }
-        if (ev.type === 'start') {
-          log(`▶ ${ev.name}（${ev.shopId}）导出中…`, 'info');
-        } else if (ev.type === 'done') {
-          if (ev.ok) {
-            log(`✓ ${ev.name}（${ev.shopId}）导出成功：${ev.rows} 条 → ${ev.file}`, 'ok');
-          } else {
-            log(`✕ ${ev.name}（${ev.shopId}）失败：${ev.msg}`, 'err');
-          }
-        } else if (ev.type === 'summary') {
-          log(`完成：成功 ${ev.success} / 失败 ${ev.failed} / 共 ${ev.total} 个店铺。`, 'info');
-        } else if (ev.type === 'fatal') {
-          log(ev.msg, 'err');
-        }
+      } else if (ev.type === 'summary') {
+        log(`完成：成功 ${ev.success} / 失败 ${ev.failed} / 共 ${ev.total} 个店铺。`, 'info');
+      } else if (ev.type === 'fatal') {
+        log(ev.msg, 'err');
       }
-    }
+    });
   } catch (e) {
     log('导出请求失败：' + e.message, 'err');
   } finally {

@@ -76,7 +76,10 @@ function push() {
     .finally(() => { pushing = false; });
 }
 
-// 监听发往各 Shopee 站点与上传域名的请求头
+// 两个监听器共用的站点过滤列表
+const FILTER = { urls: ['https://*.shopee.cn/*', 'https://*.shopee.ph/*'] };
+
+// 监听发往跨境（shopee.cn）与本土菲律宾（shopee.ph）站点的请求头
 chrome.webRequest.onBeforeSendHeaders.addListener(
   (d) => {
     try {
@@ -129,14 +132,7 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
       }
     } catch (e) { /* ignore */ }
   },
-  { urls: [
-    'https://*.shopee.cn/*',
-    'https://*.shopee.ph/*',
-    'https://*.shopee.com/*',
-    'https://*.shopee.sg/*',
-    'https://*.shopee.com.my/*',
-    'https://*.usercontent.com/*',
-  ] },
+  FILTER,
   ['requestHeaders', 'extraHeaders']
 );
 
@@ -157,8 +153,7 @@ chrome.webRequest.onBeforeRequest.addListener(
       const m = text.match(/userId=(\d+)/) || text.match(/"userId":\s*"?(\d+)/);
       if (m && m[1]) {
         const c = siteObj(site);
-        let target = c.pending || (c.pending = {});
-        if (c.curShopId) target = shopObj(site, c.curShopId);
+        const target = c.curShopId ? shopObj(site, c.curShopId) : (c.pending || (c.pending = {}));
         if (target.userid !== m[1]) {
           target.userid = m[1];
           persist();
@@ -167,11 +162,6 @@ chrome.webRequest.onBeforeRequest.addListener(
       }
     } catch (e) { /* ignore */ }
   },
-  { urls: [
-    'https://*.shopee.cn/*',
-    'https://*.shopee.ph/*',
-    'https://*.shopee.com/*',
-    'https://*.shopee.com.my/*',
-  ] },
+  FILTER,
   ['requestBody']
 );

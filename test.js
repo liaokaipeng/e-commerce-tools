@@ -65,7 +65,7 @@ async function main() {
     }
 
     console.log('===== 页面静态资源 =====');
-    for (const p of ['/', '/tiktok/', '/bidding/', '/video/', '/xlsx.full.min.js']) {
+    for (const p of ['/', '/tiktok/', '/bidding/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/xlsx.full.min.js']) {
       const r = await req('GET', p);
       t(`GET ${p} 返回 200`, r.status === 200, `status=${r.status}`);
     }

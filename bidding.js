@@ -7,7 +7,7 @@ const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
 const { request } = require('./lib/http');
-const { sendJson } = require('./lib/http-utils');
+const { sendJson, readBody } = require('./lib/http-utils');
 
 const SESSION_FILE = path.join(__dirname, 'bidding-session.json');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -116,7 +116,7 @@ async function fetchWinningData(cookieHeader, shopId, region) {
   return { rows, total };
 }
 
-async function writeExcel(shopId, rows, outPath) {
+async function writeExcel(rows, outPath) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'bidding-export';
   const ws = wb.addWorksheet('获胜竞价');
@@ -161,33 +161,29 @@ async function exportShop(shopId, saveDir) {
   const pad = n => String(n).padStart(2, '0');
   const ts = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   const out = path.join(outDir, `竞价获胜_店铺${shopId}_${ts}.xlsx`);
-  await writeExcel(shopId, rows, out);
+  await writeExcel(rows, out);
 
-  return { shopId, rows: rows.length, total, file: path.basename(out) };
+  return { rows: rows.length, total, file: path.basename(out) };
 }
 
 // ============ 接收扩展 Cookie ============
-function handleCookie(req, res) {
-  let body = '';
-  req.on('data', chunk => { body += chunk; });
-  req.on('end', () => {
-    try {
-      const payload = JSON.parse(body);
-      const cookies = payload.cookies || [];
-      if (!cookies.length) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('no cookies');
-        return;
-      }
-      fs.writeFileSync(SESSION_FILE, JSON.stringify(payload, null, 2));
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('ok');
-      console.log(`✅ 已收到 ${cookies.length} 个 Cookie，保存到 ${SESSION_FILE}`);
-    } catch (e) {
+async function handleCookie(req, res) {
+  try {
+    const payload = JSON.parse(await readBody(req));
+    const cookies = payload.cookies || [];
+    if (!cookies.length) {
       res.writeHead(400, { 'Content-Type': 'text/plain' });
-      res.end('bad json: ' + e.message);
+      res.end('no cookies');
+      return;
     }
-  });
+    fs.writeFileSync(SESSION_FILE, JSON.stringify(payload, null, 2));
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+    console.log(`✅ 已收到 ${cookies.length} 个 Cookie，保存到 ${SESSION_FILE}`);
+  } catch (e) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('bad json: ' + e.message);
+  }
 }
 
 // ============ 导出接口（SSE 流式事件） ============
@@ -249,14 +245,10 @@ function register({ get, post }) {
     sendJson(res, 200, STORES);
   });
 
-  post('/api/export', (req, res) => {
-    let body = '';
-    req.on('data', c => { body += c; });
-    req.on('end', () => {
-      let parsed = {};
-      try { parsed = JSON.parse(body); } catch (e) { console.warn('解析 /api/export 请求体失败:', e.message); }
-      handleExport(parsed, res);
-    });
+  post('/api/export', async (req, res) => {
+    let parsed = {};
+    try { parsed = JSON.parse(await readBody(req)); } catch (e) { console.warn('解析 /api/export 请求体失败:', e.message); }
+    handleExport(parsed, res);
   });
 
   post('/api/cookie', (req, res) => {
@@ -264,4 +256,4 @@ function register({ get, post }) {
   });
 }
 
-module.exports = { register, STORES };
+module.exports = { register };

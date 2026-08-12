@@ -22,19 +22,9 @@ const UA =
 
 // ------- 站点配置（跨境 / 本土） -------
 // cn = 跨境（.cn 覆盖多国）；ph = 本土菲律宾（一个站点一个域名）。
-// 各站点接口域名/参数不同，上传链路也不同（cn 走分片+merge，ph 走单次 PUT+task 发布）。
+// 上传链路不同：cn 走分片+merge（域名/参数见顶部常量），ph 走单次 PUT+task 发布（域名/参数见此处配置）。
 const SITES = {
-  cn: {
-    label: '跨境（.cn）',
-    mms: 'https://api.mms.shopee.cn',
-    upload: 'https://up-sp.vod.shopee.cn',
-    solutions: 'https://solutions.shopee.cn',
-    biz: 178,
-    region: 'CN',
-    ostype: 'web',
-    sdkversion: '3.4.5',
-    origin: 'https://solutions.shopee.cn',
-  },
+  cn: { label: '跨境（.cn）' },
   ph: {
     label: '本土-菲律宾（.ph）',
     mms: 'https://api.mms.shopee.ph',
@@ -54,6 +44,27 @@ const SITES = {
 const CREDS_FILE = path.join(__dirname, 'video-session.json');
 let storedCreds = {}; // site -> creds
 
+// 旧扁平凭证格式 {auth,cookie,shopId,userid,updatedAt} → 统一结构（字段缺省为空）
+function flatCreds(o) {
+  return {
+    auth: o.auth || '',
+    cookie: o.cookie || '',
+    shopId: o.shopId || '',
+    userid: o.userid || '',
+    updatedAt: o.updatedAt || 0,
+  };
+}
+
+// 从扩展推送的原始对象中提取可存凭证（auth 需为合法 token 前缀、cookie 需足够长，避免存垃圾值）
+function credsPatch(src, withShopId) {
+  const patch = {};
+  if (src.auth && src.auth.startsWith('NTAw')) patch.auth = src.auth;
+  if (src.cookie && src.cookie.length > 80) patch.cookie = src.cookie;
+  if (withShopId && src.shopId) patch.shopId = String(src.shopId);
+  if (src.userid) patch.userid = String(src.userid);
+  return patch;
+}
+
 function loadCredsFile() {
   let raw = {};
   try {
@@ -64,7 +75,7 @@ function loadCredsFile() {
   }
   // 兼容旧格式：顶层 {auth,cookie,shopId} 视为跨境 cn → 归入 shops
   if (raw.auth || raw.cookie || raw.shopId) {
-    const flat = { auth: raw.auth || '', cookie: raw.cookie || '', shopId: raw.shopId || '', userid: raw.userid || '', updatedAt: raw.updatedAt || 0 };
+    const flat = flatCreds(raw);
     if (flat.shopId) storedCreds.cn = { shops: { [String(flat.shopId)]: flat } };
   }
   for (const s of Object.keys(SITES)) {
@@ -73,7 +84,7 @@ function loadCredsFile() {
     if (s === 'cn') {
       if (v.shops && typeof v.shops === 'object') storedCreds.cn = { shops: v.shops };
       else if (v.cookie || v.auth || v.shopId) {
-        const flat = { auth: v.auth || '', cookie: v.cookie || '', shopId: v.shopId || '', userid: v.userid || '', updatedAt: v.updatedAt || 0 };
+        const flat = flatCreds(v);
         if (flat.shopId) storedCreds.cn = { shops: { [String(flat.shopId)]: flat } };
       }
     } else if (v.cookie || v.auth || v.shopId || v.userid) {
@@ -132,17 +143,6 @@ async function call(opts) {
   }
   throw new Error('请求重试后仍失败');
 }
-
-// ------- 店铺列表（复用 stores.json，用于展示 shopId 对应店名，参考竞价导出） -------
-function loadStores() {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(__dirname, 'stores.json'), 'utf8'));
-  } catch (e) {
-    console.warn('读取 stores.json 失败:', e.message);
-    return [];
-  }
-}
-const STORES = loadStores();
 
 // ------- 上传流程各步骤 -------
 // 用 Cookie 尝试从授权接口换取新上传凭证，换到返回 token，换不到返回空字符串。
@@ -496,7 +496,7 @@ function probeVideo(buf) {
 }
 
 // ------- 单个视频的完整上传（跨境 .cn） -------
-async function uploadOneCn(row, creds, site, log) {
+async function uploadOneCn(row, creds, log) {
   let { auth, cookie, shopId } = creds;
   const filePath = row.path;
   const rowErr = validateUploadRow(row);
@@ -850,13 +850,13 @@ function broadcast(jobId, data) {
   }
 }
 
-async function processJob(jobId, rows, creds, site, uploadOne) {
+async function processJob(jobId, rows, creds, uploadOne) {
   const total = rows.length;
   for (let i = 0; i < total; i++) {
     const row = rows[i];
     broadcast(jobId, { type: 'row-start', index: i, total, row });
     try {
-      const result = await uploadOne(row, creds, site, (step, msg) =>
+      const result = await uploadOne(row, creds, (step, msg) =>
         broadcast(jobId, { type: 'step', index: i, step, msg })
       );
       broadcast(jobId, { type: 'row-done', index: i, result });
@@ -903,11 +903,6 @@ function register({ get, post }) {
     res.end(JSON.stringify({ sites: storedCreds, updatedAt: Date.now() }));
   });
 
-  // 店铺列表（用于把 shopId 展示成店名，复用 stores.json，参考竞价导出）
-  get('/api/stores', (req, res) => {
-    res.writeHead(200, Object.assign({ 'Content-Type': 'application/json' }, corsH));
-    res.end(JSON.stringify(STORES));
-  });
   post('/api/creds', (req, res) => {
     let body = '';
     req.on('data', (c) => (body += c));
@@ -916,20 +911,8 @@ function register({ get, post }) {
         const p = JSON.parse(body);
         // 扩展单条推送：{ site, auth, cookie, shopId, userid }
         if (p.site && SITES[p.site]) {
-          if (p.site === 'cn' && p.shopId) {
-            const patch = {};
-            if (p.auth && p.auth.startsWith('NTAw')) patch.auth = p.auth;
-            if (p.cookie && p.cookie.length > 80) patch.cookie = p.cookie;
-            if (p.userid) patch.userid = String(p.userid);
-            setCnShop(p.shopId, patch);
-          } else {
-            const patch = {};
-            if (p.auth && p.auth.startsWith('NTAw')) patch.auth = p.auth;
-            if (p.cookie && p.cookie.length > 80) patch.cookie = p.cookie;
-            if (p.shopId) patch.shopId = String(p.shopId);
-            if (p.userid) patch.userid = String(p.userid);
-            setCredsFor(p.site, patch);
-          }
+          if (p.site === 'cn' && p.shopId) setCnShop(p.shopId, credsPatch(p, false));
+          else setCredsFor(p.site, credsPatch(p, true));
         }
         // 扩展批量推送：{ sites: { cn: { shops: {...} }, ph: {...} } }
         if (p.sites && typeof p.sites === 'object') {
@@ -939,27 +922,14 @@ function register({ get, post }) {
               if (v.shops && typeof v.shops === 'object') {
                 for (const [shopId, sv] of Object.entries(v.shops)) {
                   if (!sv || typeof sv !== 'object') continue;
-                  const patch = {};
-                  if (sv.auth && sv.auth.startsWith('NTAw')) patch.auth = sv.auth;
-                  if (sv.cookie && sv.cookie.length > 80) patch.cookie = sv.cookie;
-                  if (sv.userid) patch.userid = String(sv.userid);
-                  setCnShop(shopId, patch);
+                  setCnShop(shopId, credsPatch(sv, false));
                 }
               } else if (v.shopId) {
                 // 兼容旧扁平批量格式：{ cn: { auth, cookie, shopId, userid } } → 归入该店铺
-                const patch = {};
-                if (v.auth && v.auth.startsWith('NTAw')) patch.auth = v.auth;
-                if (v.cookie && v.cookie.length > 80) patch.cookie = v.cookie;
-                if (v.userid) patch.userid = String(v.userid);
-                setCnShop(v.shopId, patch);
+                setCnShop(v.shopId, credsPatch(v, false));
               }
             } else {
-              const patch = {};
-              if (v.auth && v.auth.startsWith('NTAw')) patch.auth = v.auth;
-              if (v.cookie && v.cookie.length > 80) patch.cookie = v.cookie;
-              if (v.shopId) patch.shopId = String(v.shopId);
-              if (v.userid) patch.userid = String(v.userid);
-              setCredsFor(s, patch);
+              setCredsFor(s, credsPatch(v, true));
             }
           }
         }
@@ -1007,8 +977,10 @@ function register({ get, post }) {
       clients.set(jobId, new Set());
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ jobId }));
-      const uploadOne = siteKey === 'ph' ? uploadOnePh : uploadOneCn;
-      processJob(jobId, rows, creds, siteKey, uploadOne).catch((e) =>
+      const uploadOne = siteKey === 'ph'
+        ? (row, creds, log) => uploadOnePh(row, creds, siteKey, log)
+        : (row, creds, log) => uploadOneCn(row, creds, log);
+      processJob(jobId, rows, creds, uploadOne).catch((e) =>
         broadcast(jobId, { type: 'fatal', error: e.message })
       );
     });

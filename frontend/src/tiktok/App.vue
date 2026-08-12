@@ -1,22 +1,23 @@
 <script setup>
-import { ref, computed, watch, nextTick, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import DirPicker from '../components/DirPicker.vue';
+import { useDirSettings, useLogScroll, readSSE } from '../composables/useToolPage.js';
 
 // ---------- 状态 ----------
 const urls = ref('');
-const dir = ref('');
 const downloading = ref(false);
 const abortRef = ref(null);
 const proxyConnected = ref(true);
 const proxyText = ref('正在检测网络环境...');
 const showVpn = ref(false);
-const hasDefault = ref(false);
-const dirPickerVisible = ref(false);
 
 const logLines = ref([]);
 const progress = ref({ show: false, done: 0, ok: 0, fail: 0, total: 0 });
 const summary = ref({ show: false, text: '', color: '' });
+
+const { dir, hasDefault, dirPickerVisible, loadSettings, setDefaultDir, openDir } = useDirSettings('tiktok', log);
+const { logEl } = useLogScroll(logLines);
 
 const validCount = computed(() => {
   return urls.value
@@ -29,15 +30,6 @@ function log(message, cls = 'info', title = '') {
   const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
   logLines.value.push({ time, cls, title, message });
 }
-
-const logEl = ref(null);
-watch(
-  () => logLines.value.length,
-  async () => {
-    await nextTick();
-    if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight;
-  }
-);
 
 // ---------- 代理状态 ----------
 async function checkNetwork() {
@@ -54,62 +46,6 @@ async function checkNetwork() {
   } catch {
     proxyConnected.value = false;
     proxyText.value = '服务未连接，请确认已启动 main.js';
-  }
-}
-
-// ---------- 目录 ----------
-async function loadSettings() {
-  try {
-    const r = await fetch('/api/settings');
-    const s = await r.json();
-    const d = s.defaults && s.defaults.tiktok;
-    if (d) {
-      dir.value = d;
-      hasDefault.value = true;
-    }
-  } catch {}
-}
-
-async function setDefaultDir(d) {
-  try {
-    const r = await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tool: 'tiktok', dir: d }),
-    });
-    const res = await r.json();
-    if (res.ok) {
-      hasDefault.value = true;
-      log('已设为默认目录：' + d, 'ok');
-      return true;
-    }
-    log('设置默认目录失败：' + (res.message || '未知错误'), 'err');
-    return false;
-  } catch {
-    log('设置默认目录失败：连接服务失败', 'err');
-    return false;
-  }
-}
-
-async function openDir() {
-  const d = dir.value.trim();
-  if (!d) {
-    ElMessage.warning('请先填写保存目录');
-    return;
-  }
-  try {
-    const r = await fetch('/api/open-dir', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dir: d }),
-    });
-    const data = await r.json();
-    if (!data.ok) {
-      ElMessage.warning('无法打开目录：' + data.message);
-      log('无法打开目录：' + data.message, 'err');
-    }
-  } catch {
-    ElMessage.warning('无法打开目录：连接服务失败');
   }
 }
 
@@ -194,28 +130,10 @@ async function startDownload() {
       log(err.message || '请求失败', 'err');
       return;
     }
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const parts = buf.split('\n\n');
-      buf = parts.pop();
-      for (const part of parts) {
-        const line = part.split('\n').find((l) => l.startsWith('data: '));
-        if (!line) continue;
-        let ev;
-        try {
-          ev = JSON.parse(line.slice(6));
-        } catch {
-          continue;
-        }
-        handleEvent(ev);
-        if (ev.network) networkIssue = true;
-      }
-    }
+    await readSSE(resp, (ev) => {
+      handleEvent(ev);
+      if (ev.network) networkIssue = true;
+    });
   } catch (e) {
     if (e.name === 'AbortError') {
       log('已手动停止下载任务', 'warn', '提示');

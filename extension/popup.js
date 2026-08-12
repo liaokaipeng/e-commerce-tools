@@ -1,6 +1,7 @@
 // 读取 Shopee 相关 Cookie（含 HttpOnly）并发送到本地工具（竞价导出用）
+// 竞价接口只走 seller.shopee.cn，故仅收集 shopee.cn 域的 Cookie
 const SERVER_URL = 'http://127.0.0.1:8765/api/cookie';
-const SHOPEE_DOMAINS = ['shopee.cn', 'shopee.com', 'shopee.com.hk', 'shopee.sg'];
+const SHOPEE_DOMAINS = ['shopee.cn'];
 
 function isShopeeDomain(domain) {
   return SHOPEE_DOMAINS.some(d => domain === d || domain.endsWith('.' + d));

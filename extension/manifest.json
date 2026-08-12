@@ -5,13 +5,8 @@
   "description": "推送 Shopee 登录 Cookie（竞价导出）与视频上传凭证到本地工具（127.0.0.1:8765）",
   "permissions": ["cookies", "webRequest", "storage"],
   "host_permissions": [
-    "https://seller.shopee.cn/*",
     "https://*.shopee.cn/*",
-    "https://*.shopee.com/*",
     "https://*.shopee.ph/*",
-    "https://*.shopee.sg/*",
-    "https://*.shopee.com.my/*",
-    "https://*.usercontent.com/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],

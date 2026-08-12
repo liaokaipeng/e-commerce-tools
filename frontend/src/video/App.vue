@@ -1,17 +1,18 @@
 <script setup>
-import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 
-// ---------- 站点（跨境 .cn / 本土各站点） ----------
-const SITES = [
-  { key: 'cn', label: '跨境（.cn）' },
-  { key: 'ph', label: '本土-菲律宾（.ph）' },
-];
-const site = ref('cn');
+// ---------- 站点（门户已按站点拆分为「跨境视频上传」「本土视频上传」两个入口） ----------
+// 本页站点由 URL 参数 ?mode=cn|ph 固定，不再提供站内切换。
+const SITES = {
+  cn: { key: 'cn', label: '跨境（.cn）' },
+  ph: { key: 'ph', label: '本土-菲律宾（.ph）' },
+};
+const modeParam = new URLSearchParams(window.location.search).get('mode');
+const site = ref(SITES[modeParam] ? modeParam : 'cn');
 const isPh = computed(() => site.value === 'ph');
 function siteLabel() {
-  const s = SITES.find((x) => x.key === site.value);
-  return s ? s.label : site.value;
+  return SITES[site.value].label;
 }
 
 // ---------- 凭证 ----------
@@ -19,7 +20,6 @@ const auth = ref('');
 const cookie = ref('');
 const shopId = ref('');
 const userid = ref('');
-const credsStatus = ref('');
 const refreshingCreds = ref(false);
 
 // 跨境 cn 多店铺：有凭证的店铺列表与当前选中店铺
@@ -32,7 +32,7 @@ function shopNameOf(id) {
   const s = stores.value.find((x) => String(x.id) === String(id));
   return s ? s.name : '';
 }
-const shopName = computed(() => shopNameOf(shopId.value));
+// 店铺下拉选项：展示全部已知店铺，无凭证的加标注
 const shopOptions = computed(() => cnShops.value.map((s) => {
   const base = shopNameOf(s.shopId) ? `${shopNameOf(s.shopId)}（${s.shopId}）` : `店铺 ${s.shopId}`;
   return { value: s.shopId, label: s.hasCred ? base : `${base}（无凭证，需上传一次）` };
@@ -51,21 +51,23 @@ function applyShop(id) {
 }
 
 function saveCreds() {
-  localStorage.setItem(`shopee_creds_${site.value}`, JSON.stringify({
-    auth: auth.value, cookie: cookie.value, shopId: shopId.value, userid: userid.value,
-  }));
+  // 跨境 cn 页面凭证由扩展抓取、按店铺存于服务端，本地仅记住所选店铺；本土 ph 完整记住凭证
+  const data = isPh.value
+    ? { auth: auth.value, cookie: cookie.value, shopId: shopId.value, userid: userid.value }
+    : { shopId: shopId.value || selectedShopId.value };
+  localStorage.setItem(`shopee_creds_${site.value}`, JSON.stringify(data));
 }
 
 function loadLocalCreds() {
   let c = {};
   try { c = JSON.parse(localStorage.getItem(`shopee_creds_${site.value}`) || '{}'); } catch (e) { c = {}; }
-  // 跨境 cn 多店铺：不预选、不预填，由用户手动选择店铺后再填入凭证
+  // 跨境 cn：页面无店铺控件，仅记住上次自动选中的店铺，保持发布目标稳定
   if (!isPh.value) {
     auth.value = '';
     cookie.value = '';
     shopId.value = '';
     userid.value = '';
-    selectedShopId.value = '';
+    selectedShopId.value = c.shopId || '';
     return;
   }
   auth.value = c.auth || '';
@@ -75,13 +77,9 @@ function loadLocalCreds() {
   selectedShopId.value = c.shopId || '';
 }
 
-function setValIfNotFocused(id, v) {
-  // 不覆盖正在编辑的输入框（auth/cookie 已不在页面展示，仅同步 shopId/userid）
-  const el = document.getElementById(id);
-  if (el && v && document.activeElement !== el) {
-    if (id === 'shopId') shopId.value = v;
-    else if (id === 'userid') userid.value = v;
-  }
+function setUseridIfNotFocused(v) {
+  const el = document.getElementById('userid');
+  if (el && v && document.activeElement !== el) userid.value = v;
 }
 
 async function loadCredsFromServer(quiet) {
@@ -95,17 +93,12 @@ async function loadCredsFromServer(quiet) {
         // auth/cookie 已无可见输入框，不会被用户编辑，直接从服务端同步
         if (cur.auth) auth.value = cur.auth;
         if (cur.cookie) cookie.value = cur.cookie;
-        setValIfNotFocused('shopId', cur.shopId);
-        setValIfNotFocused('userid', cur.userid);
+        setUseridIfNotFocused(cur.userid);
         const t = cur.updatedAt ? new Date(cur.updatedAt).toLocaleString() : '';
-        credsStatus.value = '已自动获取「' + siteLabel() + '」凭证' + (t ? '（' + t + '）' : '');
         if (!quiet) saveCreds();
-      } else {
-        credsStatus.value = '尚未抓取到「' + siteLabel() + '」凭证，请安装扩展并在该站点短视频页手动上传一次';
-      }
+      } 
     } else {
       const shopsMap = (sites.cn && sites.cn.shops) || {};
-      // 保留服务端全部已知店铺，无凭证的也展示（标注），避免店铺“悄悄消失”
       const list = Object.entries(shopsMap)
         .map(([id, v]) => {
           const auth = (v && v.auth) || '';
@@ -122,21 +115,22 @@ async function loadCredsFromServer(quiet) {
         .sort((a, b) => Number(b.hasCred) - Number(a.hasCred));
       cnShops.value = list;
       if (list.length) {
-        const cur = selectedShopId.value && list.find((x) => x.shopId === selectedShopId.value);
-        if (cur) {
-          if (cur.auth) auth.value = cur.auth;
-          if (cur.cookie) cookie.value = cur.cookie;
-          setValIfNotFocused('shopId', cur.shopId);
-          setValIfNotFocused('userid', cur.userid);
+        // 优先沿用当前所选店铺（用户手动选择或上次记住的），未选择时自动挑最近更新的有凭证店铺
+        const withCred = list
+          .filter((x) => x.hasCred)
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        let cur = selectedShopId.value ? list.find((x) => x.shopId === selectedShopId.value) : null;
+        if (!cur) cur = withCred[0] || list[0];
+        if (selectedShopId.value !== cur.shopId) {
+          selectedShopId.value = cur.shopId;
+          saveCreds();
         }
-        const credCount = list.filter((x) => x.hasCred).length;
-        const noCredCount = list.length - credCount;
-        credsStatus.value = `已识别「${siteLabel()}」${list.length} 家店铺，其中 ${credCount} 家有凭证`
-          + (noCredCount ? `，${noCredCount} 家暂无凭证（需重新上传）` : '') + '；请在上方选择店铺';
+        if (cur.auth) auth.value = cur.auth;
+        if (cur.cookie) cookie.value = cur.cookie;
+        shopId.value = cur.shopId;
+        if (cur.userid) userid.value = cur.userid;
         if (!quiet) saveCreds();
-      } else {
-        credsStatus.value = '尚未抓取到「' + siteLabel() + '」凭证，请安装扩展并在任一店铺短视频页手动上传一次（凭证账号级通用）';
-      }
+      } 
     }
   } catch (e) {
     /* 服务未启动忽略 */
@@ -336,11 +330,11 @@ function startUpload() {
     return;
   }
   if (isPh.value && !useridV) {
-    ElMessage.warning('本土站点请填写 User ID（扩展会自动抓取，若为空请手动填写，见下方说明）');
+    ElMessage.warning('本土站点请填写 User ID（扩展会自动抓取，若为空请手动填写）');
     return;
   }
   if (!isPh.value && !shopIdV) {
-    ElMessage.warning('跨境站点请填写 Shop ID（Authorization 可留空，会自动获取）');
+    ElMessage.warning('未识别到可用的跨境店铺：请安装扩展，在任一店铺短视频页手动上传一次以自动抓取凭证');
     return;
   }
 
@@ -412,6 +406,7 @@ function startUpload() {
 }
 
 onMounted(() => {
+  document.title = isPh.value ? '本土视频批量上传' : '跨境视频批量上传';
   loadLocalCreds();
   loadCredsFromServer(true);
   fetch('/api/stores')
@@ -419,13 +414,8 @@ onMounted(() => {
     .then((d) => { stores.value = Array.isArray(d) ? d : []; })
     .catch(() => { /* 服务未启动忽略 */ });
   const timer = setInterval(() => loadCredsFromServer(true), 5000);
-  const stopWatch = watch(site, () => {
-    loadLocalCreds();
-    loadCredsFromServer(true);
-  });
   onUnmounted(() => {
     clearInterval(timer);
-    stopWatch();
     if (es) es.close();
   });
 });
@@ -437,40 +427,19 @@ onMounted(() => {
 
     <!-- 凭证 -->
     <el-card shadow="never" class="card">
-        <el-collapse style="border: none">
-          <el-collapse-item title="上传站点与凭证（扩展自动抓取，无需手填）" name="creds">
-            <div class="row">
-              <span class="site-label">上传站点</span>
-              <el-select v-model="site" style="max-width: 260px">
-                <el-option v-for="s in SITES" :key="s.key" :value="s.key" :label="s.label" />
-              </el-select>
-            </div>
-            <div v-if="!isPh" class="row" style="margin-top: 8px">
-              <span class="site-label">选择店铺</span>
-              <el-select v-model="selectedShopId" style="min-width: 280px" placeholder="选择有凭证的店铺" @change="applyShop">
-                <el-option v-for="o in shopOptions" :key="o.value" :value="o.value" :label="o.label" />
-              </el-select>
-            </div>
-            <div v-if="!isPh" class="row" style="margin-top: 8px">
-              <el-input id="shopId" v-model="shopId" style="max-width: 220px" placeholder="Shop ID">
-                <template #label>Shop ID（仅跨境需要）</template>
-              </el-input>
-              <span v-if="shopName" class="hint shop-name">→ {{ shopName }}</span>
-            </div>
-            <div v-if="isPh" class="row" style="margin-top: 8px">
-              <el-input id="userid" v-model="userid" style="max-width: 220px" placeholder="User ID（如 13469117809）">
-                <template #label>User ID（本土上传需要，扩展会自动抓取，若为空请手动填写）</template>
-              </el-input>
-            </div>
-            <div class="btn-row" style="margin-top: 10px">
-              <el-button :loading="refreshingCreds" @click="refreshCreds">从浏览器刷新凭证</el-button>
-              <span class="hint creds-status">{{ credsStatus }}</span>
-            </div>
-            <div class="hint">
-              凭证由「KP工具合集助手」扩展自动抓取，无需手填；跨境凭证账号级通用，任一店铺上传一次即可供同账号所有店铺使用。凭证失效（报 token is expired）时重新登录并在短视频页上传一次即可。
-            </div>
-          </el-collapse-item>
-        </el-collapse>
+      <template #header><span>上传凭证</span></template>
+      <div v-if="!isPh" class="row">
+        <el-select v-model="selectedShopId" style="min-width: 280px" placeholder="选择要发布到的店铺" @change="applyShop">
+          <el-option v-for="o in shopOptions" :key="o.value" :value="o.value" :label="o.label" />
+        </el-select>
+      </div>
+      <div v-if="isPh" class="row">
+        <span class="field-label">User ID（本土上传需要，扩展会自动抓取，若为空请手动填写）</span>
+        <el-input id="userid" v-model="userid" style="max-width: 220px" placeholder="如 13469117809" />
+      </div>
+      <div class="btn-row" style="margin-top: 10px">
+        <el-button :loading="refreshingCreds" @click="refreshCreds">从浏览器刷新凭证</el-button>
+      </div>
     </el-card>
 
     <!-- 表格 -->
@@ -565,9 +534,8 @@ onMounted(() => {
 .file-row { display: flex; flex-direction: column; gap: 8px; }
 .file-input { padding: 4px 0; }
 .hint { font-size: 12px; color: #9aa0ad; margin-top: 6px; }
-.site-label { font-size: 12px; color: #6b7280; margin-right: 8px; align-self: center; }
+.field-label { font-size: 12px; color: #6b7280; margin-right: 8px; }
 .creds-status { align-self: center; margin: 0; }
-.shop-name { margin: 0 0 0 8px; align-self: center; color: #2f6fed; }
 .btn-row { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
 .mapping { margin-top: 14px; }
 .grid3 {
@@ -593,7 +561,6 @@ onMounted(() => {
   white-space: pre-wrap;
 }
 .log-line { margin: 0 0 2px; }
-.log-line .tag { color: #7fd1ff; }
 .log-line.err { color: #ff7b72; }
 .log-line.ok { color: #5fd08a; }
 </style>

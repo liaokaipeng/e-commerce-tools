@@ -4,7 +4,7 @@
 
 ## 仓库概览
 
-本仓库为**工具合集（shopee-tools-all-in-one）**：单服务、单端口（8765）、单网页，提供三个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 视频批量上传）的本地 Node HTTP 服务 + 一个前端门户页，按 Tab 切换使用。
+本仓库为**工具合集（shopee-tools-all-in-one）**：单服务、单端口（8765）、单网页，提供三个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 视频批量上传）的本地 Node HTTP 服务 + 一个前端门户页，按 Tab 切换使用。其中视频上传在门户页按站点拆分为「跨境视频上传」「本土视频上传」两个 Tab（共用 `/video/` 页面，经 `?mode=cn|ph` 固定站点）。
 
 > 项目结构、技术栈、后端 API、构建方式见 [README.md](README.md)；最终用户操作见 [新手入门指南.md](新手入门指南.md)。
 
@@ -12,7 +12,8 @@
 
 - 后端一律 **CommonJS**（`require`/`module.exports`）；前端用 **Vue3 SFC**。改代码时保持文件原有风格，不混用。
 - 后端依赖仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端仅 `vue` / `element-plus` / `vite`。
-- 视频上传支持多站点（cn 跨境分片+merge / ph 菲律宾单次 PUT+task），凭证按站点存 `video-session.json`；跨境选店铺即可（凭证账号级通用，经 `resolveCnAuth` 统一解析）、菲律宾需 User ID。注意：solutions 接口成功码为 200000（非 0），有 post_id 即发布成功。
+- 前端 tiktok/bidding 两页共用逻辑抽在 `frontend/src/composables/useToolPage.js`（默认目录设置 / 日志自动滚动 / SSE 流读取），改动时优先复用，不重复实现。
+- 视频上传支持多站点（cn 跨境分片+merge / ph 菲律宾单次 PUT+task），凭证按站点存 `video-session.json`；跨境默认自动选定已抓凭证的店铺、可用「选择店铺」下拉框改选（凭证账号级通用，经 `resolveCnAuth` 统一解析）、菲律宾需 User ID。注意：solutions 接口成功码为 200000（非 0），有 post_id 即发布成功。
 - 扩展「KP工具合集助手」（MV3）负责竞价 Cookie 推送（`/api/cookie`）与视频上传凭证按站点抓取（`/api/creds`）；凭证缓存在 `chrome.storage.local`，抓到新请求时整包重推（故 `video-session.json` 清空后会被自动写回）。页面已不展示 Cookie/Authorization 输入框，凭证全靠扩展自动抓取。
 
 ## 约定与约束

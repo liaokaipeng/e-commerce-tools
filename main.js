@@ -3,7 +3,7 @@
 //   1) TikTok 无水印视频批量下载（原 8737）
 //   2) Shopee 竞价导出（原 8765）
 //   3) Shopee 视频批量上传（原 3000）
-// 前端为门户页（public/index.html），通过 Tab 切换三个工具页面：
+// 前端为门户页（frontend/dist，源码见 frontend/），通过 Tab 切换三个工具页面：
 //   /tiktok/   TikTok 下载
 //   /bidding/  Shopee 竞价导出
 //   /video/    Shopee 视频上传

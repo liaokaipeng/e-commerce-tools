@@ -10,7 +10,6 @@ server.log
 *.xlsx
 竞价获胜_*.xlsx
 
-session.json
 bidding-session.json
 video-session.json
 settings.json

@@ -1,11 +1,13 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue';
 
-// 三个工具各用一个 iframe，首次访问时加载并常驻 DOM。
+// 各工具各用一个 iframe，首次访问时加载并常驻 DOM。
 // 切换 Tab 只改变 display，不重新加载页面，从而保留各 Tab 状态。
+// 视频上传按站点拆分为两个入口（跨境 / 本土），共用 /video/ 页面，经 ?mode=cn|ph 区分站点。
 const tabs = [
   { key: 'bidding', label: '竞价导出', sub: '获胜数据 → Excel', group: 'Shopee', src: '/bidding/' },
-  { key: 'video', label: '视频上传', sub: '批量上传并关联商品', group: 'Shopee', src: '/video/' },
+  { key: 'video-cn', label: '跨境视频上传', sub: '批量上传并关联商品', group: 'Shopee', src: '/video/?mode=cn' },
+  { key: 'video-ph', label: '本土视频上传', sub: '菲律宾站点批量上传', group: 'Shopee', src: '/video/?mode=ph' },
   { key: 'tiktok', label: '视频下载', sub: '批量无水印下载', group: 'TikTok', src: '/tiktok/' },
 ];
 
@@ -26,7 +28,7 @@ function isActive(key) {
 }
 
 function iframeSrc(tab) {
-  // 仅当该 Tab 被激活时才真正赋值 src，避免一次性加载三个页面
+  // 仅当该 Tab 被激活时才真正赋值 src，避免一次性加载全部页面
   return loaded.has(tab.key) ? tab.src : undefined;
 }
 

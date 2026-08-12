@@ -492,4 +492,4 @@ function register({ get, post }) {
   post('/api/download', handleDownload);
 }
 
-module.exports = { runBatch, extractUrls, detectProxy, register };
+module.exports = { extractUrls, register };

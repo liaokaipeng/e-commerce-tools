@@ -1,6 +1,6 @@
 # 工具合集（shopee-tools-all-in-one）
 
-单服务、单端口（8765）、单网页，提供三个工具：**TikTok 视频下载**、**Shopee 竞价导出**、**Shopee 视频批量上传**。
+单服务、单端口（8765）、单网页，提供三个工具：**TikTok 视频下载**、**Shopee 竞价导出**、**Shopee 视频批量上传**（门户页按站点拆分为「跨境视频上传」「本土视频上传」两个 Tab）。
 
 > 面向最终用户的操作教程见《[新手入门指南](新手入门指南.md)》。本文档面向开发者。
 
@@ -39,7 +39,7 @@ shopee/
     http.js         统一出站请求封装（按 host 维护 Cookie 罐）
     settings.js     默认目录持久化（运行时生成 settings.json，不入库）
   extension/        浏览器扩展（manifest / background / popup）
-  frontend/         Vue 多页前端工程（portal/tiktok/bidding/video + dist）
+  frontend/         Vue 多页前端工程（portal/tiktok/bidding/video + dist；页面通用逻辑见 src/composables/useToolPage.js）
   新手入门指南.md   面向最终用户的操作教程
   启动.bat          一键启动
 ```
@@ -51,7 +51,7 @@ shopee/
 | main.js | `GET/POST /api/settings`、`GET /api/browse` |
 | tiktok.js | `GET /api/tiktok/status`、`POST /api/download`、`POST /api/open-dir` |
 | bidding.js | `GET /api/status`、`GET /api/stores`、`POST /api/export`、`POST /api/cookie` |
-| video.js | `POST /api/start`、`GET /api/events`（SSE）、`GET/POST /api/creds`、`GET /api/stores` |
+| video.js | `POST /api/start`、`GET /api/events`（SSE）、`GET/POST /api/creds` |
 
 视频上传模块内置健壮性处理：出站请求对网络错误 / 超时 / 5xx 自动指数退避重试（最多 3 次，4xx 业务错不重试，避免重复副作用）；发布（`video/create` / `task/edit` / `task/post`）会校验业务错误码，不再把「HTTP 200 但业务失败」误报为成功（solutions 接口成功码为 200000）；跨境商品匹配对纯数字编码优先作精确匹配。
 
@@ -62,7 +62,7 @@ shopee/
 `extension/` 一个扩展同时负责：
 
 - **竞价**：popup 点「发送登录信息到本地工具」→ 推 Cookie 到 `/api/cookie`。
-- **视频上传**：background 监听 `webRequest`，按站点（跨境 .cn / 本土 .ph 等）抓取凭证 → 推 `/api/creds`，存 `video-session.json`。凭证同时缓存在 `chrome.storage.local`，本地服务未启动时不丢，下次抓到新请求时**整包重推全部站点/店铺**（因此手动清空 `video-session.json` 后一刷新虾皮页面会被自动写回）。host_permissions 覆盖 `shopee.ph / shopee.sg / shopee.com.my / usercontent.com` 等域。
+- **视频上传**：background 监听 `webRequest`，按站点（跨境 .cn / 本土 .ph）抓取凭证 → 推 `/api/creds`，存 `video-session.json`。凭证同时缓存在 `chrome.storage.local`，本地服务未启动时不丢，下次抓到新请求时**整包重推全部站点/店铺**（因此手动清空 `video-session.json` 后一刷新虾皮页面会被自动写回）。host_permissions 覆盖 `shopee.cn / shopee.ph` 域。
 
 ## 约定
 
