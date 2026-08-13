@@ -30,11 +30,12 @@ cd frontend && npm run build                 # 构建到 frontend/dist，由 mai
 shopee/
   server/          后端（Node CommonJS）
     main.js        后端入口（单端口路由 + 静态托管 + 目录浏览/默认目录设置）
-    bidding.js     Shopee 竞价导出模块
-    video.js       Shopee 视频上传模块（多站点上传链路 + SSE 任务流）
+    bidding.js     Shopee 竞价导出模块（店铺列表热载自 config/stores.json）
+    video.js       Shopee 视频上传模块（路由注册；链路拆到 video/ 子模块）
     tiktok.js      TikTok 下载核心模块
+    video/         视频上传子模块（constants / request / creds / upload-cn / upload-ph / job）
     lib/
-      http-utils.js   通用 HTTP 工具（sendJson / serveStatic / readBody）
+      http-utils.js   通用 HTTP 工具（sendJson / serveStatic / readBody / sse）
       http.js         统一出站请求封装（按 host 维护 Cookie 罐）
       settings.js     默认目录持久化（运行时生成 settings.json，不入库）
       video-utils.js  视频上传纯函数（哈希/etag/SigV4/AES 解密/MP4 探测/行校验，可独立单测）
@@ -74,4 +75,4 @@ shopee/
 - 端口固定 **8765**。
 - 凭证不入库：`bidding-session.json` / `video-session.json` / `settings.json` 均 gitignored（统一存放在 `server/data/`）。
 - 后端保持 CommonJS，前端用 Vue SFC。
-- 改入口 / 端口 / 结构时，同步更新 `启动.bat`、`README.md`、`AGENTS.md`。
+- 改入口 / 端口 / 结构时，同步更新 `启动.bat`、`docs/README.md`、`AGENTS.md`。

@@ -252,10 +252,11 @@ function probeVideoFile(filePath) {
   return { width: 0, height: 0, duration: 0 };
 }
 
-// 公共行校验（cn / ph 共用）
+// 公共行校验（cn / ph 共用）；前端 video 页有同名的即时预览校验，文案/阈值需保持一致
+const CAPTION_MAX_LENGTH = 250;
 function validateUploadRow(row) {
   if (!row.path) return '缺少视频路径';
-  if (row.caption && row.caption.length > 250) return '视频说明超过250字符，请精简后再上传';
+  if (row.caption && row.caption.length > CAPTION_MAX_LENGTH) return `视频说明超过${CAPTION_MAX_LENGTH}字符，请精简后再上传`;
   if (row.caption && /tiktok/i.test(row.caption)) return '视频说明不能包含 tiktok 字样';
   if (!fs.existsSync(row.path)) return `表格中填写的视频文件不存在，请检查路径是否正确: ${row.path}`;
   return '';
@@ -275,4 +276,5 @@ module.exports = {
   probeVideo,
   probeVideoFile,
   validateUploadRow,
+  CAPTION_MAX_LENGTH,
 };

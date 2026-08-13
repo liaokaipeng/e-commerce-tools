@@ -72,12 +72,13 @@ export function useDirSettings(tool, log = () => {}) {
   return { dir, hasDefault, dirPickerVisible, loadSettings, setDefaultDir, openDir };
 }
 
-/** 日志自动滚动：logLines 数量变化时把 logEl 滚到底部 */
-export function useLogScroll(logLines) {
+/** 日志自动滚动：logLines 数量变化时把 logEl 滚到底部；enabled 为 ref 时支持暂停滚动 */
+export function useLogScroll(logLines, enabled) {
   const logEl = ref(null);
   watch(
     () => logLines.value.length,
     async () => {
+      if (enabled && !enabled.value) return;
       await nextTick();
       if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight;
     }

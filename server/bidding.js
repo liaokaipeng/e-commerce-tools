@@ -7,13 +7,14 @@ const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
 const { request } = require('./lib/http');
-const { sendJson, readBody } = require('./lib/http-utils');
+const { sendJson, sse, readBody } = require('./lib/http-utils');
 
 const SESSION_FILE = path.join(__dirname, 'data', 'bidding-session.json');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 // ============ 店铺列表（分类 / 店铺简称 / 店铺 ID）============
 // 从 stores.json 读取，便于非技术用户直接增删店铺，无需改代码。
+// 每次请求实时读取（热载），改 stores.json 无需重启服务即可生效。
 function loadStores() {
   try {
     return JSON.parse(fs.readFileSync(path.join(__dirname, 'config', 'stores.json'), 'utf8'));
@@ -22,7 +23,6 @@ function loadStores() {
     return [];
   }
 }
-const STORES = loadStores();
 
 // ============ 登录状态 ============
 function readSession() {
@@ -75,7 +75,7 @@ async function apiPost(cookieHeader, url, body) {
   return resp.json;
 }
 
-/** 金额：内部单位为"分"，除以 100000 得到实际金额 */
+/** 金额：接口返回单位为 1/100000 元（十万分之一元），除以 100000 得元并四舍五入到分 */
 function toAmount(v) {
   if (v === null || v === undefined || v === '' || v === '0' || v === 0) return '';
   const n = Number(v) / 100000;
@@ -195,19 +195,13 @@ function handleExport(body, res) {
     sendJson(res, 400, { ok: false, msg: '请先选择至少一个店铺' });
     return;
   }
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream; charset=utf-8',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
-  });
-  res.write('retry: 2000\n\n');
-
-  const emit = (data) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* client gone */ } };
+  const emit = sse(res);
 
   (async () => {
     const results = [];
+    const stores = loadStores();
     for (const id of shopIds) {
-      const store = STORES.find(s => s.id === String(id));
+      const store = stores.find(s => s.id === String(id));
       const name = store ? store.name : id;
       emit({ type: 'start', shopId: id, name });
       try {
@@ -243,7 +237,7 @@ function register({ get, post }) {
   });
 
   get('/api/stores', (req, res) => {
-    sendJson(res, 200, STORES);
+    sendJson(res, 200, loadStores());
   });
 
   post('/api/export', async (req, res) => {

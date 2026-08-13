@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useLogScroll } from '../composables/useToolPage.js';
 
 // ---------- 站点（门户已按站点拆分为「跨境视频上传」「本土视频上传」两个入口） ----------
 // 本页站点由 URL 参数 ?mode=cn|ph 固定，不再提供站内切换。
@@ -211,9 +212,12 @@ function parseCSV(text) {
   });
 }
 
+// 即时预览校验：仅覆盖纯规则（无文件系统检查）。文案/阈值需与后端
+// server/lib/video-utils.js 的 validateUploadRow 保持一致；文件是否存在由后端兜底。
+const CAPTION_MAX_LENGTH = 250;
 function validateRow({ path, caption }) {
   if (!path) return '缺少视频路径';
-  if (caption && caption.length > 250) return '视频说明超过250字符，请精简';
+  if (caption && caption.length > CAPTION_MAX_LENGTH) return `视频说明超过${CAPTION_MAX_LENGTH}字符，请精简后再上传`;
   if (caption && /tiktok/i.test(caption)) return '视频说明不能包含 tiktok 字样';
   return '';
 }
@@ -292,14 +296,11 @@ function downloadTemplate() {
 // ---------- 日志 ----------
 const autoScroll = ref(true);
 const logLines = ref([]);
-const logEl = ref(null);
+const { logEl } = useLogScroll(logLines, autoScroll);
 
 function log(msg, cls) {
   const time = new Date().toLocaleTimeString();
   logLines.value.push({ time, msg, cls });
-  nextTick(() => {
-    if (autoScroll.value && logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight;
-  });
 }
 
 function clearLog() {
@@ -438,6 +439,7 @@ function startUpload() {
     });
 }
 
+let credsTimer = null;
 onMounted(() => {
   document.title = isPh.value ? '本土视频批量上传' : '跨境视频批量上传';
   loadLocalCreds();
@@ -446,11 +448,11 @@ onMounted(() => {
     .then((r) => r.json())
     .then((d) => { stores.value = Array.isArray(d) ? d : []; })
     .catch(() => { /* 服务未启动忽略 */ });
-  const timer = setInterval(() => loadCredsFromServer(true), 5000);
-  onUnmounted(() => {
-    clearInterval(timer);
-    if (es) es.close();
-  });
+  credsTimer = setInterval(() => loadCredsFromServer(true), 5000);
+});
+onUnmounted(() => {
+  if (credsTimer) clearInterval(credsTimer);
+  if (es) es.close();
 });
 </script>
 

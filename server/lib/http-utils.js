@@ -25,6 +25,25 @@ function sendJson(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
+/**
+ * 初始化 SSE 响应（写响应头 + retry），返回向该连接写事件的 emit 函数。
+ * 供各业务模块的流式进度接口复用，避免重复写响应头与 emit 封装。
+ * @param {object} res http.ServerResponse
+ * @param {object} [extraHeaders] 额外响应头（如 X-Accel-Buffering / CORS）
+ * @returns {(data: object) => void}
+ */
+function sse(res, extraHeaders = {}) {
+  res.writeHead(200, Object.assign({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  }, extraHeaders));
+  res.write('retry: 2000\n\n');
+  return (data) => {
+    try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* client gone */ }
+  };
+}
+
 /** 读取请求体（默认上限 2MB）：按字节计数，超限直接拒绝而非静默截断 */
 function readBody(req, maxBytes = 2 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
@@ -69,4 +88,4 @@ function serveStatic(res, urlPath, publicDir) {
   });
 }
 
-module.exports = { sendJson, readBody, serveStatic };
+module.exports = { sendJson, sse, readBody, serveStatic };

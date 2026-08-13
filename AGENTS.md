@@ -6,7 +6,7 @@
 
 本仓库为**工具合集（shopee-tools-all-in-one）**：单服务、单端口（8765）、单网页，提供三个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 视频批量上传）的本地 Node HTTP 服务 + 一个前端门户页，按 Tab 切换使用。其中视频上传在门户页按站点拆分为「跨境视频上传」「本土视频上传」两个 Tab（共用 `/video/` 页面，经 `?mode=cn|ph` 固定站点）。
 
-> 项目结构、技术栈、后端 API、构建方式见 [README.md](README.md)；最终用户操作见 [新手入门指南.md](新手入门指南.md)；面向开发者的架构与约定见 [docs/开发指南.md](docs/开发指南.md)。
+> 项目结构、技术栈、后端 API、构建方式见 [docs/README.md](docs/README.md)；最终用户操作见 [新手入门指南.md](新手入门指南.md)；面向开发者的架构与约定见 [docs/开发指南.md](docs/开发指南.md)。
 
 ## 技术栈关键点
 
@@ -14,7 +14,7 @@
 - 后端依赖仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端仅 `vue` / `element-plus` / `vite`。
 - 前端 tiktok/bidding 两页共用逻辑抽在 `frontend/src/composables/useToolPage.js`（默认目录设置 / 日志自动滚动 / SSE 流读取），改动时优先复用，不重复实现。
 - 视频上传支持多站点（cn 跨境分片+merge / ph 菲律宾单次 PUT+task），凭证按站点存 `video-session.json`；跨境默认自动选定已抓凭证的店铺、可用「选择店铺」下拉框改选（凭证账号级通用，经 `resolveCnAuth` 统一解析）、菲律宾需 User ID。注意：solutions 接口成功码为 200000（非 0），有 post_id 即发布成功。
-- 视频上传的纯函数（md5/etag/AES 解密/SigV4 签名/MP4 探测/行校验等）统一在 `server/lib/video-utils.js`，`server/video.js` 只管链路编排；新增此类逻辑放 server/lib 并补单测，不要塞回 video.js。
+- 视频上传的纯函数（md5/etag/AES 解密/SigV4 签名/MP4 探测/行校验等）统一在 `server/lib/video-utils.js`（行校验阈值导出为 `CAPTION_MAX_LENGTH`，与前端 `video/App.vue` 的即时预览校验保持一致）。`server/video.js` 只做路由注册，站点常量/出站请求/凭证/上传链路/Job-SSE 分别拆到 `server/video/` 子模块（`constants` / `request` / `creds` / `upload-cn` / `upload-ph` / `job`）；新增此类纯函数放 server/lib 并补单测，不要塞回 video.js。
 - 视频大文件**流式处理**：哈希用 `streamHashes`（md5/sha1/sha256 一次遍历）、分片用 `readChunk` 按段流读、ph PUT 用读流作 body（sha256 经 `payloadSha256` 预计算）、MP4 元信息用 `probeVideoFile` 头尾采样探针——不得整文件 `readFileSync` 加载进内存。
 - 任务可取消：`POST /api/cancel` 标记 `abortedJobs` + `AbortController.abort()` 中断进行中的请求；`processJob` 每行开始前与行失败后检查取消标志，广播 `cancelled` 事件（含 done 计数）而非 `finished`；取消造成的中断在 `call` 里不重试。取消逻辑测试见 `test/unit.test.js`（用 `video._test` 确定性验证）。
 - SSE 任务事件按 job 缓存（`jobEvents`，上限 20 个任务），迟到连接自动回放：任务可能先于浏览器连接结束（如首行校验秒失败），无回放会让前端一直卡住。
@@ -28,8 +28,8 @@
 4. **端口固定 8765**，扩展与文档已硬编码。
 5. **凭证不入库**，日志不完整打印 Cookie/Authorization。
 6. **中文优先**，文档/注释/用户文案用中文，代码标识符可英文。
-7. 改入口/端口/结构时，同步更新 `启动.bat`、`README.md`、`AGENTS.md`（涉及视频上传链路/测试结构时还应更新 `docs/开发指南.md`）。
-8. 不主动新增文档文件，用现有 `README.md` / `新手入门指南.md` / `AGENTS.md` / `docs/开发指南.md`。
+7. 改入口/端口/结构时，同步更新 `启动.bat`、`docs/README.md`、`AGENTS.md`（涉及视频上传链路/测试结构时还应更新 `docs/开发指南.md`）。
+8. 不主动新增文档文件，用现有 `docs/README.md` / `新手入门指南.md` / `AGENTS.md` / `docs/开发指南.md`。
 
 ## 测试
 

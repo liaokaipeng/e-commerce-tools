@@ -6,7 +6,7 @@ const https = require('https');
 const { execFileSync, execFile } = require('child_process');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const { SocksProxyAgent } = require('socks-proxy-agent');
-const { sendJson, readBody } = require('./lib/http-utils');
+const { sendJson, sse, readBody } = require('./lib/http-utils');
 const { getDefault } = require('./lib/settings');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -457,17 +457,7 @@ async function handleDownload(req, res) {
     return;
   }
 
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream; charset=utf-8',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-  res.write('retry: 2000\n\n');
-
-  const emit = (event) => {
-    try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch { /* client gone */ }
-  };
+  const emit = sse(res, { 'X-Accel-Buffering': 'no' });
 
   emit({ type: 'info', message: `共 ${urls.length} 个链接，开始下载...` });
 
