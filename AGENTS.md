@@ -6,21 +6,9 @@
 
 本仓库为**工具合集（shopee-tools-all-in-one）**：单服务、单端口（8765）、单网页，提供三个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 视频批量上传）的本地 Node HTTP 服务 + 一个前端门户页，按 Tab 切换使用。其中视频上传在门户页按站点拆分为「跨境视频上传」「本土视频上传」两个 Tab（共用 `/video/` 页面，经 `?mode=cn|ph` 固定站点）。
 
-> 项目结构、技术栈、后端 API、构建方式见 [docs/README.md](docs/README.md)；最终用户操作见 [新手入门指南.md](新手入门指南.md)；面向开发者的架构与约定见 [docs/开发指南.md](docs/开发指南.md)。
+> 架构与目录结构见 [docs/架构.md](docs/架构.md)；开发流程、后端约定与测试见 [docs/开发指南.md](docs/开发指南.md)；仓库概览与快速开始见 [docs/README.md](docs/README.md)；最终用户操作见 [新手入门指南.md](新手入门指南.md)。
 
-## 技术栈关键点
-
-- 后端一律 **CommonJS**（`require`/`module.exports`）；前端用 **Vue3 SFC**。改代码时保持文件原有风格，不混用。
-- 后端依赖仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端仅 `vue` / `element-plus` / `vite`。
-- 前端 tiktok/bidding 两页共用逻辑抽在 `frontend/src/composables/useToolPage.js`（默认目录设置 / 日志自动滚动 / SSE 流读取），改动时优先复用，不重复实现。
-- 视频上传支持多站点（cn 跨境分片+merge / ph 菲律宾单次 PUT+task），凭证按站点存 `video-session.json`；跨境默认自动选定已抓凭证的店铺、可用「选择店铺」下拉框改选（凭证账号级通用，经 `resolveCnAuth` 统一解析）、菲律宾需 User ID。注意：solutions 接口成功码为 200000（非 0），有 post_id 即发布成功。
-- 视频上传的纯函数（md5/etag/AES 解密/SigV4 签名/MP4 探测/行校验等）统一在 `server/lib/video-utils.js`（行校验阈值导出为 `CAPTION_MAX_LENGTH`，与前端 `video/App.vue` 的即时预览校验保持一致）。`server/video.js` 只做路由注册，站点常量/出站请求/凭证/上传链路/Job-SSE 分别拆到 `server/video/` 子模块（`constants` / `request` / `creds` / `upload-cn` / `upload-ph` / `job`）；新增此类纯函数放 server/lib 并补单测，不要塞回 video.js。
-- 视频大文件**流式处理**：哈希用 `streamHashes`（md5/sha1/sha256 一次遍历）、分片用 `readChunk` 按段流读、ph PUT 用读流作 body（sha256 经 `payloadSha256` 预计算）、MP4 元信息用 `probeVideoFile` 头尾采样探针——不得整文件 `readFileSync` 加载进内存。
-- 任务可取消：`POST /api/cancel` 标记 `abortedJobs` + `AbortController.abort()` 中断进行中的请求；`processJob` 每行开始前与行失败后检查取消标志，广播 `cancelled` 事件（含 done 计数）而非 `finished`；取消造成的中断在 `call` 里不重试。取消逻辑测试见 `test/unit.test.js`（用 `video._test` 确定性验证）。
-- SSE 任务事件按 job 缓存（`jobEvents`，上限 20 个任务），迟到连接自动回放：任务可能先于浏览器连接结束（如首行校验秒失败），无回放会让前端一直卡住。
-- 扩展「KP工具合集助手」（MV3）负责竞价 Cookie 推送（`/api/cookie`）与视频上传凭证按站点抓取（`/api/creds`）；凭证缓存在 `chrome.storage.local`，抓到新请求时整包重推（故 `video-session.json` 清空后会被自动写回）。页面已不展示 Cookie/Authorization 输入框，凭证全靠扩展自动抓取。
-
-## 约定与约束
+## 关键约束（务必遵守）
 
 1. **极简零配置**，双击 `启动.bat` 即用，不加环境变量/额外安装步骤。
 2. **不新增运行时依赖**。
@@ -28,13 +16,26 @@
 4. **端口固定 8765**，扩展与文档已硬编码。
 5. **凭证不入库**，日志不完整打印 Cookie/Authorization。
 6. **中文优先**，文档/注释/用户文案用中文，代码标识符可英文。
-7. 改入口/端口/结构时，同步更新 `启动.bat`、`docs/README.md`、`AGENTS.md`（涉及视频上传链路/测试结构时还应更新 `docs/开发指南.md`）。
-8. 不主动新增文档文件，用现有 `docs/README.md` / `新手入门指南.md` / `AGENTS.md` / `docs/开发指南.md`。
+7. 改入口/端口/结构时，同步更新 `启动.bat`、`docs/README.md`、`docs/架构.md`、`AGENTS.md`（涉及视频上传链路/测试结构时还应更新 `docs/开发指南.md`）。
+8. 不主动新增文档文件，用现有 `docs/README.md` / `docs/架构.md` / `docs/开发指南.md` / `新手入门指南.md` / `AGENTS.md`。
+
+## 技术栈速查
+
+- 后端一律 **CommonJS**（`require`/`module.exports`）；前端用 **Vue3 SFC**。改代码时保持文件原有风格，不混用。
+- 后端依赖仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端仅 `vue` / `element-plus` / `vite`。
+- 前端 tiktok/bidding 两页共用逻辑抽在 `frontend/src/composables/useToolPage.js`（默认目录 / 日志滚动 / SSE 流读取），改动时优先复用，不重复实现。
+- `tiktok.js` / `video.js` 只做路由注册，链路拆到 `server/tiktok/` / `server/video/` 子模块；新增逻辑放对应子模块，不要塞回入口文件。
+
+## 关键注意点（详见 docs/架构.md）
+
+- 视频上传按站点拆分：cn 跨境分片+merge / ph 菲律宾单次 PUT+task；**solutions 接口成功码为 200000（非 0），有 post_id 即发布成功**。
+- 跨境凭证经 `resolveCnAuth` 统一解析（账号级通用，取有效期最长者）；菲律宾需 User ID。
+- 视频纯函数（md5/etag/AES/SigV4/MP4 探测/行校验）统一在 `server/lib/video-utils.js`，行校验阈值 `CAPTION_MAX_LENGTH` 与前端 `video/App.vue` 即时预览校验保持一致；新增此类纯函数放 server/lib 并补单测，不要塞回 video.js。
+- 大文件**流式处理**（`streamHashes` / `readChunk` / 读流 PUT / `probeVideoFile` 探针），不得整文件 `readFileSync` 进内存。
+- 任务可取消（`POST /api/cancel` + `AbortController`），取消造成的中断在 `call` 里不重试。
+- SSE 事件按 job 缓存（`jobEvents`），迟到连接自动回放，否则前端可能一直卡在「上传中」。
+- 扩展（MV3）抓凭证推 `/api/creds`，缓存在 `chrome.storage.local`，抓到新请求时整包重推（故 `video-session.json` 清空后会被自动写回）。
 
 ## 测试
 
-- `node test.js`（或 `npm test`）：分两类，全部通过即正常（退出码 0），**不访问真实站点**。
-  - **单元测试** `test/unit.test.js`：纯函数（`server/lib/video-utils.js` 的哈希/etag/AES/SigV4/MP4 探测/行校验、流式哈希与文件探针、tiktok 链接与代理、竞价金额换算）与任务取消逻辑（`video._test`，确定性验证），不启动服务。
-  - **接口冒烟测试** `test/api.test.js`：临时端口 8865，验页面与 API 路由、SSE 端到端（含迟到回放）、任务取消（契约 + 进行中取消）、404 兜底；session 凭证文件测试前备份、结束后原样恢复。
-  - 共享工具在 `test/helpers.js`（`t` 断言 / `req` 封装 / `startServer` 启动与凭证备份恢复）。
-- 其余无自动化：TikTok 下载 / 竞价导出 / 视频上传按真实流程手测。
+`node test.js`（或 `npm test`）：单元（`test/unit.test.js`，纯函数 + 任务取消，不启动服务）+ 接口冒烟（`test/api.test.js`，临时端口 8865，含 SSE 迟到回放、任务取消与 404 兜底），**不访问真实站点**；session 凭证文件测试前备份、结束后原样恢复。运行方式与新增用例见 [docs/开发指南.md](docs/开发指南.md)。

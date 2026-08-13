@@ -25,9 +25,8 @@ const {
   extractUrls,
   extractVideoIdFromUrl,
   isNetworkError,
-  detectProxy,
-  createAgent,
-} = require('../server/tiktok');
+} = require('../server/tiktok/parse');
+const { detectProxy, createAgent } = require('../server/tiktok/proxy');
 const { toAmount } = require('../server/bidding');
 
 // ---------- 合成一个可被 probeVideo 解析的 MP4（仅盒结构，无真实媒体数据） ----------

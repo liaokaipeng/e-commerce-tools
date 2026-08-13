@@ -40,7 +40,6 @@ onMounted(() => show(active.value));
   <div class="portal">
     <header class="topbar">
       <div class="brand">
-        <div class="logo">SP</div>
         <b>工具合集</b>
       </div>
       <nav>
