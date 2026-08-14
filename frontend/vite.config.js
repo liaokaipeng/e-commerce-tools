@@ -1,4 +1,4 @@
-// Vite 多页应用配置：门户 + 三个工具页，构建到 dist/ 由后端 main.js 托管
+// Vite 多页应用配置：门户 + 工具页，构建到 dist/ 由后端 main.js 托管
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 
@@ -19,6 +19,7 @@ export default defineConfig({
         portal: 'index.html',
         tiktok: 'tiktok/index.html',
         bidding: 'bidding/index.html',
+        'bidding-cancel': 'bidding-cancel/index.html',
         video: 'video/index.html',
       },
     },

@@ -17,5 +17,8 @@ settings.json
 # 运行时生成的凭证/设置文件统一放在 server/data/
 server/data/
 
+# 研究用临时工具（Playwright 抓包等，含登录态与抓包数据，整体不入库）
+research/
+
 .DS_Store
 Thumbs.db

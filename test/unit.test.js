@@ -28,6 +28,7 @@ const {
 } = require('../server/tiktok/parse');
 const { detectProxy, createAgent } = require('../server/tiktok/proxy');
 const { toAmount } = require('../server/bidding');
+const biddingCancel = require('../server/bidding-cancel');
 
 // ---------- 合成一个可被 probeVideo 解析的 MP4（仅盒结构，无真实媒体数据） ----------
 function box(type, payload) {
@@ -227,6 +228,31 @@ async function run() {
   t('toAmount 空值返回空串', toAmount(null) === '' && toAmount('0') === '');
   t('toAmount 分转元', toAmount(100000) === 1);
   t('toAmount 四舍五入到分', toAmount(12345678) === 123.46);
+
+  // ===== 取消竞价：待改进列表解析 =====
+  t('bidding-cancel toAmount 与 bidding 一致', biddingCancel.toAmount(12345678) === 123.46 && biddingCancel.toAmount(null) === '');
+  {
+    const data = {
+      list: [
+        {
+          item_id: '111',
+          item_name: '商品A',
+          model_list: [
+            {
+              product_info: { model_id: 'm1', model_name: '型号1' },
+              bidding_info: { bid_id: 'b1', bid_price: '17900000', default_suggest_price: '20700000' },
+            },
+            { product_info: { model_id: 'm2' }, bidding_info: { bid_price: '1' } }, // 无 bid_id，跳过
+          ],
+        },
+        { item_id: '222', item_name: '商品B', model_list: [] },
+      ],
+    };
+    const rows = biddingCancel.extractImprovementItems(data);
+    t('extractImprovementItems 提取待改进竞价行', rows.length === 1 && rows[0].bidId === 'b1' && rows[0].itemId === '111' && rows[0].modelName === '型号1', JSON.stringify(rows));
+    t('extractImprovementItems 金额换算正确', rows.length === 1 && rows[0].price === 179 && rows[0].suggestedPrice === 207, JSON.stringify(rows));
+    t('extractImprovementItems 空数据返回空数组', biddingCancel.extractImprovementItems({ list: [] }).length === 0 && biddingCancel.extractImprovementItems(null).length === 0);
+  }
 
   // ===== 任务取消（确定性验证，不依赖网络与服务） =====
   {

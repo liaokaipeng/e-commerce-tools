@@ -1,12 +1,14 @@
 // 工具合集 - 单服务单端口（默认 8765）
-// 合并了三个独立工具后端：
+// 合并了四个独立工具后端：
 //   1) TikTok 无水印视频批量下载（原 8737）
 //   2) Shopee 竞价导出（原 8765）
-//   3) Shopee 视频批量上传（原 3000）
-// 前端为门户页（frontend/dist，源码见 frontend/），通过 Tab 切换三个工具页面：
-//   /tiktok/   TikTok 下载
-//   /bidding/  Shopee 竞价导出
-//   /video/    Shopee 视频上传
+//   3) Shopee 取消竞价（待改进竞价批量撤销，与竞价导出共用 Cookie）
+//   4) Shopee 视频批量上传（原 3000）
+// 前端为门户页（frontend/dist，源码见 frontend/），通过 Tab 切换工具页面：
+//   /tiktok/          TikTok 下载
+//   /bidding/         Shopee 竞价导出
+//   /bidding-cancel/  Shopee 取消竞价
+//   /video/           Shopee 视频上传
 // main.js 只负责「路由注册 + 静态服务 + 服务启动」，业务路由与 SSE 由各模块 register 提供。
 const http = require('http');
 const path = require('path');
@@ -15,6 +17,7 @@ const { sendJson, serveStatic, readBody } = require('./lib/http-utils');
 const settings = require('./lib/settings');
 const tiktok = require('./tiktok');
 const bidding = require('./bidding');
+const biddingCancel = require('./bidding-cancel');
 const video = require('./video');
 
 const PORT = process.env.PORT || 8765;
@@ -29,6 +32,7 @@ function post(p, fn) { routes.push({ m: 'POST', p, fn }); }
 // 各业务模块注册自己的路由
 tiktok.register({ get, post });
 bidding.register({ get, post });
+biddingCancel.register({ get, post });
 video.register({ get, post });
 
 // ============ 工具默认目录（settings.json 持久化） ============
@@ -147,11 +151,11 @@ server.on('error', (e) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log('==============================================');
-  console.log('  工具合集（Shopee：竞价导出 / 视频上传；TikTok：视频下载）');
+  console.log('  工具合集（Shopee：竞价导出 / 取消竞价 / 视频上传；TikTok：视频下载）');
   console.log('  请打开浏览器访问: http://127.0.0.1:' + PORT);
   console.log('==============================================');
   console.log('  - TikTok 下载     此页面即可直接使用');
-  console.log('  - 竞价导出：需先装扩展并点「发送登录信息到本地工具」');
+  console.log('  - 竞价导出/取消竞价：需先装扩展并点「发送登录信息到本地工具」');
   console.log('  - 视频上传：需先装扩展，在短视频页手动上传一次视频抓取凭证');
   console.log('  扩展安装：edge://extensions → 开发人员模式 → 加载解压缩的扩展');
 });

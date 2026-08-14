@@ -4,7 +4,7 @@
 
 ## 仓库概览
 
-本仓库为**工具合集（shopee-tools-all-in-one）**：单服务、单端口（8765）、单网页，提供三个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 视频批量上传）的本地 Node HTTP 服务 + 一个前端门户页，按 Tab 切换使用。其中视频上传在门户页按站点拆分为「跨境视频上传」「本土视频上传」两个 Tab（共用 `/video/` 页面，经 `?mode=cn|ph` 固定站点）。
+本仓库为**工具合集（shopee-tools-all-in-one）**：单服务、单端口（8765）、单网页，提供四个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 取消竞价 / Shopee 视频批量上传）的本地 Node HTTP 服务 + 一个前端门户页，按 Tab 切换使用。其中视频上传在门户页按站点拆分为「跨境视频上传」「本土视频上传」两个 Tab（共用 `/video/` 页面，经 `?mode=cn|ph` 固定站点）。
 
 > 架构与目录结构见 [docs/架构.md](docs/架构.md)；开发流程、后端约定与测试见 [docs/开发指南.md](docs/开发指南.md)；仓库概览与快速开始见 [docs/README.md](docs/README.md)；最终用户操作见 [新手入门指南.md](新手入门指南.md)。
 
@@ -23,11 +23,12 @@
 
 - 后端一律 **CommonJS**（`require`/`module.exports`）；前端用 **Vue3 SFC**。改代码时保持文件原有风格，不混用。
 - 后端依赖仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端仅 `vue` / `element-plus` / `vite`。
-- 前端 tiktok/bidding 两页共用逻辑抽在 `frontend/src/composables/useToolPage.js`（默认目录 / 日志滚动 / SSE 流读取），改动时优先复用，不重复实现。
+- 前端 tiktok/bidding/bidding-cancel 三页共用逻辑抽在 `frontend/src/composables/useToolPage.js`（默认目录 / 日志滚动 / SSE 流读取），改动时优先复用，不重复实现。
 - `tiktok.js` / `video.js` 只做路由注册，链路拆到 `server/tiktok/` / `server/video/` 子模块；新增逻辑放对应子模块，不要塞回入口文件。
 
 ## 关键注意点（详见 docs/架构.md）
 
+- 取消竞价：人工流程「竞价详情 → 进行中的竞价 → 待改进 → 逐个撤销」对应接口 `get_item_ongoing_list`（`filter.page_tab=2` 即待改进，`page_tab=1` 为进行中全部）+ `seller_withdraw`（body `{ bid_id }`）；与竞价导出共用 `bidding-session.json` 与 `stores.json`。
 - 视频上传按站点拆分：cn 跨境分片+merge / ph 菲律宾单次 PUT+task；**solutions 接口成功码为 200000（非 0），有 post_id 即发布成功**。
 - 跨境凭证经 `resolveCnAuth` 统一解析（账号级通用，取有效期最长者）；菲律宾需 User ID。
 - 视频纯函数（md5/etag/AES/SigV4/MP4 探测/行校验）统一在 `server/lib/video-utils.js`，行校验阈值 `CAPTION_MAX_LENGTH` 与前端 `video/App.vue` 即时预览校验保持一致；新增此类纯函数放 server/lib 并补单测，不要塞回 video.js。

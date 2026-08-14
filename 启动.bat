@@ -4,7 +4,7 @@ title Tool Collection
 
 echo ==========================================
 echo   Tool Collection
-echo   Shopee: Bidding Export / Video Upload
+echo   Shopee: Bidding Export / Bidding Cancel / Video Upload
 echo   TikTok: Video Download
 echo   (Chinese UI is shown in the server output)
 echo ==========================================

@@ -11,11 +11,12 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 
-// 目录路径 -> index.html 映射（门户 / 三个工具子页面）
+// 目录路径 -> index.html 映射（门户 / 工具子页面）
 const DIR_INDEX = {
   '/': '/index.html',
   '/tiktok/': '/tiktok/index.html',
   '/bidding/': '/bidding/index.html',
+  '/bidding-cancel/': '/bidding-cancel/index.html',
   '/video/': '/video/index.html',
 };
 

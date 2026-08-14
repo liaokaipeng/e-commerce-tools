@@ -4,7 +4,7 @@
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
-const { BASE, t, req, startServer } = require('./helpers');
+const { BASE, ROOT, t, req, startServer } = require('./helpers');
 
 // 读取 SSE 流直至出现指定类型事件，返回全部已收到的事件
 async function readSSEUntil(urlPath, untilTypes) {
@@ -45,7 +45,7 @@ async function run() {
     }
 
     console.log('  -- 页面静态资源 --');
-    for (const p of ['/', '/tiktok/', '/bidding/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/xlsx.full.min.js']) {
+    for (const p of ['/', '/tiktok/', '/bidding/', '/bidding-cancel/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/xlsx.full.min.js']) {
       const r = await req('GET', p);
       t(`GET ${p} 返回 200`, r.status === 200, `status=${r.status}`);
     }
@@ -119,6 +119,44 @@ async function run() {
     {
       const r = await req('POST', '/api/export', { shopIds: [], dir: '' });
       t('POST /api/export 未选店铺返回 400', r.status === 400, `status=${r.status}`);
+    }
+
+    console.log('  -- 取消竞价 API --');
+    {
+      const r = await req('POST', '/api/bidding-cancel/preview', { shopIds: [] });
+      t('POST /api/bidding-cancel/preview 未选店铺返回 400', r.status === 400, `status=${r.status}`);
+      const r2 = await req('POST', '/api/bidding-cancel/run', { shopIds: [] });
+      t('POST /api/bidding-cancel/run 未选店铺返回 400', r2.status === 400, `status=${r2.status}`);
+    }
+    {
+      // 无登录会话时返回友好提示，不触达真实站点（helpers.stop 会按备份恢复会话文件）
+      const sess = path.join(ROOT, 'server', 'data', 'bidding-session.json');
+      if (fs.existsSync(sess)) fs.unlinkSync(sess);
+      const r = await req('POST', '/api/bidding-cancel/preview', { shopIds: ['953673451'] });
+      t('无登录 Cookie 时 preview 返回 400 且提示 Cookie', r.status === 400 && JSON.parse(r.text).msg.includes('Cookie'), r.text);
+      // run 为 SSE 接口：无会话时广播 fatal 事件后断开
+      const resp = await fetch(BASE + '/api/bidding-cancel/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shopIds: ['953673451'] }),
+      });
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      const events = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const line = part.split('\n').find((l) => l.startsWith('data: '));
+          if (!line) continue;
+          try { events.push(JSON.parse(line.slice(6))); } catch { /* 忽略无法解析的事件 */ }
+        }
+      }
+      t('无登录 Cookie 时 run 广播 fatal 事件', events.some((e) => e.type === 'fatal'), JSON.stringify(events));
     }
 
     console.log('  -- 视频上传 API --');
