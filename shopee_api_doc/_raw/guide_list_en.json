@@ -1,0 +1,493 @@
+{
+  "developer_guide_list": [
+    {
+      "item_id": 50,
+      "item_name": "Getting Started",
+      "item_type": 1,
+      "count": 15,
+      "status": 1,
+      "children": [
+        {
+          "item_id": 4,
+          "item_name": "Introduction",
+          "item_type": 2,
+          "release_time": 1660708257,
+          "status": 1
+        },
+        {
+          "item_id": 12,
+          "item_name": "Developer account registration",
+          "item_type": 2,
+          "release_time": 1660803491,
+          "status": 1
+        },
+        {
+          "item_id": 14,
+          "item_name": "App management",
+          "item_type": 2,
+          "release_time": 1660803567,
+          "status": 1
+        },
+        {
+          "item_id": 16,
+          "item_name": "API calls",
+          "item_type": 2,
+          "release_time": 1660803658,
+          "status": 1
+        },
+        {
+          "item_id": 18,
+          "item_name": "Push Mechanism notifications",
+          "item_type": 2,
+          "release_time": 1660803686,
+          "status": 1
+        },
+        {
+          "item_id": 20,
+          "item_name": "Authorization and Authentication",
+          "item_type": 2,
+          "release_time": 1660804210,
+          "status": 1
+        },
+        {
+          "item_id": 644,
+          "item_name": "Sandbox Testing V2",
+          "item_type": 2,
+          "release_time": 1746029227,
+          "status": 1
+        },
+        {
+          "item_id": 24,
+          "item_name": "Service Partner Program",
+          "item_type": 2,
+          "release_time": 1660804630,
+          "status": 1
+        },
+        {
+          "item_id": 27,
+          "item_name": "V2.0 API Call Flow",
+          "item_type": 2,
+          "release_time": 1660804570,
+          "status": 1
+        },
+        {
+          "item_id": 28,
+          "item_name": "CNSC API Integration Guide",
+          "item_type": 2,
+          "release_time": 1660804601,
+          "status": 1
+        },
+        {
+          "item_id": 29,
+          "item_name": "KRSC API Integration Guide",
+          "item_type": 2,
+          "release_time": 1660804618,
+          "status": 1
+        },
+        {
+          "item_id": 31,
+          "item_name": "V2.0 Data Definition",
+          "item_type": 2,
+          "release_time": 1660805026,
+          "status": 1
+        },
+        {
+          "item_id": 718,
+          "item_name": "Requesting Access to Sensitive Data",
+          "item_type": 2,
+          "release_time": 1766908262,
+          "status": 1
+        },
+        {
+          "item_id": 732,
+          "item_name": "TW New Developer Audit",
+          "item_type": 2,
+          "release_time": 1778582133,
+          "status": 1
+        },
+        {
+          "item_id": 749,
+          "item_name": "BR SPI App Creation User Guide",
+          "item_type": 2,
+          "release_time": 1786704447,
+          "status": 1
+        }
+      ]
+    },
+    {
+      "item_id": 2126,
+      "item_name": "BRASIL | Jornada do Desenvolvedor",
+      "item_type": 1,
+      "count": 13,
+      "status": 1,
+      "children": [
+        {
+          "item_id": 2125,
+          "item_name": "Sua trilha começa aqui!",
+          "item_type": 1,
+          "count": 13,
+          "status": 1,
+          "children": [
+            {
+              "item_id": 736,
+              "item_name": "Desenvolva uma integração",
+              "item_type": 2,
+              "release_time": 1784470091,
+              "status": 1
+            },
+            {
+              "item_id": 384,
+              "item_name": "Crie um login",
+              "item_type": 2,
+              "release_time": 1721793714,
+              "status": 1
+            },
+            {
+              "item_id": 738,
+              "item_name": "Crie a conta de desenvolvedor",
+              "item_type": 2,
+              "release_time": 1784471498,
+              "status": 1
+            },
+            {
+              "item_id": 740,
+              "item_name": "Crie seu App",
+              "item_type": 2,
+              "release_time": 1784546732,
+              "status": 1
+            },
+            {
+              "item_id": 744,
+              "item_name": "Realize testes (Sandbox)",
+              "item_type": 2,
+              "release_time": 1784548068,
+              "status": 1
+            },
+            {
+              "item_id": 741,
+              "item_name": "Publique seu App (Go Live)",
+              "item_type": 2,
+              "release_time": 1784547210,
+              "status": 1
+            },
+            {
+              "item_id": 739,
+              "item_name": "Autorize sua primeira loja",
+              "item_type": 2,
+              "release_time": 1784474036,
+              "status": 1
+            },
+            {
+              "item_id": 743,
+              "item_name": "Dados Sensíveis (Sensitive Data)",
+              "item_type": 2,
+              "release_time": 1784547665,
+              "status": 1
+            },
+            {
+              "item_id": 745,
+              "item_name": "Faça sua primeira chamada de API",
+              "item_type": 2,
+              "release_time": 1784548585,
+              "status": 1
+            },
+            {
+              "item_id": 746,
+              "item_name": "Push Notifications (Webhooks)",
+              "item_type": 2,
+              "release_time": 1784549553,
+              "status": 1
+            },
+            {
+              "item_id": 735,
+              "item_name": "Perguntas Frequentes",
+              "item_type": 2,
+              "release_time": 1783084328,
+              "status": 1
+            },
+            {
+              "item_id": 737,
+              "item_name": "Referências",
+              "item_type": 2,
+              "release_time": 1784470174,
+              "status": 1
+            },
+            {
+              "item_id": 747,
+              "item_name": "Boas práticas antes de abrir um ticket",
+              "item_type": 2,
+              "release_time": 1784741755,
+              "status": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "item_id": 2058,
+      "item_name": "API Guidelines and Flows",
+      "item_type": 1,
+      "count": 28,
+      "status": 1,
+      "children": [
+        {
+          "item_id": 217,
+          "item_name": "Guidelines for Creating Product",
+          "item_type": 2,
+          "release_time": 1667219335,
+          "status": 1
+        },
+        {
+          "item_id": 209,
+          "item_name": "Product creation preparation",
+          "item_type": 2,
+          "release_time": 1667208258,
+          "status": 1
+        },
+        {
+          "item_id": 211,
+          "item_name": "Creating product",
+          "item_type": 2,
+          "release_time": 1667210538,
+          "status": 1
+        },
+        {
+          "item_id": 213,
+          "item_name": "Creating global product",
+          "item_type": 2,
+          "release_time": 1667218486,
+          "status": 1
+        },
+        {
+          "item_id": 215,
+          "item_name": "Publishing global product",
+          "item_type": 2,
+          "release_time": 1667219085,
+          "status": 1
+        },
+        {
+          "item_id": 219,
+          "item_name": "Variant management",
+          "item_type": 2,
+          "release_time": 1667219991,
+          "status": 1
+        },
+        {
+          "item_id": 221,
+          "item_name": "Product base info management",
+          "item_type": 2,
+          "release_time": 1667220832,
+          "status": 1
+        },
+        {
+          "item_id": 223,
+          "item_name": "Stock & Price Management",
+          "item_type": 2,
+          "release_time": 1667220906,
+          "status": 1
+        },
+        {
+          "item_id": 229,
+          "item_name": "Order Management",
+          "item_type": 2,
+          "release_time": 1667362876,
+          "status": 1
+        },
+        {
+          "item_id": 225,
+          "item_name": "First Mile Binding",
+          "item_type": 2,
+          "release_time": 1667293328,
+          "status": 1
+        },
+        {
+          "item_id": 227,
+          "item_name": "Return Refund Management",
+          "item_type": 2,
+          "release_time": 1667294763,
+          "status": 1
+        },
+        {
+          "item_id": 261,
+          "item_name": "SIP best practices",
+          "item_type": 2,
+          "release_time": 1673591545,
+          "status": 1
+        },
+        {
+          "item_id": 277,
+          "item_name": "Shopee On-Platform Ads API Guide",
+          "item_type": 2,
+          "release_time": 1700726784,
+          "status": 1
+        },
+        {
+          "item_id": 677,
+          "item_name": "Shopee Xpress - Package-free Integration Guide",
+          "item_type": 2,
+          "release_time": 1756967614,
+          "status": 1
+        },
+        {
+          "item_id": 2067,
+          "item_name": "BRAZIL | Specific Local Guides",
+          "item_type": 1,
+          "count": 9,
+          "status": 1,
+          "children": [
+            {
+              "item_id": 383,
+              "item_name": "APIs de Order (Pedido)",
+              "item_type": 2,
+              "release_time": 1721793664,
+              "status": 1
+            },
+            {
+              "item_id": 292,
+              "item_name": "APIs de Logistics (Logística)",
+              "item_type": 2,
+              "release_time": 1716883564,
+              "status": 1
+            },
+            {
+              "item_id": 382,
+              "item_name": "Como subir a NF-e através da OpenAPI e Mascaramento de Dados",
+              "item_type": 2,
+              "release_time": 1721793320,
+              "status": 1
+            },
+            {
+              "item_id": 378,
+              "item_name": "AUTO PARTS: COMPATIBILIDADE DE AUTOPEÇAS",
+              "item_type": 2,
+              "release_time": 1719800710,
+              "status": 1
+            },
+            {
+              "item_id": 290,
+              "item_name": "Shopee Entrega Direta",
+              "item_type": 2,
+              "release_time": 1716863465,
+              "status": 1
+            },
+            {
+              "item_id": 568,
+              "item_name": "Fulfilled by Shopee (BR)",
+              "item_type": 2,
+              "release_time": 1731933885,
+              "status": 1
+            },
+            {
+              "item_id": 286,
+              "item_name": "Logística do Vendedor (API de Cotação)",
+              "item_type": 2,
+              "release_time": 1712808240,
+              "status": 1
+            },
+            {
+              "item_id": 697,
+              "item_name": "Quotation API (Entrega Expressa) Developer Guide",
+              "item_type": 2,
+              "release_time": 1758528744,
+              "status": 1
+            },
+            {
+              "item_id": 381,
+              "item_name": "Ferramenta de Log da Open Platform",
+              "item_type": 2,
+              "release_time": 1721793280,
+              "status": 1
+            }
+          ]
+        },
+        {
+          "item_id": 643,
+          "item_name": "Instant Mart Integration Guide",
+          "item_type": 2,
+          "release_time": 1745483266,
+          "status": 1
+        },
+        {
+          "item_id": 669,
+          "item_name": "Livestream API Integration Guide",
+          "item_type": 2,
+          "release_time": 1752130584,
+          "status": 1
+        },
+        {
+          "item_id": 702,
+          "item_name": "Shopee AMS API Integration Guide",
+          "item_type": 2,
+          "release_time": 1761106343,
+          "status": 1
+        },
+        {
+          "item_id": 706,
+          "item_name": "Shopee Video API Integration Guide",
+          "item_type": 2,
+          "release_time": 1762513305,
+          "status": 1
+        },
+        {
+          "item_id": 733,
+          "item_name": "Brand Portal Service API Integration Guide",
+          "item_type": 2,
+          "release_time": 1783666505,
+          "status": 1
+        }
+      ]
+    },
+    {
+      "item_id": 54,
+      "item_name": "Terms of Use",
+      "item_type": 1,
+      "count": 5,
+      "status": 1,
+      "children": [
+        {
+          "item_id": 36,
+          "item_name": "Terms of Service",
+          "item_type": 2,
+          "release_time": 1660804811,
+          "status": 1
+        },
+        {
+          "item_id": 32,
+          "item_name": "Data Protection Policy",
+          "item_type": 2,
+          "release_time": 1660804702,
+          "status": 1
+        },
+        {
+          "item_id": 34,
+          "item_name": "Platform Partner Rules",
+          "item_type": 2,
+          "release_time": 1660804728,
+          "status": 1
+        },
+        {
+          "item_id": 646,
+          "item_name": "TW Developer Screening",
+          "item_type": 2,
+          "release_time": 1746707312,
+          "status": 1
+        },
+        {
+          "item_id": 723,
+          "item_name": "Chatbot Terms of Service",
+          "item_type": 2,
+          "release_time": 1770100645,
+          "status": 1
+        }
+      ]
+    },
+    {
+      "item_id": 742,
+      "item_name": "Declare seus IPs",
+      "item_type": 2,
+      "release_time": 1784547380,
+      "status": 1
+    }
+  ],
+  "total": 62
+}

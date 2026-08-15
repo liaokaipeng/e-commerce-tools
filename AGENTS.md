@@ -6,7 +6,7 @@
 
 本仓库为**工具合集（shopee-tools-all-in-one）**：单服务、单端口（8765）、单网页，提供四个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 取消竞价 / Shopee 视频批量上传）的本地 Node HTTP 服务 + 一个前端门户页，按 Tab 切换使用。其中视频上传在门户页按站点拆分为「跨境视频上传」「本土视频上传」两个 Tab（共用 `/video/` 页面，经 `?mode=cn|ph` 固定站点）。
 
-> 架构与目录结构见 [docs/架构.md](docs/架构.md)；开发流程、后端约定与测试见 [docs/开发指南.md](docs/开发指南.md)；仓库概览与快速开始见 [docs/README.md](docs/README.md)；最终用户操作见 [新手入门指南.md](新手入门指南.md)。
+> 架构与目录结构见 [docs/架构.md](docs/架构.md)；开发流程、后端约定与测试见 [docs/开发指南.md](docs/开发指南.md)；仓库概览与快速开始见 [docs/README.md](docs/README.md)；最终用户操作见 [新手入门指南.md](新手入门指南.md)；Shopee 开放平台接口资料（开发者指南 / API 参考整站目录，中文版）见 [shopee_api_doc/README.md](shopee_api_doc/README.md)。
 
 ## 关键约束（务必遵守）
 
@@ -17,7 +17,7 @@
 5. **凭证不入库**，日志不完整打印 Cookie/Authorization。
 6. **中文优先**，文档/注释/用户文案用中文，代码标识符可英文。
 7. 改入口/端口/结构时，同步更新 `启动.bat`、`docs/README.md`、`docs/架构.md`、`AGENTS.md`（涉及视频上传链路/测试结构时还应更新 `docs/开发指南.md`）。
-8. 不主动新增文档文件，用现有 `docs/README.md` / `docs/架构.md` / `docs/开发指南.md` / `新手入门指南.md` / `AGENTS.md`。
+8. 不主动新增文档文件，用现有 `docs/README.md` / `docs/架构.md` / `docs/开发指南.md` / `新手入门指南.md` / `AGENTS.md`；Shopee 开放平台接口资料统一放 `shopee_api_doc/`（官方文档整站目录中文整理版，刷新方式见其 README）。
 
 ## 技术栈速查
 
