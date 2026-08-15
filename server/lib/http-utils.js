@@ -18,6 +18,7 @@ const DIR_INDEX = {
   '/bidding/': '/bidding/index.html',
   '/bidding-cancel/': '/bidding-cancel/index.html',
   '/video/': '/video/index.html',
+  '/openapi/': '/openapi/index.html',
 };
 
 /** 统一 JSON 响应 */

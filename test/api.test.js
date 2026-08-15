@@ -45,7 +45,7 @@ async function run() {
     }
 
     console.log('  -- 页面静态资源 --');
-    for (const p of ['/', '/tiktok/', '/bidding/', '/bidding-cancel/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/xlsx.full.min.js']) {
+    for (const p of ['/', '/tiktok/', '/bidding/', '/bidding-cancel/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/openapi/', '/xlsx.full.min.js']) {
       const r = await req('GET', p);
       t(`GET ${p} 返回 200`, r.status === 200, `status=${r.status}`);
     }
@@ -238,6 +238,67 @@ async function run() {
       } finally {
         fs.unlinkSync(tmp);
       }
+    }
+
+    console.log('  -- 开放平台登录 API --');
+    {
+      // 测试服务用独立临时会话文件启动（helpers.startServer 设 OPENAPI_SESSION_FILE），
+      // 不触碰用户真实 openapi-session.json，本组断言从「未配置」状态开始。
+      const r = await req('GET', '/api/openapi/status');
+      const j = JSON.parse(r.text);
+      t('GET /api/openapi/status 返回 200', r.status === 200 && j.ok === true, r.text);
+      t('未配置 App 时 status 为未配置且无店铺', j.configured === false && Array.isArray(j.shops) && j.shops.length === 0, r.text);
+
+      const au = await req('POST', '/api/openapi/auth-url', { redirect: '' });
+      t('未配置 App 时生成授权链接返回 400', au.status === 400 && JSON.parse(au.text).ok === false, au.text);
+      const auBad = await req('POST', '/api/openapi/auth-url', { redirect: 'http://1.2.3.4/x' });
+      t('非本机 IP redirect 返回 400', auBad.status === 400 && JSON.parse(auBad.text).message.includes('本机可达地址'), auBad.text);
+      const auLocal = await req('POST', '/api/openapi/auth-url', { redirect: 'http://127.0.0.1.sslip.io:8765/openapi/callback' });
+      t('本机域名 redirect 通过校验（未配置 App 时 400 且不触网）', auLocal.status === 400 && JSON.parse(auLocal.text).message.includes('App'), auLocal.text);
+      const auManual = await req('POST', '/api/openapi/auth-url', { redirect: 'https://my.example.com/cb' });
+      t('https 域名 redirect 通过校验走手动模式（未配置 App 时 400 且不触网）', auManual.status === 400 && JSON.parse(auManual.text).message.includes('App'), auManual.text);
+      const auManualHttp = await req('POST', '/api/openapi/auth-url', { redirect: 'http://my.example.com/cb' });
+      t('http 自有域名 redirect 同样走手动模式', auManualHttp.status === 400 && JSON.parse(auManualHttp.text).message.includes('App'), auManualHttp.text);
+      const ac = await req('POST', '/api/openapi/auth-callback', { code: '', shopId: '' });
+      t('auth-callback 缺授权码返回 400', ac.status === 400 && JSON.parse(ac.text).message.includes('code'), ac.text);
+      const ac2 = await req('POST', '/api/openapi/auth-callback', { code: 'x' });
+      t('auth-callback 有 code 但无 shop_id/main_account_id 返回 400', ac2.status === 400 && JSON.parse(ac2.text).message.includes('main_account_id'), ac2.text);
+      const rf = await req('POST', '/api/openapi/refresh', { shopId: '123' });
+      t('未配置 App 时刷新返回 400', rf.status === 400 && JSON.parse(rf.text).message.includes('App'), rf.text);
+      const ts = await req('POST', '/api/openapi/test', { shopId: '123' });
+      t('未配置 App 时测试返回 400', ts.status === 400 && JSON.parse(ts.text).message.includes('App'), ts.text);
+
+      const saveBad = await req('POST', '/api/openapi/app', { partnerId: 'p123', partnerKey: '', env: 'prod' });
+      t('保存 App 缺 partner_key 返回 400', saveBad.status === 400, saveBad.text);
+      const saveEnv = await req('POST', '/api/openapi/app', { partnerId: 'p123', partnerKey: 'k456', env: 'xx' });
+      t('保存 App 非法环境返回 400', saveEnv.status === 400, saveEnv.text);
+
+      const save = await req('POST', '/api/openapi/app', { partnerId: 'p123', partnerKey: 'k456', env: 'prod' });
+      const sj = JSON.parse(save.text);
+      t('保存 App 返回 ok 且 key 打码', save.status === 200 && sj.ok === true && sj.partnerKeyMasked.includes('***') && !save.text.includes('k456'), save.text);
+
+      const st = await req('GET', '/api/openapi/status');
+      const stj = JSON.parse(st.text);
+      t('保存后 status 已配置且不泄漏完整 key', stj.configured === true && stj.partnerId === 'p123' && stj.partnerKeyMasked.includes('***') && !st.text.includes('k456'), st.text);
+
+      // 授权链接为本地拼接的 GET URL（auth_partner 不发起接口调用），不触达真实站点
+      const g = await req('POST', '/api/openapi/auth-url', { redirect: 'http://127.0.0.1.sslip.io:8765/openapi/callback' });
+      const gj = JSON.parse(g.text);
+      t('生成授权链接返回 authUrl（本地拼接 GET URL，不触网）', g.status === 200 && gj.ok === true && typeof gj.authUrl === 'string' && gj.authUrl.startsWith('https://partner.shopeemobile.com/api/v2/shop/auth_partner?') && gj.authUrl.includes('partner_id=p123') && gj.authUrl.includes('redirect='), g.text);
+      t('本机域名授权链接 mode=auto', gj.mode === 'auto', g.text);
+      const gm = await req('POST', '/api/openapi/auth-url', { redirect: 'https://my.example.com/cb' });
+      const gmj = JSON.parse(gm.text);
+      t('自有域名授权链接 mode=manual', gm.status === 200 && gmj.ok === true && gmj.mode === 'manual' && gmj.authUrl.includes('redirect='), gm.text);
+
+      const rm = await req('POST', '/api/openapi/remove-shop', { shopId: '999' });
+      t('删除不存在的店铺幂等返回 ok', rm.status === 200 && JSON.parse(rm.text).ok === true && JSON.parse(rm.text).removed === false, rm.text);
+      const rf2 = await req('POST', '/api/openapi/refresh', { shopId: '999' });
+      t('店铺未授权时刷新返回 400', rf2.status === 400 && JSON.parse(rf2.text).message.includes('尚未授权'), rf2.text);
+      const ts2 = await req('POST', '/api/openapi/test', { shopId: '999' });
+      t('店铺未授权时测试返回 400（不触达真实站点）', ts2.status === 400 && JSON.parse(ts2.text).message.includes('尚未授权'), ts2.text);
+
+      const cb = await req('GET', '/openapi/callback');
+      t('GET /openapi/callback 返回 200 且含中文提示', cb.status === 200 && cb.text.includes('正在完成店铺授权'), `status=${cb.status}`);
     }
 
     console.log('  -- 404 兜底 --');

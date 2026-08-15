@@ -4,7 +4,7 @@
 
 ## 仓库概览
 
-本仓库为**工具合集（shopee-tools-all-in-one）**：单服务、单端口（8765）、单网页，提供四个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 取消竞价 / Shopee 视频批量上传）的本地 Node HTTP 服务 + 一个前端门户页，按 Tab 切换使用。其中视频上传在门户页按站点拆分为「跨境视频上传」「本土视频上传」两个 Tab（共用 `/video/` 页面，经 `?mode=cn|ph` 固定站点）。
+本仓库为**工具合集（shopee-tools-all-in-one）**：单服务、单端口（8765）、单网页，提供四个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 取消竞价 / Shopee 视频批量上传）的本地 Node HTTP 服务 + 一个前端门户页，按 Tab 切换使用。其中视频上传在门户页按站点拆分为「跨境视频上传」「本土视频上传」两个 Tab（共用 `/video/` 页面，经 `?mode=cn|ph` 固定站点）；另设「开放平台」Tab（`/openapi/`）：录入 App 完成店铺 OAuth 授权并管理 Token，为后续官方 Open API 功能统一提供登录与调用入口。
 
 > 架构与目录结构见 [docs/架构.md](docs/架构.md)；开发流程、后端约定与测试见 [docs/开发指南.md](docs/开发指南.md)；仓库概览与快速开始见 [docs/README.md](docs/README.md)；最终用户操作见 [新手入门指南.md](新手入门指南.md)；Shopee 开放平台接口资料（开发者指南 / API 参考整站目录，中文版）见 [shopee_api_doc/README.md](shopee_api_doc/README.md)。
 
@@ -24,7 +24,7 @@
 - 后端一律 **CommonJS**（`require`/`module.exports`）；前端用 **Vue3 SFC**。改代码时保持文件原有风格，不混用。
 - 后端依赖仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端仅 `vue` / `element-plus` / `vite`。
 - 前端 tiktok/bidding/bidding-cancel 三页共用逻辑抽在 `frontend/src/composables/useToolPage.js`（默认目录 / 日志滚动 / SSE 流读取），改动时优先复用，不重复实现。
-- `tiktok.js` / `video.js` 只做路由注册，链路拆到 `server/tiktok/` / `server/video/` 子模块；新增逻辑放对应子模块，不要塞回入口文件。
+- `tiktok.js` / `video.js` / `openapi.js` 只做路由注册，链路拆到 `server/tiktok/` / `server/video/` / `server/openapi/` 子模块；新增逻辑放对应子模块，不要塞回入口文件。
 
 ## 关键注意点（详见 docs/架构.md）
 
@@ -36,6 +36,8 @@
 - 任务可取消（`POST /api/cancel` + `AbortController`），取消造成的中断在 `call` 里不重试。
 - SSE 事件按 job 缓存（`jobEvents`），迟到连接自动回放，否则前端可能一直卡在「上传中」。
 - 扩展（MV3）抓凭证推 `/api/creds`，缓存在 `chrome.storage.local`，抓到新请求时整包重推（故 `video-session.json` 清空后会被自动写回）。
+- 开放平台登录：签名 `base = partner_id + api_path + timestamp（+ access_token + shop_id）`、`sign = HMAC-SHA256(partner_key, base)` 小写 hex（纯函数在 `server/lib/openapi-utils.js`，规则以官方 developer-guide/20 为准）；后台 redirect 只做域名校验、不接受指向本机的地址（IP/localhost/sslip.io 均被拒）且不能带查询参数，`validateRedirect` 支持 auto（本机域名白名单）与 manual（任意 http/https 域名 + 前端粘贴回调链接或域名转发页）两种模式，默认占位 `https://example.com/`；`auth_partner` 为本地拼接的 GET 授权链接（**不调接口**，POST 会 404）；**查询类接口（get_*/search_*）用 GET（全参数放 query）、写操作/换 token 用 POST（公共参数 query、业务参数 body），方法用错网关 404**；主账号授权回调只有 code+main_account_id（无 shop_id），token/get 返回 shop_id_list 全部保存；**刷新后旧 refresh_token 立即失效，必须先拿到新 token 再写盘**；凭证存 `server/data/openapi-session.json`（按环境分区，测试经 `OPENAPI_SESSION_FILE` 环境变量隔离），对外一律 `maskToken` 打码。
+- 后续官方 Open API 功能统一经 `server/openapi/client.js` 的 `callOpenApi(apiPath, 业务参数, { shopId })` 调用：自动签名、附带 token、过期自动刷新（per-shop 锁防并发），不要自行拼签名或管理 token。查询类接口（get_*/search_*）需传 `{ method: 'GET' }`，写操作默认 POST。
 
 ## 测试
 

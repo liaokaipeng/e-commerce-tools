@@ -1,0 +1,391 @@
+<script setup>
+import { ref, reactive, onMounted, onUnmounted } from 'vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
+
+// 开放平台 API 登录：App 配置 → 生成授权链接 → 店铺授权回调换 token → 店铺管理。
+// 后端：/api/openapi/*（server/openapi.js），token 存本机 server/data/openapi-session.json（不入库）。
+
+// ---------- 登录状态 ----------
+const status = reactive({ configured: false, env: '', partnerId: '', partnerKeyMasked: '', shops: [], loading: true });
+const form = reactive({
+  partnerId: '',
+  partnerKey: '',
+  env: 'prod',
+  redirect: 'https://example.com/',
+});
+const saving = ref(false);
+const generating = ref(false);
+const authUrl = ref('');
+const authMode = ref('auto'); // auto=自动跳回本工具；manual=授权后需手动粘贴回调链接
+const manualUrl = ref('');
+const manualing = ref(false);
+// 有域名时的转发页代码：官方授权后跳到你的域名 → 原样转回本机工具，实现全自动
+// 注意：代码里不能出现字面的 script 闭合标签（会提前终止本组件的 script 块），故拆开拼接
+const forwardSnippet = [
+  '<!DOCTYPE html>',
+  '<html lang="zh-CN"><body><scr' + 'ipt>',
+  '// Shopee 授权回调转发页：把官方跳转（含 code/shop_id）原样转回本机工具',
+  "location.replace('http://127.0.0.1:8765/openapi/callback' + location.search);",
+  '</scr' + 'ipt></body></html>',
+].join('\n');
+const busyShop = reactive(new Set()); // 正在操作中的店铺
+
+async function refreshStatus() {
+  try {
+    const r = await fetch('/api/openapi/status');
+    const s = await r.json();
+    if (s && s.ok) {
+      Object.assign(status, s);
+      if (s.configured && !form.partnerId) {
+        form.partnerId = s.partnerId;
+        form.env = s.env;
+      }
+    }
+  } catch {
+    // 本地服务未启动：保持 loading 结束，界面提示由用户点刷新观察
+  } finally {
+    status.loading = false;
+  }
+}
+
+// ---------- ① 保存 App 配置 ----------
+async function saveApp() {
+  saving.value = true;
+  try {
+    const r = await fetch('/api/openapi/app', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ partnerId: form.partnerId, partnerKey: form.partnerKey, env: form.env }),
+    });
+    const j = await r.json();
+    if (r.ok && j.ok) {
+      ElMessage.success(j.message || '已保存');
+      form.partnerKey = '';
+      await refreshStatus();
+    } else {
+      ElMessage.error(j.message || '保存失败');
+    }
+  } catch (e) {
+    ElMessage.error('本地服务异常：' + e.message);
+  } finally {
+    saving.value = false;
+  }
+}
+
+// ---------- ② 生成授权链接 ----------
+async function generateAuthUrl() {
+  generating.value = true;
+  try {
+    const r = await fetch('/api/openapi/auth-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ redirect: form.redirect }),
+    });
+    const j = await r.json();
+    if (r.ok && j.ok) {
+      authUrl.value = j.authUrl;
+      authMode.value = j.mode || 'auto';
+      if (authMode.value === 'auto') ElMessage.success('授权链接已生成，授权后将自动跳回本工具');
+      else ElMessage.warning('授权后浏览器会跳到上面的回调地址，请把地址栏完整链接复制到下方「手动完成授权」');
+    } else {
+      ElMessage.error(j.message || '生成失败');
+    }
+  } catch (e) {
+    ElMessage.error('本地服务异常：' + e.message);
+  } finally {
+    generating.value = false;
+  }
+}
+
+// 手动完成授权：粘贴授权跳转后的完整回调链接换取 token。
+// 主账号授权时链接只有 ?code=…&main_account_id=…（无 shop_id），属正常情况。
+async function manualComplete() {
+  let u;
+  try {
+    u = new URL(manualUrl.value.trim());
+  } catch {
+    ElMessage.error('粘贴的地址不完整：需包含 http(s):// 前缀');
+    return;
+  }
+  const code = u.searchParams.get('code');
+  const shopId = u.searchParams.get('shop_id') || '';
+  const mainAccountId = u.searchParams.get('main_account_id') || '';
+  if (!code) {
+    ElMessage.error('链接里没有 code，请复制授权跳转后的完整地址栏内容');
+    return;
+  }
+  if (!shopId && !mainAccountId) {
+    ElMessage.error('链接里没有 shop_id 也没有 main_account_id，请复制授权跳转后的完整地址栏内容');
+    return;
+  }
+  manualing.value = true;
+  try {
+    const r = await fetch('/api/openapi/auth-callback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, shopId, mainAccountId }),
+    });
+    const j = await r.json();
+    if (r.ok && j.ok) {
+      ElMessage.success(j.message || '授权成功');
+      manualUrl.value = '';
+      authUrl.value = '';
+      await refreshStatus();
+    } else {
+      ElMessage.error(j.message || '授权失败');
+    }
+  } catch (e) {
+    ElMessage.error('本地服务异常：' + e.message);
+  } finally {
+    manualing.value = false;
+  }
+}
+
+function openAuthPage() {
+  if (!authUrl.value) return;
+  window.open(authUrl.value, '_blank');
+}
+
+async function copyAuthUrl() {
+  if (!authUrl.value) return;
+  try {
+    await navigator.clipboard.writeText(authUrl.value);
+    ElMessage.success('授权链接已复制到剪贴板');
+  } catch (e) {
+    ElMessage.warning('复制失败，请手动选中复制');
+  }
+}
+
+async function copySnippet() {
+  try {
+    await navigator.clipboard.writeText(forwardSnippet);
+    ElMessage.success('转发页代码已复制');
+  } catch (e) {
+    ElMessage.warning('复制失败，请手动选中复制');
+  }
+}
+
+// ---------- ③ 店铺管理 ----------
+async function withShop(shopId, fn) {
+  if (busyShop.has(shopId)) return;
+  busyShop.add(shopId);
+  try {
+    await fn();
+  } finally {
+    busyShop.delete(shopId);
+    await refreshStatus();
+  }
+}
+
+async function testShop(shopId) {
+  await withShop(shopId, async () => {
+    const r = await fetch('/api/openapi/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shopId }),
+    });
+    const j = await r.json();
+    if (r.ok && j.ok) ElMessage.success(j.message || '登录有效');
+    else ElMessage.error(j.message || '测试失败');
+  });
+}
+
+async function refreshShop(shopId) {
+  await withShop(shopId, async () => {
+    const r = await fetch('/api/openapi/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shopId }),
+    });
+    const j = await r.json();
+    if (r.ok && j.ok) ElMessage.success(j.message || '刷新成功');
+    else ElMessage.error(j.message || '刷新失败');
+  });
+}
+
+async function removeShop(shopId) {
+  try {
+    await ElMessageBox.confirm(`确定删除店铺 ${shopId} 的授权吗？删除后相关功能将无法调用官方接口。`, '删除授权', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    });
+  } catch {
+    return; // 用户取消
+  }
+  await withShop(shopId, async () => {
+    const r = await fetch('/api/openapi/remove-shop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shopId }),
+    });
+    const j = await r.json();
+    if (r.ok && j.ok) ElMessage.success(j.message || '已删除');
+    else ElMessage.error(j.message || '删除失败');
+  });
+}
+
+function stateMeta(s) {
+  if (s.state === 'valid') return { type: 'success', label: '有效' };
+  if (s.state === 'expiring') return { type: 'warning', label: '即将过期' };
+  return { type: 'danger', label: '已过期' };
+}
+
+function fmtTime(t) {
+  return t ? new Date(t * 1000).toLocaleString('zh-CN', { hour12: false }) : '—';
+}
+
+const envLabel = (e) => (e === 'sandbox' ? '沙箱' : '生产');
+
+let timer = null;
+onMounted(() => {
+  refreshStatus();
+  timer = setInterval(() => refreshStatus(), 30000); // 每 30s 刷新到期状态
+});
+onUnmounted(() => {
+  if (timer) clearInterval(timer);
+});
+</script>
+
+<template>
+  <div class="page">
+    <div class="container">
+
+      <el-card shadow="never" class="card">
+        <template #header>① App 配置（开放平台开发者账号）</template>
+        <el-form label-width="130px" @submit.prevent>
+          <el-form-item label="partner_id">
+            <el-input v-model="form.partnerId" placeholder="开放平台 App 的 partner_id" />
+          </el-form-item>
+          <el-form-item label="partner_key">
+            <el-input v-model="form.partnerKey" type="password" show-password placeholder="开放平台 App 的 partner_key" />
+          </el-form-item>
+          <el-form-item label="环境">
+            <el-select v-model="form.env" style="width: 220px">
+              <el-option label="生产环境（正式接口）" value="prod" />
+              <el-option label="沙箱环境（测试接口）" value="sandbox" />
+            </el-select>
+            <span class="hint">中国卖家跨境 App 一般选生产环境；沙箱仅供官方联调测试</span>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="saving" :disabled="!form.partnerId || !form.partnerKey" @click="saveApp">
+              保存配置
+            </el-button>
+            <el-tag v-if="status.configured" type="success" effect="light" style="margin-left: 12px">
+              已配置：{{ status.partnerId }}（key {{ status.partnerKeyMasked }}，{{ envLabel(status.env) }}）
+            </el-tag>
+          </el-form-item>
+        </el-form>
+        <el-alert type="info" :closable="false" show-icon
+          title="凭证只保存在本机（server/data/openapi-session.json，不入库、不上传）；key 保存后不再完整显示。" />
+      </el-card>
+
+      <el-card shadow="never" class="card">
+        <template #header>② 店铺授权</template>
+        <el-form label-width="130px" @submit.prevent>
+          <el-form-item label="回调地址 redirect">
+            <el-input v-model="form.redirect" placeholder="https://example.com/" style="max-width: 480px" />
+          </el-form-item>
+        </el-form>
+        <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 12px"
+          title="先在开放平台 App 管理后台保存一个能过校验的回调地址（后台只接受合法域名，不接受 127.0.0.1 / localhost 等指向本机的地址，且不能带 ? 查询参数），然后把后台保存成功的地址原样填到上面。没有域名时，后台与这里都用默认的 https://example.com/ 即可。" />
+        <div class="row">
+          <el-button type="primary" :loading="generating" :disabled="!status.configured" @click="generateAuthUrl">
+            生成授权链接
+          </el-button>
+          <span v-if="!status.configured" class="hint">请先完成 ① 保存 App 配置</span>
+        </div>
+        <div v-if="authUrl" class="row" style="margin-top: 12px">
+          <el-input v-model="authUrl" readonly class="auth-url" />
+          <el-button @click="copyAuthUrl">复制链接</el-button>
+          <el-button type="success" @click="openAuthPage">打开授权页</el-button>
+        </div>
+        <div class="hint" style="margin-top: 8px">
+          打开授权页 → 登录卖家主账号 → 授权。授权链接约 30 分钟过期、授权码一次性；授权后浏览器跳到上面的回调地址，把地址栏完整链接粘贴到下方「手动完成授权」换取 token（链接只有 code 与 main_account_id、没有 shop_id 是正常的）。
+        </div>
+        <el-divider />
+        <div class="row">
+          <el-input v-model="manualUrl" placeholder="粘贴授权跳转后的完整回调链接，例如 https://example.com/?code=…&main_account_id=…" class="auth-url" />
+          <el-button type="warning" :loading="manualing" @click="manualComplete">手动完成授权</el-button>
+        </div>
+        <details class="domain-help">
+          <summary>有域名？放一个转发页，实现全自动登录（无需粘贴）</summary>
+          <div class="hint">
+            1. 在你的域名下新建一个页面，内容为下面这段代码（复制即可）；<br />
+            2. 后台与上面输入框的「回调地址」都填该页面地址，例如 <b>https://你的域名/openapi-callback/</b>；<br />
+            3. 生成链接 → 授权 → 官方跳到你的页面 → 页面自动转回本机工具完成换取 token。<br />
+            不想建页面也行：给域名加一条指向 127.0.0.1 的 A 记录（如 <b>local.你的域名</b>），回调地址填
+            <b>http://local.你的域名:8765/openapi/callback</b>，同样全程自动。
+          </div>
+          <el-input :model-value="forwardSnippet" type="textarea" :rows="6" readonly class="snippet" />
+          <el-button size="small" style="margin-top: 6px" @click="copySnippet">复制代码</el-button>
+        </details>
+      </el-card>
+
+      <el-card shadow="never" class="card">
+        <template #header>
+          ③ 已授权店铺
+          <el-button size="small" style="float: right" :loading="status.loading" @click="refreshStatus">刷新状态</el-button>
+        </template>
+        <el-table v-loading="status.loading" :data="status.shops" empty-text="暂无已授权店铺，请先完成 ② 店铺授权">
+          <el-table-column prop="shopId" label="店铺 ID" min-width="140" />
+          <el-table-column label="环境" width="80">
+            <template #default="{ row }">{{ envLabel(row.env) }}</template>
+          </el-table-column>
+          <el-table-column label="access_token 到期" min-width="170">
+            <template #default="{ row }">{{ fmtTime(row.accessExpireAt) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">
+              <el-tag :type="stateMeta(row).type" effect="light">{{ stateMeta(row).label }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="最近更新" min-width="170">
+            <template #default="{ row }">{{ fmtTime(row.updatedAt / 1000) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="230">
+            <template #default="{ row }">
+              <el-button size="small" :loading="busyShop.has(row.shopId)" @click="testShop(row.shopId)">测试</el-button>
+              <el-button size="small" type="warning" :disabled="busyShop.has(row.shopId)" @click="refreshShop(row.shopId)">
+                刷新 token
+              </el-button>
+              <el-button size="small" type="danger" plain :disabled="busyShop.has(row.shopId)" @click="removeShop(row.shopId)">
+                删除
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="hint" style="margin-top: 8px">
+          access_token 约 4 小时有效，过期后调用接口会自动用 refresh_token 刷新；refresh_token 约 30 天有效且刷新后旧值立即失效，长期不用需重新授权。
+        </div>
+      </el-card>
+
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.page {
+  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", sans-serif;
+  background: #f4f6fb;
+  color: #1f2330;
+  min-height: 100vh;
+  padding: 28px 20px 0;
+  box-sizing: border-box;
+}
+.container { max-width: 960px; margin: 0 auto; padding-bottom: 60px; }
+.card { margin-bottom: 18px; border-radius: 14px; }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.auth-url { flex: 1; min-width: 320px; }
+.hint { font-size: 12px; color: #8a90a3; }
+.domain-help {
+  margin-top: 14px;
+  border: 1px dashed #c9cede;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: #fafbfe;
+}
+.domain-help summary { cursor: pointer; font-size: 13px; color: #4a5064; font-weight: 600; }
+.domain-help .snippet { margin-top: 8px; }
+.domain-help .snippet :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+</style>

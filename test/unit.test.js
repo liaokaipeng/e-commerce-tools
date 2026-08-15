@@ -1,7 +1,7 @@
 'use strict';
 // 单元测试：后端纯函数（无网络依赖、不启动服务）。
 // 覆盖：视频上传工具（哈希/etag/AES 解密/auth 解析/SigV4/item 收集/MP4 探测/行校验）、
-//       TikTok 链接处理与错误分类、竞价金额换算。
+//       TikTok 链接处理与错误分类、竞价金额换算、开放平台签名/打码/redirect 校验。
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
@@ -29,6 +29,8 @@ const {
 const { detectProxy, createAgent } = require('../server/tiktok/proxy');
 const { toAmount } = require('../server/bidding');
 const biddingCancel = require('../server/bidding-cancel');
+const { nowSec, buildBaseString, hmacHex, maskToken } = require('../server/lib/openapi-utils');
+const openapi = require('../server/openapi');
 
 // ---------- 合成一个可被 probeVideo 解析的 MP4（仅盒结构，无真实媒体数据） ----------
 function box(type, payload) {
@@ -228,6 +230,42 @@ async function run() {
   t('toAmount 空值返回空串', toAmount(null) === '' && toAmount('0') === '');
   t('toAmount 分转元', toAmount(100000) === 1);
   t('toAmount 四舍五入到分', toAmount(12345678) === 123.46);
+
+  // ===== 开放平台：签名纯函数 =====
+  t('nowSec 为整数秒且接近当前时间', Number.isInteger(nowSec()) && Math.abs(nowSec() - Date.now() / 1000) < 5, String(nowSec()));
+  t('buildBaseString 无 token = partner_id+api_path+timestamp', buildBaseString('p1', '/api/v2/auth/token/get', 100) === 'p1/api/v2/auth/token/get100');
+  t('buildBaseString 带 token = +access_token+shop_id', buildBaseString('p1', '/api/v2/x', 100, 'acc', 'shop') === 'p1/api/v2/x100accshop');
+  t('buildBaseString 仅 access_token 时只拼 token', buildBaseString('p1', '/api/v2/x', 100, 'acc', '') === 'p1/api/v2/x100acc');
+  t('buildBaseString 仅 shop_id 时只拼 shop_id', buildBaseString('p1', '/api/v2/x', 100, '', 'shop') === 'p1/api/v2/x100shop');
+  t('hmacHex 与 crypto 标准实现一致', hmacHex('key', 'data') === crypto.createHmac('sha256', 'key').update('data').digest('hex'));
+  t('hmacHex 输出小写 64 位 hex', /^[0-9a-f]{64}$/.test(hmacHex('k', 'd')));
+  t('maskToken 保留前 8 后 4 位', maskToken('abcdefghijklmnop') === 'abcdefgh***mnop', maskToken('abcdefghijklmnop'));
+  t('maskToken 短串保留首尾', maskToken('abc') === 'a***c', maskToken('abc'));
+  t('maskToken 空串返回空', maskToken('') === '' && maskToken(null) === '');
+
+  // ===== 开放平台：redirect 校验（自动回调 / 手动粘贴两种模式） =====
+  {
+    const { validateRedirect } = openapi._test;
+    const ok = (url, mode) => {
+      try { return validateRedirect(url).mode === mode; } catch { return false; }
+    };
+    const bad = (url) => {
+      try { validateRedirect(url); return false; } catch { return true; }
+    };
+    t('redirect 127.0.0.1 本机地址 → auto', ok('http://127.0.0.1:8765/openapi/callback', 'auto'));
+    t('redirect localhost → auto', ok('http://localhost:8765/openapi/callback', 'auto'));
+    t('redirect sslip.io 通配域名 → auto', ok('http://127.0.0.1.sslip.io:8765/openapi/callback', 'auto'));
+    t('redirect localtest.me / lvh.me → auto', ok('http://localtest.me:8765/openapi/callback', 'auto') && ok('http://lvh.me:8765/openapi/callback', 'auto'));
+    t('redirect 本机地址端口不对 → 拒绝', bad('http://127.0.0.1:9999/openapi/callback'));
+    t('redirect 本机地址路径不对 → 拒绝', bad('http://127.0.0.1:8765/other'));
+    t('redirect 非白名单 http 域名 → manual（手动粘贴兜底）', ok('http://my.example.com/cb', 'manual'));
+    t('redirect IP 地址（http）→ 拒绝', bad('http://1.2.3.4/cb'));
+    t('redirect https 域名 → manual（手动粘贴兜底）', ok('https://my.example.com/cb', 'manual'));
+    t('redirect 带查询参数 → 拒绝（官方要求不含 ?）', bad('https://my.example.com/cb?x=1'));
+    t('redirect https 带端口域名 → manual', ok('https://my.example.com:8443/cb', 'manual'));
+    t('redirect https 但 host 是 IP → 拒绝', bad('https://1.2.3.4/cb'));
+    t('redirect 非 http(s) 协议 → 拒绝', bad('ftp://x.example.com/cb') && bad('not-a-url'));
+  }
 
   // ===== 取消竞价：待改进列表解析 =====
   t('bidding-cancel toAmount 与 bidding 一致', biddingCancel.toAmount(12345678) === 123.46 && biddingCancel.toAmount(null) === '');

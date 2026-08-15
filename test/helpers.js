@@ -3,6 +3,7 @@
 // 供 test/unit.test.js 与 test/api.test.js 共用，保证两条测试线结果汇总一致。
 const { spawn } = require('child_process');
 const path = require('path');
+const os = require('os');
 const fs = require('fs');
 
 const ROOT = path.join(__dirname, '..');
@@ -40,10 +41,13 @@ async function waitReady() {
 
 // 启动被测服务（临时端口），并备份测试期间可能被改写的 session/settings 文件，
 // stop() 时原样恢复（内含用户真实凭证，不能删除）。
+// 开放平台凭证：服务启动时读入内存（openapi/store.js），测试用独立临时文件隔离
+// （OPENAPI_SESSION_FILE 环境变量），避免误动用户真实 openapi-session.json。
 function startServer() {
+  const openapiTestFile = path.join(os.tmpdir(), `kp_openapi_session_${process.pid}_${Date.now()}.json`);
   const child = spawn(process.execPath, ['server/main.js'], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT) },
+    env: { ...process.env, PORT: String(PORT), OPENAPI_SESSION_FILE: openapiTestFile },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let childErr = '';
@@ -51,7 +55,7 @@ function startServer() {
 
   const settingsFile = path.join(ROOT, 'server', 'data', 'settings.json');
   const settingsBackup = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile) : null;
-  const sessionFiles = ['bidding-session.json', 'video-session.json'].map((f) => path.join(ROOT, 'server', 'data', f));
+  const sessionFiles = ['bidding-session.json', 'video-session.json', 'openapi-session.json'].map((f) => path.join(ROOT, 'server', 'data', f));
   const sessionBackups = sessionFiles.map((fp) => (fs.existsSync(fp) ? fs.readFileSync(fp) : null));
 
   return {
@@ -66,6 +70,7 @@ function startServer() {
       });
       if (settingsBackup) fs.writeFileSync(settingsFile, settingsBackup);
       else if (fs.existsSync(settingsFile)) fs.unlinkSync(settingsFile);
+      if (fs.existsSync(openapiTestFile)) fs.unlinkSync(openapiTestFile);
     },
   };
 }
