@@ -30,7 +30,8 @@ const forwardSnippet = [
 ].join('\n');
 const busyShop = reactive(new Set()); // 正在操作中的店铺
 
-async function refreshStatus() {
+async function refreshStatus(manual = false) {
+  status.loading = true;
   try {
     const r = await fetch('/api/openapi/status');
     const s = await r.json();
@@ -40,9 +41,12 @@ async function refreshStatus() {
         form.partnerId = s.partnerId;
         form.env = s.env;
       }
+      if (manual) ElMessage.success('状态已刷新');
+    } else if (manual) {
+      ElMessage.error((s && s.message) || '状态读取失败');
     }
   } catch {
-    // 本地服务未启动：保持 loading 结束，界面提示由用户点刷新观察
+    if (manual) ElMessage.error('读取失败：本地服务未启动或连接异常，请确认 启动.bat 正在运行');
   } finally {
     status.loading = false;
   }
@@ -265,7 +269,6 @@ onUnmounted(() => {
               <el-option label="生产环境（正式接口）" value="prod" />
               <el-option label="沙箱环境（测试接口）" value="sandbox" />
             </el-select>
-            <span class="hint">中国卖家跨境 App 一般选生产环境；沙箱仅供官方联调测试</span>
           </el-form-item>
           <el-form-item>
             <el-button type="primary" :loading="saving" :disabled="!form.partnerId || !form.partnerKey" @click="saveApp">
@@ -277,7 +280,7 @@ onUnmounted(() => {
           </el-form-item>
         </el-form>
         <el-alert type="info" :closable="false" show-icon
-          title="凭证只保存在本机（server/data/openapi-session.json，不入库、不上传）；key 保存后不再完整显示。" />
+          title="凭证只保存在本机，不上传；key 保存后不再完整显示。" />
       </el-card>
 
       <el-card shadow="never" class="card">
@@ -288,7 +291,7 @@ onUnmounted(() => {
           </el-form-item>
         </el-form>
         <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 12px"
-          title="先在开放平台 App 管理后台保存一个能过校验的回调地址（后台只接受合法域名，不接受 127.0.0.1 / localhost 等指向本机的地址，且不能带 ? 查询参数），然后把后台保存成功的地址原样填到上面。没有域名时，后台与这里都用默认的 https://example.com/ 即可。" />
+          title="回调地址需为合法域名（不接受 127.0.0.1 / localhost 等本机地址，不能带 ?），后台与上面输入框填成一致；没有域名时两边都用 https://example.com/。" />
         <div class="row">
           <el-button type="primary" :loading="generating" :disabled="!status.configured" @click="generateAuthUrl">
             生成授权链接
@@ -301,21 +304,18 @@ onUnmounted(() => {
           <el-button type="success" @click="openAuthPage">打开授权页</el-button>
         </div>
         <div class="hint" style="margin-top: 8px">
-          打开授权页 → 登录卖家主账号 → 授权。授权链接约 30 分钟过期、授权码一次性；授权后浏览器跳到上面的回调地址，把地址栏完整链接粘贴到下方「手动完成授权」换取 token（链接只有 code 与 main_account_id、没有 shop_id 是正常的）。
+          打开授权页，用<b>主账号</b>登录授权（一次授权名下全部店铺）。授权后把浏览器地址栏完整链接粘贴到下方「手动完成授权」；链接约 30 分钟过期、授权码一次性（只有 code 与 main_account_id 是正常的）。
         </div>
         <el-divider />
         <div class="row">
-          <el-input v-model="manualUrl" placeholder="粘贴授权跳转后的完整回调链接，例如 https://example.com/?code=…&main_account_id=…" class="auth-url" />
+          <el-input v-model="manualUrl" placeholder="粘贴授权跳转后的完整链接，如 https://example.com/?code=…&main_account_id=…" class="auth-url" />
           <el-button type="warning" :loading="manualing" @click="manualComplete">手动完成授权</el-button>
         </div>
         <details class="domain-help">
-          <summary>有域名？放一个转发页，实现全自动登录（无需粘贴）</summary>
+          <summary>有域名？放转发页实现全自动（免粘贴）</summary>
           <div class="hint">
-            1. 在你的域名下新建一个页面，内容为下面这段代码（复制即可）；<br />
-            2. 后台与上面输入框的「回调地址」都填该页面地址，例如 <b>https://你的域名/openapi-callback/</b>；<br />
-            3. 生成链接 → 授权 → 官方跳到你的页面 → 页面自动转回本机工具完成换取 token。<br />
-            不想建页面也行：给域名加一条指向 127.0.0.1 的 A 记录（如 <b>local.你的域名</b>），回调地址填
-            <b>http://local.你的域名:8765/openapi/callback</b>，同样全程自动。
+            把下面代码放到你域名的一个页面（如 <b>https://你的域名/openapi-callback/</b>），后台与本页回调地址都填该地址，授权后自动跳回本工具。<br />
+            也可给域名加 A 记录 <b>local.你的域名 → 127.0.0.1</b>，回调地址填 <b>http://local.你的域名:8765/openapi/callback</b>。
           </div>
           <el-input :model-value="forwardSnippet" type="textarea" :rows="6" readonly class="snippet" />
           <el-button size="small" style="margin-top: 6px" @click="copySnippet">复制代码</el-button>
@@ -325,7 +325,7 @@ onUnmounted(() => {
       <el-card shadow="never" class="card">
         <template #header>
           ③ 已授权店铺
-          <el-button size="small" style="float: right" :loading="status.loading" @click="refreshStatus">刷新状态</el-button>
+          <el-button size="small" style="float: right" :loading="status.loading" @click="refreshStatus(true)">刷新状态</el-button>
         </template>
         <el-table v-loading="status.loading" :data="status.shops" empty-text="暂无已授权店铺，请先完成 ② 店铺授权">
           <el-table-column prop="shopId" label="店铺 ID" min-width="140" />
@@ -356,7 +356,7 @@ onUnmounted(() => {
           </el-table-column>
         </el-table>
         <div class="hint" style="margin-top: 8px">
-          access_token 约 4 小时有效，过期后调用接口会自动用 refresh_token 刷新；refresh_token 约 30 天有效且刷新后旧值立即失效，长期不用需重新授权。
+          access_token 约 4 小时有效（过期自动刷新）；refresh_token 约 30 天有效，长期不用需重新授权。
         </div>
       </el-card>
 
