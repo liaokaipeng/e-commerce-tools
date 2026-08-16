@@ -332,6 +332,19 @@ async function run() {
       const stt = await req('GET', '/api/monitor/status');
       const sttj = JSON.parse(stt.text);
       t('GET /api/monitor/status 返回运行状态', stt.status === 200 && sttj.ok === true && sttj.running === true && Array.isArray(sttj.shops) && sttj.shops.length === 0, stt.text);
+      // 按需采集：在场心跳 / 离开事件
+      const pOn = await req('POST', '/api/monitor/presence', { active: true });
+      const pOnJ = JSON.parse(pOn.text);
+      t('POST /api/monitor/presence 在场返回 ok 且 active=true', pOn.status === 200 && pOnJ.ok === true && pOnJ.active === true, pOn.text);
+      const sttOn = JSON.parse((await req('GET', '/api/monitor/status')).text);
+      t('在场后 status.presenceActive=true 且含租约时长', sttOn.presenceActive === true && typeof sttOn.presenceLeaseMs === 'number' && sttOn.presenceLeaseMs > 0, JSON.stringify({ presenceActive: sttOn.presenceActive, presenceLeaseMs: sttOn.presenceLeaseMs }));
+      const pOff = await req('POST', '/api/monitor/presence', { active: false });
+      const pOffJ = JSON.parse(pOff.text);
+      t('POST /api/monitor/presence 离开返回 ok 且 active=false', pOff.status === 200 && pOffJ.ok === true && pOffJ.active === false, pOff.text);
+      const sttOff = JSON.parse((await req('GET', '/api/monitor/status')).text);
+      t('离开后 status.presenceActive=false', sttOff.presenceActive === false, JSON.stringify({ presenceActive: sttOff.presenceActive }));
+      const pBad = await req('POST', '/api/monitor/presence', {});
+      t('POST /api/monitor/presence 缺 active 字段视为离开（不报错）', pBad.status === 200 && JSON.parse(pBad.text).ok === true, pBad.text);
       const events = await readSSEUntil('/api/monitor/events', ['connected']);
       t('GET /api/monitor/events 首事件为 connected', events.some((e) => e.type === 'connected'), JSON.stringify(events));
     }

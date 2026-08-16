@@ -242,10 +242,11 @@ function ackAlert(id) {
   return Object.assign({}, a);
 }
 
-/** 人工关闭告警（终端态；再次触发会重新打开） */
+/** 人工关闭告警（终端态；再次触发会重新打开）。已关闭时幂等返回，不重复广播。 */
 function closeAlert(id) {
   const a = alerts.find((x) => x.id === id);
   if (!a) return null;
+  if (a.status === 'closed') return Object.assign({}, a);
   a.status = 'closed';
   a.updatedAt = Date.now();
   alertsDirty = true;

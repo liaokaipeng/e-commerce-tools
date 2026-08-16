@@ -31,6 +31,7 @@ const { toAmount } = require('../server/bidding');
 const biddingCancel = require('../server/bidding-cancel');
 const { nowSec, buildBaseString, hmacHex, maskToken } = require('../server/lib/openapi-utils');
 const openapi = require('../server/openapi');
+const { isAuthDead, isAuthRetryable, planRefresh } = require('../server/openapi/client');
 
 // ---------- 监控模块：数据目录隔离到临时目录（不碰 server/data） ----------
 const MONITOR_TMP = path.join(os.tmpdir(), `kp_monitor_test_${process.pid}_${Date.now()}`);
@@ -278,6 +279,33 @@ async function run() {
     t('redirect https 带端口域名 → manual', ok('https://my.example.com:8443/cb', 'manual'));
     t('redirect https 但 host 是 IP → 拒绝', bad('https://1.2.3.4/cb'));
     t('redirect 非 http(s) 协议 → 拒绝', bad('ftp://x.example.com/cb') && bad('not-a-url'));
+  }
+
+  // ===== 开放平台：凭证失效判定与刷新计划（纯函数） =====
+  t('isAuthDead 命中网关 invalid_acceess_token 文案', isAuthDead('开放平台错误 invalid_acceess_token：Invalid access_token, please have a check.') === true);
+  t('isAuthDead 命中 refresh token/shop_id 不匹配文案', isAuthDead('error_param：Your refresh token or shop_id is wrong, please check refresh token or shop_id.') === true);
+  t('isAuthDead 命中 refresh token/merchant_id 不匹配文案', isAuthDead('error_param：Your refresh token or merchant_id is wrong') === true);
+  t('isAuthDead 命中 refresh_token 过期文案', isAuthDead('error_refresh_token：Your refresh_token expired.') === true);
+  t('isAuthDead 不命中普通业务/网络错误', isAuthDead('开放平台错误 error_param：缺少必填参数') === false && isAuthDead('连接超时') === false);
+  t('isAuthRetryable 认证类错误可刷新重试', isAuthRetryable('开放平台错误 error_access_token：xxx') === true && isAuthRetryable('开放平台错误 invalid_acceess_token：Invalid access_token, please have a check.') === true);
+  t('isAuthRetryable 普通错误不重试', isAuthRetryable('商品清单：接口超时') === false);
+  {
+    const shared = [
+      { shopId: 's1', refreshToken: 'R', merchantId: 'M1' },
+      { shopId: 's2', refreshToken: 'R', merchantId: 'M1' },
+      { shopId: 's3', refreshToken: 'R2', merchantId: 'M1' },
+    ];
+    t('planRefresh 独立凭证 → individual', planRefresh({ shopId: 's3', refreshToken: 'R2', merchantId: 'M1' }, shared).mode === 'individual');
+    const gm = planRefresh({ shopId: 's1', refreshToken: 'R', merchantId: 'M1' }, shared);
+    t('planRefresh 共享同商户 → group-merchant（含组大小）', gm.mode === 'group-merchant' && gm.merchantId === 'M1' && gm.groupSize === 2);
+    t('planRefresh 共享跨商户 → group-nomerchant', planRefresh({ shopId: 's1', refreshToken: 'R', merchantId: 'M1' }, [
+      { shopId: 's1', refreshToken: 'R', merchantId: 'M1' },
+      { shopId: 's2', refreshToken: 'R', merchantId: 'M2' },
+    ]).mode === 'group-nomerchant');
+    t('planRefresh 共享无 merchantId → group-nomerchant', planRefresh({ shopId: 's1', refreshToken: 'R', merchantId: '' }, [
+      { shopId: 's1', refreshToken: 'R', merchantId: '' },
+      { shopId: 's2', refreshToken: 'R', merchantId: '' },
+    ]).mode === 'group-nomerchant');
   }
 
   // ===== 取消竞价：待改进列表解析 =====

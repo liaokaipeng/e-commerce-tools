@@ -58,6 +58,13 @@ async function parseBody(req) {
   }
 }
 
+/** 授权状态变化后通知监控大屏调度器立即刷新店铺列表（重新授权后无需等巡检周期，大屏当场恢复） */
+function notifyMonitorAuthChanged() {
+  try {
+    require('./monitor/scheduler').notifyAuthChanged();
+  } catch { /* 监控模块未加载时忽略 */ }
+}
+
 // ============ 授权回调页（浏览器从官方授权页跳回这里） ============
 // 内联 HTML：读取 query 中的 code/shop_id/main_account_id，调 /api/openapi/auth-callback 换 token。
 function callbackPageHtml() {
@@ -192,9 +199,13 @@ function register({ get, post }) {
           accessToken: t.accessToken,
           refreshToken: t.refreshToken,
           accessExpireAt,
+          invalid: false, // 重新授权成功即恢复
+          invalidReason: '',
+          invalidAt: 0,
         });
       }
       console.log(`✅ 开放平台授权成功：${shops.length} 个店铺（${shops.join(', ')}，token 到期 ${new Date(accessExpireAt * 1000).toLocaleString('zh-CN', { hour12: false })}）`);
+      notifyMonitorAuthChanged(); // 大屏立即恢复这些店铺的采集
       sendJson(res, 200, {
         ok: true,
         shopIds: shops,
@@ -218,9 +229,13 @@ function register({ get, post }) {
       if (!app) throw new Error('尚未配置 App，请先保存 partner_id / partner_key');
       const shop = store.getShop(app.env, shopId);
       if (!shop) throw new Error(`店铺 ${shopId} 尚未授权`);
+      if (shop.invalid) {
+        throw new Error(`店铺 ${shopId} 授权已失效：${shop.invalidReason || '凭证无效'}，重新授权后才能恢复`);
+      }
       const oldRefresh = shop.refreshToken;
       const fresh = await client.refreshToken(app.env, shopId, oldRefresh);
       const synced = client.saveRefreshResult(app.env, shopId, oldRefresh, fresh);
+      notifyMonitorAuthChanged(); // 刷新成功即恢复该店铺采集
       sendJson(res, 200, {
         ok: true,
         shopId,
@@ -242,6 +257,7 @@ function register({ get, post }) {
       if (!shopId) throw new Error('缺少 shop_id');
       const app = store.getApp();
       const removed = app ? store.removeShop(app.env, shopId) : false;
+      if (removed) notifyMonitorAuthChanged();
       sendJson(res, 200, { ok: true, removed, message: removed ? '已删除店铺授权' : '该店铺本就没有授权记录' });
     } catch (e) {
       sendJson(res, 400, { ok: false, message: e.message });

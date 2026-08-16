@@ -232,6 +232,7 @@ async function removeShop(shopId) {
 function stateMeta(s) {
   if (s.state === 'valid') return { type: 'success', label: '有效' };
   if (s.state === 'expiring') return { type: 'warning', label: '即将过期' };
+  if (s.state === 're_auth') return { type: 'danger', label: '需重新授权' };
   return { type: 'danger', label: '已过期' };
 }
 

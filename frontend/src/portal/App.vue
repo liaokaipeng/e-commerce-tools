@@ -24,6 +24,16 @@ function show(key) {
   if (tab && !loaded.has(key)) {
     loaded.add(key);
   }
+  notifyTabs(key);
+}
+
+/** 通知所有已加载 iframe 当前激活的 Tab（监控大屏据此启停按需采集） */
+function notifyTabs(key) {
+  for (const f of Array.from(document.querySelectorAll('iframe'))) {
+    try {
+      f.contentWindow && f.contentWindow.postMessage({ type: 'portal-tab', key }, location.origin);
+    } catch { /* 忽略跨源 iframe */ }
+  }
 }
 
 function isActive(key) {
@@ -36,7 +46,21 @@ function iframeSrc(tab) {
 }
 
 // 首次打开即加载默认 Tab（竞价导出），否则其 iframe 无 src 显示空白
-onMounted(() => show(active.value));
+onMounted(() => {
+  show(active.value);
+  // 子页面（如监控大屏）可通过 parent.postMessage 请求切换 Tab；
+  // 监控大屏加载完成后发 monitor-ready 询问当前激活 Tab（用于按需采集启停）
+  window.addEventListener('message', (ev) => {
+    const d = ev.data;
+    if (d && d.type === 'switch-tab' && tabs.some((t) => t.key === d.key)) {
+      show(d.key);
+    } else if (d && d.type === 'monitor-ready') {
+      try {
+        ev.source && ev.source.postMessage({ type: 'portal-tab', key: active.value }, location.origin);
+      } catch { /* 忽略 */ }
+    }
+  });
+});
 </script>
 
 <template>

@@ -19,6 +19,7 @@ const overview = reactive({
   configured: false,
   scheduler: { running: false, active: 0, lastTickAt: 0 },
   totals: { P0: 0, P1: 0, P2: 0, recovered: 0 },
+  reAuthCount: 0,
   metrics: {},
   shops: [],
   at: 0,
@@ -61,6 +62,14 @@ const sortedShops = computed(() => {
 });
 
 const normalCount = computed(() => overview.shops.filter((s) => !s.alerts.maxLevel).length);
+
+const reAuthCount = computed(() => overview.reAuthCount || overview.shops.filter((s) => s.authBroken).length);
+
+/** 跳转到门户页「开放平台」Tab（同源 iframe，经 parent postMessage 切 Tab） */
+function goOpenapi() {
+  try { window.parent.postMessage({ type: 'switch-tab', key: 'openapi' }, location.origin || '*'); } catch { /* 忽略 */ }
+  showToast('请到「开放平台」Tab 用主账号重新授权一次，全部店铺即恢复');
+}
 
 const shownAlerts = computed(() => {
   let list = alerts.value;
@@ -391,6 +400,53 @@ function applyRotate() {
 
 watch([projectMode, rotateOn], applyRotate);
 
+// ---------- 在场心跳（按需采集：仅本页可见时采集，离开即停） ----------
+const PRESENCE_HEARTBEAT_MS = 30 * 1000;
+let tabActive = window.parent === window; // 直接打开本页（非门户 iframe）时默认视为可见
+let hasParentReply = false;
+let presenceTimer = null;
+let parentTimer = null;
+
+function sendPresence(active) {
+  try {
+    fetch('/api/monitor/presence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active }),
+    }).catch(() => { /* 服务暂不可用时忽略，下个心跳重试 */ });
+  } catch { /* 忽略 */ }
+}
+
+function startPresence() {
+  if (presenceTimer) clearInterval(presenceTimer);
+  sendPresence(true); // 立即报告在场（服务端会立刻巡检一轮）
+  presenceTimer = setInterval(() => sendPresence(true), PRESENCE_HEARTBEAT_MS);
+}
+
+function stopPresence() {
+  if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; }
+  sendPresence(false); // 离开即停采
+}
+
+/** 按「门户当前 Tab + 页面可见性」同步在场状态 */
+function syncPresence() {
+  if (tabActive && document.visibilityState !== 'hidden') startPresence();
+  else stopPresence();
+}
+
+function onParentMessage(ev) {
+  if (!ev || !ev.data) return;
+  if (ev.data.type === 'portal-tab') {
+    hasParentReply = true;
+    tabActive = ev.data.key === 'monitor';
+    syncPresence();
+  }
+}
+
+function onVisibilityChange() {
+  syncPresence();
+}
+
 // ---------- 生命周期 ----------
 onMounted(async () => {
   await loadOverview();
@@ -399,6 +455,18 @@ onMounted(async () => {
   const firstAlert = sortedShops.value.find((s) => s.alerts.maxLevel) || sortedShops.value[0];
   if (firstAlert) selectShop(firstAlert.shopId);
   connectSse();
+  // 在场心跳：门户 iframe 内先询问当前激活 Tab（避免「刚打开又立刻切走」误报在场）；
+  // 没有父窗口（直接访问本页）则立即视为在场
+  window.addEventListener('message', onParentMessage);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  if (window.parent !== window) {
+    try { window.parent.postMessage({ type: 'monitor-ready' }, location.origin || '*'); } catch { /* 忽略 */ }
+    parentTimer = setTimeout(() => {
+      if (!hasParentReply) { tabActive = true; syncPresence(); }
+    }, 1500);
+  } else {
+    syncPresence();
+  }
   // 30s 兜底轮询（SSE 断开时数据不落后太多）+ 时钟
   setInterval(() => {
     if (!sseOk.value) { loadOverview(); loadAlerts(); }
@@ -410,6 +478,10 @@ onMounted(async () => {
 onUnmounted(() => {
   if (es) { try { es.close(); } catch { /* 忽略 */ } }
   clearInterval(rotateTimer);
+  stopPresence();
+  if (parentTimer) clearTimeout(parentTimer);
+  window.removeEventListener('message', onParentMessage);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
 });
 </script>
 
@@ -431,6 +503,7 @@ onUnmounted(() => {
         <div class="stat p2"><b>{{ overview.totals.P2 }}</b><span>P2 提醒</span></div>
         <div class="stat ok"><b>{{ normalCount }}</b><span>正常</span></div>
         <div class="stat dim"><b>{{ overview.totals.recovered }}</b><span>已恢复</span></div>
+        <div v-if="reAuthCount > 0" class="stat reauth"><b>{{ reAuthCount }}</b><span>待重新授权</span></div>
       </div>
       <div class="controls">
         <label class="ctl" title="投屏/展示模式"><input type="checkbox" v-model="projectMode" />投影</label>
@@ -445,10 +518,18 @@ onUnmounted(() => {
       </div>
     </header>
 
+    <!-- 授权失效横幅：这些店铺已暂停采集，重新授权后自动恢复 -->
+    <div v-if="reAuthCount > 0" class="reauth-banner">
+      <span class="rb-ico">⚠</span>
+      <span><b>{{ reAuthCount }}</b> 家店铺的开放平台授权已失效（主账号共享 token 被刷新绑定或已过期），已自动暂停这些店铺的采集。
+        到「开放平台」页用<b>主账号重新授权一次</b>即可全部恢复，无需逐店操作。</span>
+      <button class="rb-btn" @click="goOpenapi">去重新授权</button>
+    </div>
+
     <div v-if="!overview.configured || !overview.shops.length" class="empty">
       <h2>{{ !overview.configured ? '尚未配置开放平台 App' : '当前没有已授权店铺' }}</h2>
       <p>请先到门户页「开放平台」Tab 完成 App 配置与店铺授权，本大屏会自动开始巡检采集。</p>
-      <p class="dim2">授权后无需任何额外设置：订单履约每 10 分钟、商品库存每 30 分钟、账户健康每小时自动采集。</p>
+      <p class="dim2">授权后无需任何额外设置：打开本页即开始按需巡检（订单履约 10 分钟 / 商品库存 30 分钟 / 账户健康 60 分钟），离开本页自动暂停采集。</p>
     </div>
 
     <!-- ===== 主体三栏 ===== -->
@@ -461,17 +542,20 @@ onUnmounted(() => {
             v-for="s in sortedShops"
             :key="s.shopId"
             class="shop-card"
-            :class="['lv-' + (s.alerts.maxLevel || 'ok'), { selected: s.shopId === selectedShop }, { flashing: s.alerts.maxLevel === 'P0' }]"
+            :class="['lv-' + (s.authBroken ? 'reauth' : s.alerts.maxLevel || 'ok'), { selected: s.shopId === selectedShop }, { flashing: s.alerts.maxLevel === 'P0' && !s.authBroken }]"
             @click="selectShop(s.shopId)"
           >
             <div class="sc-head">
-              <span class="dot" :style="{ background: LEVEL_COLOR[s.alerts.maxLevel] || OK_COLOR }"></span>
+              <span class="dot" :style="{ background: s.authBroken ? '#8f95a8' : LEVEL_COLOR[s.alerts.maxLevel] || OK_COLOR }"></span>
               <b class="sc-name">{{ shopName(s) }}</b>
               <span class="sc-badges">
-                <i v-if="s.alerts.P0" class="b-P0">P0×{{ s.alerts.P0 }}</i>
-                <i v-if="s.alerts.P1" class="b-P1">P1×{{ s.alerts.P1 }}</i>
-                <i v-if="s.alerts.P2" class="b-P2">P2×{{ s.alerts.P2 }}</i>
-                <i v-if="!s.alerts.maxLevel" class="b-ok">正常</i>
+                <i v-if="s.authBroken" class="b-reauth" :title="'授权已失效，重新授权后自动恢复采集'">待重新授权</i>
+                <template v-else>
+                  <i v-if="s.alerts.P0" class="b-P0">P0×{{ s.alerts.P0 }}</i>
+                  <i v-if="s.alerts.P1" class="b-P1">P1×{{ s.alerts.P1 }}</i>
+                  <i v-if="s.alerts.P2" class="b-P2">P2×{{ s.alerts.P2 }}</i>
+                  <i v-if="!s.alerts.maxLevel" class="b-ok">正常</i>
+                </template>
               </span>
             </div>
             <div class="sc-metrics">
@@ -610,7 +694,7 @@ onUnmounted(() => {
       </div>
       <div class="coll-strip">
         <span class="cs-item" :class="{ bad: !overview.scheduler.running }">
-          {{ overview.scheduler.running ? '巡检运行中' : '巡检已停止' }}
+          {{ overview.scheduler.running ? (overview.scheduler.presenceActive ? '巡检运行中' : '巡检待机（离开本页即暂停采集）') : '巡检已停止' }}
           <i v-if="overview.scheduler.active">·{{ overview.scheduler.active }} 项采集中</i>
         </span>
         <span
@@ -696,7 +780,23 @@ onUnmounted(() => {
 .stat span { font-size: 11px; color: #8a93ad; }
 .stat.p0 b { color: #FF3B30; } .stat.p1 b { color: #FF9500; } .stat.p2 b { color: #FFD60A; }
 .stat.ok b { color: #30D158; } .stat.dim b { color: #5b6272; }
+.stat.reauth b { color: #8f95a8; }
 .stat.p0.pulse { animation: cardPulse 1.6s ease-in-out infinite; }
+/* 授权失效横幅 */
+.reauth-banner {
+  display: flex; align-items: center; gap: 12px;
+  background: #2a2410; border-bottom: 1px solid #4d3c14;
+  color: #ffd97a; font-size: 13px; line-height: 1.6;
+  padding: 8px 16px;
+}
+.reauth-banner .rb-ico { font-size: 18px; flex: none; }
+.reauth-banner b { color: #ffb340; }
+.rb-btn {
+  margin-left: auto; flex: none;
+  background: #ee4d2d; color: #fff; border: none; border-radius: 7px;
+  padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit;
+}
+.rb-btn:hover { background: #f05b3d; }
 @keyframes cardPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.5); }
   50% { box-shadow: 0 0 16px 3px rgba(255, 59, 48, 0.55); }
@@ -751,6 +851,7 @@ onUnmounted(() => {
 .shop-card.lv-P1 { border-left-color: #FF9500; }
 .shop-card.lv-P2 { border-left-color: #FFD60A; }
 .shop-card.lv-ok { border-left-color: #30D158; }
+.shop-card.lv-reauth { border-left-color: #8f95a8; opacity: 0.8; }
 .shop-card.flashing { animation: cardFlash 1.4s ease-in-out infinite; }
 @keyframes cardFlash {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0); }
@@ -765,6 +866,7 @@ onUnmounted(() => {
 .b-P1 { background: #FF9500; color: #111; }
 .b-P2 { background: #FFD60A; color: #111; }
 .b-ok { background: rgba(48, 209, 88, 0.2); color: #30D158; }
+.b-reauth { background: rgba(143, 149, 168, 0.25); color: #aab2c8; }
 .sc-metrics { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
 .sc-metrics span { display: flex; flex-direction: column; font-size: 10px; color: #7d86a0; }
 .sc-metrics em { font-style: normal; font-size: 13px; font-weight: 600; }

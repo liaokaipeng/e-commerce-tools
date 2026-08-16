@@ -56,20 +56,21 @@ function shopView(shopId, name) {
 
 // ============ 路由注册 ============
 function register({ get, post }) {
-  // 大屏总览：店铺列表（含告警计数/最高级别/矩阵定级）+ 全局统计
+  // 大屏总览：店铺列表（含告警计数/最高级别/矩阵定级/授权状态）+ 全局统计
   get('/api/monitor/overview', (req, res) => {
     const openapiStatus = openapiStore.status();
     const sum = engine.summary();
     const sched = scheduler.status();
     const shops = sched.shops.map((s) => {
       const alerts = sum.byShop[s.shopId] || { P0: 0, P1: 0, P2: 0, maxLevel: null };
-      return Object.assign(shopView(s.shopId, s.name), { alerts });
+      return Object.assign(shopView(s.shopId, s.name), { alerts, authBroken: !!s.authBroken });
     });
     sendJson(res, 200, {
       ok: true,
       configured: openapiStatus.configured,
-      scheduler: { running: sched.running, active: sched.active, lastTickAt: sched.lastTickAt },
+      scheduler: { running: sched.running, active: sched.active, lastTickAt: sched.lastTickAt, presenceActive: sched.presenceActive },
       totals: sum.totals,
+      reAuthCount: shops.filter((s) => s.authBroken).length,
       metrics: METRICS,
       shops,
       at: Date.now(),
@@ -146,6 +147,19 @@ function register({ get, post }) {
       const body = await parseBody(req);
       const started = scheduler.collectNow(body && body.shopId ? String(body.shopId) : '');
       sendJson(res, 200, { ok: true, started, message: `已触发 ${started.length} 项采集任务` });
+    } catch (e) {
+      sendJson(res, 400, { ok: false, message: e.message });
+    }
+  });
+
+  // 大屏在场心跳（按需采集）：页面打开/可见期间前端每 30s 报一次 { active: true }，
+  // 离开页面报 { active: false }；服务端租约 75s 超时自动视为离开（崩溃兜底）。
+  post('/api/monitor/presence', async (req, res) => {
+    try {
+      const body = await parseBody(req);
+      const active = body && body.active === true;
+      scheduler.setPresence(active);
+      sendJson(res, 200, { ok: true, active, message: active ? '监控大屏在场，已开始按需巡检' : '已离开监控大屏，暂停巡检' });
     } catch (e) {
       sendJson(res, 400, { ok: false, message: e.message });
     }

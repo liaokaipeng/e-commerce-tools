@@ -62,6 +62,30 @@ function getShop(env, shopId) {
   return s ? Object.assign({}, s) : null;
 }
 
+/** 取某环境下全部店铺凭证（完整值，仅 client 内部刷新分组用） */
+function getShopsRaw(env) {
+  return Object.values(store.shops[env] || {}).map((s) => Object.assign({}, s));
+}
+
+/**
+ * 标记店铺凭证已失效（需重新授权）：网关确认凭证死透（access_token/refresh_token 无效或与店铺不匹配）后调用。
+ * 只加标记不清 token（保留给页面打码展示与重新授权覆盖）。
+ */
+function markShopInvalid(env, shopId, reason) {
+  return setShop(env, shopId, {
+    invalid: true,
+    invalidReason: String(reason || '凭证无效，请重新授权').slice(0, 300),
+    invalidAt: Date.now(),
+  });
+}
+
+/** 清除失效标记（重新授权成功 / 刷新成功 / 接口调用成功证明凭证可用时调用） */
+function clearShopInvalid(env, shopId) {
+  const s = getShop(env, shopId);
+  if (!s || !s.invalid) return;
+  setShop(env, shopId, { invalid: false, invalidReason: '', invalidAt: 0 });
+}
+
 /** 写入/更新店铺凭证（合并 patch，刷新后先拿到新 token 再调用，保证旧值不丢失） */
 function setShop(env, shopId, patch) {
   const e = String(env);
@@ -98,7 +122,9 @@ function status() {
         refreshTokenMasked: maskToken(s.refreshToken),
         accessExpireAt: s.accessExpireAt || 0,
         remainSec: remain,
-        state: remain > EXPIRING_SOON_SEC ? 'valid' : remain > 0 ? 'expiring' : 'expired',
+        invalid: !!s.invalid,
+        invalidReason: s.invalidReason || '',
+        state: s.invalid ? 're_auth' : remain > EXPIRING_SOON_SEC ? 'valid' : remain > 0 ? 'expiring' : 'expired',
         updatedAt: s.updatedAt || 0,
       });
     }
@@ -113,4 +139,7 @@ function status() {
   };
 }
 
-module.exports = { getApp, setApp, getShop, setShop, removeShop, status };
+module.exports = {
+  getApp, setApp, getShop, getShopsRaw, setShop, removeShop,
+  markShopInvalid, clearShopInvalid, status,
+};
