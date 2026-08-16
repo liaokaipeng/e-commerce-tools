@@ -44,5 +44,5 @@ const emit = defineEmits(['refresh']);
 }
 .dot.ok { background: #2e7d32; }
 .dot.err { background: #c62828; }
-.status-tip { font-size: 13px; color: #666; flex: 1; min-width: 200px; }
+.status-tip { font-size: 13px; color: var(--text-2, #666); flex: 1; min-width: 200px; }
 </style>

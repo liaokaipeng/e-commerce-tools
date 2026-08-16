@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { UploadFilled } from '@element-plus/icons-vue';
 import LogPanel from '../components/LogPanel.vue';
+import { useLog } from '../composables/useToolPage.js';
 
 // ---------- 站点（门户已按站点拆分为「跨境视频上传」「本土视频上传」两个入口） ----------
 // 本页站点由 URL 参数 ?mode=cn|ph 固定，不再提供站内切换。
@@ -313,16 +314,7 @@ function downloadTemplate() {
 
 // ---------- 日志 ----------
 const autoScroll = ref(true);
-const logLines = ref([]);
-
-function log(msg, cls) {
-  const time = new Date().toLocaleTimeString();
-  logLines.value.push({ time, msg, cls });
-}
-
-function clearLog() {
-  logLines.value = [];
-}
+const { logLines, log, clear: clearLog } = useLog();
 
 // ---------- 上传 ----------
 const uploading = ref(false);
@@ -376,7 +368,7 @@ function startUpload() {
   uploading.value = true;
   cancelledFlag = false;
   currentJobId.value = '';
-  logLines.value = [];
+  clearLog();
   summary.value = '';
   log(`开始批量上传（${siteLabel()}），共 ${rows.value.length} 个任务`, 'ok');
 
@@ -601,5 +593,5 @@ onUnmounted(() => {
 }
 .grid3 label { display: block; font-size: 12px; color: #6b7280; margin: 0 0 4px; }
 .preview { margin-top: 14px; }
-.log-box { margin-top: 12px; }
+/* .log-box 为全局类（styles/base.css） */
 </style>

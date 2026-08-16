@@ -29,6 +29,28 @@ function sendJson(res, status, data) {
 }
 
 /**
+ * 生成路由分发处理器：按「方法 + 路径」匹配路由表并调用处理函数；
+ * 处理器内同步抛错或异步未捕获异常统一兜底为 500 响应，避免请求连接挂起。
+ * @param {Array<{m: string, p: string, fn: Function}>} routes 路由表
+ * @param {(err: Error, method: string, pathname: string) => void} [onError] 错误上报回调
+ * @returns {(req: object, res: object, url: URL) => boolean} 命中路由返回 true，未命中返回 false
+ */
+function createDispatcher(routes, onError = () => {}) {
+  return (req, res, url) => {
+    const route = routes.find((r) => r.m === req.method && r.p === url.pathname);
+    if (!route) return false;
+    Promise.resolve()
+      .then(() => route.fn(req, res, url))
+      .catch((e) => {
+        // SSE 等已写响应头的连接不再二次响应（客户端已接管流），仅记录错误
+        if (!res.headersSent) sendJson(res, 500, { ok: false, message: '服务内部错误' });
+        try { onError(e, req.method, url.pathname); } catch { /* 上报失败忽略 */ }
+      });
+    return true;
+  };
+}
+
+/**
  * 初始化 SSE 响应（写响应头 + retry），返回向该连接写事件的 emit 函数。
  * 供各业务模块的流式进度接口复用，避免重复写响应头与 emit 封装。
  * @param {object} res http.ServerResponse
@@ -91,4 +113,4 @@ function serveStatic(res, urlPath, publicDir) {
   });
 }
 
-module.exports = { sendJson, sse, readBody, serveStatic };
+module.exports = { sendJson, createDispatcher, sse, readBody, serveStatic };

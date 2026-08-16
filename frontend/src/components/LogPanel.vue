@@ -1,5 +1,5 @@
 <!-- 控制台风格日志面板：tiktok / bidding / bidding-cancel / video 四页共用。
-     lines: [{ time, cls, message | msg, title? }]，cls 决定行颜色。 -->
+     lines: [{ time, cls, msg, title? }]（useToolPage.js 的 useLog 生成），cls 决定行颜色。 -->
 <script setup>
 import { computed } from 'vue';
 import { useLogScroll } from '../composables/useToolPage.js';
@@ -27,7 +27,7 @@ const boxStyle = computed(() => ({
     <div v-for="(l, i) in lines" :key="i" class="log-line">
       <span class="log-time">{{ l.time }}</span>
       <span class="log-text" :class="'log-' + (l.cls || 'info')">
-        {{ l.title ? `[${l.title}] ` : '' }}{{ l.message ?? l.msg }}
+        {{ l.title ? `[${l.title}] ` : '' }}{{ l.msg }}
       </span>
     </div>
     <div v-if="!lines.length" class="log-empty">{{ emptyText }}</div>
@@ -45,14 +45,20 @@ const boxStyle = computed(() => ({
   padding: 14px 16px;
   overflow-y: auto;
   word-break: break-all;
+  scrollbar-width: thin; /* Firefox 细滚动条 */
+  scrollbar-color: #2b3245 transparent;
 }
+.log-panel::-webkit-scrollbar { width: 8px; height: 8px; }
+.log-panel::-webkit-scrollbar-thumb { background: #2b3245; border-radius: 4px; }
+.log-panel::-webkit-scrollbar-thumb:hover { background: #3a435c; }
+.log-panel::-webkit-scrollbar-track { background: transparent; }
 .log-line {
   display: flex;
   gap: 8px;
   word-break: break-all;
 }
 .log-line + .log-line { margin-top: 3px; }
-.log-time { color: #5c6370; flex-shrink: 0; white-space: nowrap; }
+.log-time { color: #5c6370; flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .log-info { color: #b8c0cc; }
 .log-warn { color: #ffc95c; }
 .log-ok { color: #5fd08a; }

@@ -81,7 +81,7 @@ function groupState(cat) {
   font-weight: 600;
   font-size: 14px;
 }
-.cat-count { color: #999; font-weight: 400; font-size: 12px; }
+.cat-count { color: var(--text-3, #999); font-weight: 400; font-size: 12px; }
 .store-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -91,7 +91,7 @@ function groupState(cat) {
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid #e5e5e5;
+  border: 1px solid var(--border, #e5e5e5);
   border-radius: 8px;
   padding: 10px 12px;
   cursor: pointer;
@@ -101,5 +101,5 @@ function groupState(cat) {
 .store-item.selected { border-color: #ee4d2d; background: #fff5f3; }
 .store-meta { line-height: 1.35; min-width: 0; }
 .store-name { font-size: 13px; font-weight: 600; }
-.store-id { font-size: 12px; color: #999; }
+.store-id { font-size: 12px; color: var(--text-3, #999); }
 </style>

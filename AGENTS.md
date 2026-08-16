@@ -23,7 +23,7 @@
 
 - 后端一律 **CommonJS**（`require`/`module.exports`）；前端用 **Vue3 SFC**。改代码时保持文件原有风格，不混用。
 - 后端依赖仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端依赖 `vue` / `element-plus` / `vite` / `echarts`（监控大屏折线图，按需引入，仅 monitor 入口加载）。
-- 前端共享代码优先复用：`frontend/src/composables/useToolPage.js`（默认目录 / 日志滚动 / SSE 流读取，tiktok/bidding/video 等页共用）、`frontend/src/composables/useShopeeSession.js`（Shopee 登录状态轮询 + 店铺分组勾选，bidding/bidding-cancel 共用）、`frontend/src/components/` 下 LogPanel（控制台日志）/ DirRow（目录行）/ LoginCard（登录卡）/ StorePicker（店铺选择）；公共页面样式在 `frontend/src/styles/base.css`。
+- 前端共享代码优先复用：各页入口统一经 `frontend/src/bootstrap.js` 挂载（Element Plus 注册 + mount）；`frontend/src/composables/useToolPage.js`（`useLog` 控制台日志 / 默认目录 / 日志滚动 / SSE 流读取，tiktok/bidding/bidding-cancel/video 共用）、`frontend/src/composables/useShopeeSession.js`（Shopee 登录状态轮询 + 店铺分组勾选，bidding/bidding-cancel 共用）、`frontend/src/components/` 下 LogPanel（控制台日志，行数据统一 `{ time, msg, cls, title }`）/ DirRow（目录行）/ LoginCard（登录卡）/ StorePicker（店铺选择）；公共页面样式在 `frontend/src/styles/base.css`（浅色工具页设计令牌 + Element Plus 品牌橙主色覆盖 + `.sel-count` / `.log-box` 等公共类，monitor 深色页不使用）。
 - `tiktok.js` / `video.js` / `openapi.js` / `monitor.js` 只做路由注册，链路拆到 `server/tiktok/` / `server/video/` / `server/openapi/` / `server/monitor/` 子模块；新增逻辑放对应子模块，不要塞回入口文件。
 
 ## 关键注意点（详见 docs/架构.md）

@@ -6,7 +6,7 @@ import StorePicker from '../components/StorePicker.vue';
 import DirRow from '../components/DirRow.vue';
 import LogPanel from '../components/LogPanel.vue';
 import { useShopeeSession } from '../composables/useShopeeSession.js';
-import { useDirSettings, readSSE } from '../composables/useToolPage.js';
+import { useDirSettings, useLog, readSSE } from '../composables/useToolPage.js';
 
 // ---------- 登录状态 + 店铺列表（与取消竞价共用） ----------
 const {
@@ -14,16 +14,11 @@ const {
   stores, selected, selCount, clearAll,
 } = useShopeeSession('Cookie 已就绪，可直接选择店铺导出。');
 
+// ---------- 日志 ----------
+const { logLines, log, clear: clearLog } = useLog();
+
 // ---------- 保存位置 ----------
 const { dir, hasDefault, loadSettings: loadDirSettings, setDefaultDir, openDir } = useDirSettings('bidding', log);
-
-// ---------- 日志 ----------
-const logLines = ref([]);
-
-function log(msg, cls) {
-  const time = new Date().toLocaleTimeString();
-  logLines.value.push({ time, msg, cls });
-}
 
 // ---------- 导出 ----------
 const exporting = ref(false);
@@ -48,7 +43,7 @@ async function doExport() {
     }
   }
   exporting.value = true;
-  logLines.value = [];
+  clearLog();
   log('开始导出，共 ' + selected.size + ' 个店铺…', 'info');
   try {
     const resp = await fetch('/api/export', {
@@ -125,6 +120,5 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.sel-count { font-size: 13px; color: #666; }
-.log-box { margin-top: 14px; }
+/* 页面级样式已统一收敛到 styles/base.css（.sel-count / .log-box 为全局类） */
 </style>

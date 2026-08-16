@@ -67,7 +67,9 @@ onMounted(() => {
   <div class="portal">
     <header class="topbar">
       <div class="brand">
-        <b>工具合集</b>
+        <span class="brand-text">
+          <b>工具合集</b>
+        </span>
       </div>
       <nav>
         <template v-for="g in ['Shopee', 'TikTok']" :key="g">
@@ -76,6 +78,7 @@ onMounted(() => {
             v-for="t in tabs.filter((x) => x.group === g)"
             :key="t.key"
             :class="{ active: isActive(t.key) }"
+            :title="t.sub"
             @click="show(t.key)"
           >
             {{ t.label }}<small>{{ t.sub }}</small>
@@ -88,6 +91,7 @@ onMounted(() => {
         v-for="t in tabs"
         :key="t.key"
         :class="{ active: isActive(t.key) }"
+        :title="t.label"
         :src="iframeSrc(t)"
       ></iframe>
     </div>
@@ -109,14 +113,16 @@ onMounted(() => {
   align-items: center;
   gap: 18px;
   flex-wrap: wrap;
-  background: #1a1a2e;
+  background: #111527; /* 与监控大屏顶栏一致 */
+  border-bottom: 1px solid #1e2440;
   color: #fff;
-  padding: 12px 24px;
+  padding: 10px 24px;
 }
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: none;
 }
 .logo {
   width: 34px;
@@ -128,14 +134,25 @@ onMounted(() => {
   justify-content: center;
   font-size: 16px;
   font-weight: 700;
+  box-shadow: 0 2px 8px rgba(238, 77, 45, 0.45);
 }
-.brand b { font-size: 16px; }
+.brand b { font-size: 16px; display: block; line-height: 1.2; }
+.brand small {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: #8f95a8;
+  line-height: 1.2;
+}
 nav {
   display: flex;
-  gap: 18px;
+  gap: 14px;
   flex: 1;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
+  overflow-x: auto; /* 小屏横向滚动，避免挤压换行 */
+  padding-bottom: 2px;
+  scrollbar-width: thin;
 }
 .g-label {
   font-size: 12px;
@@ -144,21 +161,29 @@ nav {
   color: #8f95a8;
   margin-right: 2px;
   white-space: nowrap;
+  flex: none;
 }
 nav button {
   border: none;
   background: rgba(255, 255, 255, 0.08);
   color: #cfd3e0;
-  padding: 9px 18px;
+  padding: 8px 18px;
   border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
   font-family: inherit;
+  white-space: nowrap;
+  flex: none;
 }
 nav button:hover { background: rgba(255, 255, 255, 0.16); }
-nav button.active { background: #ee4d2d; color: #fff; }
+nav button.active {
+  background: #ee4d2d;
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(238, 77, 45, 0.5);
+  transform: translateY(-1px);
+}
 nav button small {
   display: block;
   font-size: 11px;
@@ -177,6 +202,7 @@ iframe {
 }
 iframe.active { visibility: visible; }
 @media (max-width: 640px) {
-  .brand b { display: none; }
+  .brand-text small { display: none; }
+  .topbar { gap: 12px; padding: 10px 14px; }
 }
 </style>

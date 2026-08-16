@@ -13,7 +13,7 @@
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const { sendJson, serveStatic, readBody } = require('./lib/http-utils');
+const { sendJson, serveStatic, readBody, createDispatcher } = require('./lib/http-utils');
 const settings = require('./lib/settings');
 const tiktok = require('./tiktok');
 const bidding = require('./bidding');
@@ -120,6 +120,13 @@ get('/api/browse', (req, res, url) => {
 });
 
 // ============ HTTP 服务 ============
+// 路由分发统一经 createDispatcher 包裹：处理器内未捕获的同步/异步异常兜底为 500，
+// 不再让请求连接挂起（SSE 等已写响应头的连接不二次响应）。
+const dispatch = createDispatcher(routes, (e, method, pathname) => {
+  // 仅记录方法与路径 + 错误信息，不打印请求体（防凭证泄漏）
+  console.error(`[路由错误] ${method} ${pathname}: ${e && e.message ? e.message : e}`);
+});
+
 const server = http.createServer((req, res) => {
   // CORS（扩展推送 / 跨源调试需要）
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -130,11 +137,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const urlPath = url.pathname;
 
-  const route = routes.find((r) => r.m === req.method && r.p === urlPath);
-  if (route) {
-    route.fn(req, res, url);
-    return;
-  }
+  if (dispatch(req, res, url)) return;
 
   if (req.method === 'GET') {
     serveStatic(res, urlPath, PUBLIC_DIR);

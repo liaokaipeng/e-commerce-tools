@@ -32,6 +32,7 @@ const biddingCancel = require('../server/bidding-cancel');
 const { nowSec, buildBaseString, hmacHex, maskToken } = require('../server/lib/openapi-utils');
 const openapi = require('../server/openapi');
 const { isAuthDead, isAuthRetryable, planRefresh } = require('../server/openapi/client');
+const { createDispatcher } = require('../server/lib/http-utils');
 
 // ---------- 监控模块：数据目录隔离到临时目录（不碰 server/data） ----------
 const MONITOR_TMP = path.join(os.tmpdir(), `kp_monitor_test_${process.pid}_${Date.now()}`);
@@ -683,6 +684,42 @@ async function run() {
     monitorEngine.flushAlerts();
     monitorStore.flushMeta();
     try { fs.rmSync(MONITOR_TMP, { recursive: true, force: true }); } catch { /* 忽略 */ }
+  }
+
+  // ===== 全局：路由分发兜底（lib/http-utils.createDispatcher） =====
+  {
+    // 最小 res 双桩：记录 writeHead / end，模拟 headersSent
+    function fakeRes() {
+      const r = { headersSent: false, status: 0, body: '' };
+      r.writeHead = (s) => { r.headersSent = true; r.status = s; };
+      r.end = (b) => { r.body = b || ''; };
+      return r;
+    }
+    const url = new URL('http://127.0.0.1/x');
+    const settle = () => new Promise((r) => setTimeout(r, 10)); // 等待 Promise 微任务链
+
+    t('分发：未命中路由返回 false', createDispatcher([])({ method: 'GET' }, fakeRes(), url) === false);
+
+    const resSync = fakeRes();
+    const hitSync = createDispatcher([{ m: 'GET', p: '/x', fn: () => { throw new Error('boom-sync'); } }])({ method: 'GET' }, resSync, url);
+    await settle();
+    const jSync = JSON.parse(resSync.body);
+    t('分发：同步抛错兜底 500', hitSync === true && resSync.status === 500 && jSync.ok === false && resSync.body.includes('服务内部错误'), resSync.body);
+
+    const resAsync = fakeRes();
+    const hitAsync = createDispatcher([{ m: 'GET', p: '/x', fn: async () => { throw new Error('boom-async'); } }])({ method: 'GET' }, resAsync, url);
+    await settle();
+    t('分发：异步 reject 兜底 500', hitAsync === true && resAsync.status === 500 && JSON.parse(resAsync.body).ok === false, resAsync.body);
+
+    // 已写响应头（模拟 SSE 流）后再抛错：不二次写响应，仅走 onError
+    const resSse = fakeRes();
+    let reported = null;
+    const onError = (e, m, p) => { reported = { msg: e.message, m, p }; };
+    const routesSse = [{ m: 'GET', p: '/x', fn: (req, res) => { res.writeHead(200); res.end(''); throw new Error('boom-sse'); } }];
+    createDispatcher(routesSse, onError)({ method: 'GET' }, resSse, url);
+    await settle();
+    t('分发：已写响应头不二次响应（SSE）', resSse.status === 200 && resSse.body === '');
+    t('分发：onError 上报方法与路径', reported && reported.msg === 'boom-sse' && reported.m === 'GET' && reported.p === '/x', JSON.stringify(reported));
   }
 }
 

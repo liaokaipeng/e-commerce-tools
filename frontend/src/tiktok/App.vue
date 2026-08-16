@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import DirRow from '../components/DirRow.vue';
 import LogPanel from '../components/LogPanel.vue';
-import { useDirSettings, readSSE } from '../composables/useToolPage.js';
+import { useDirSettings, useLog, readSSE } from '../composables/useToolPage.js';
 
 // ---------- 状态 ----------
 const urls = ref('');
@@ -13,7 +13,7 @@ const proxyConnected = ref(true);
 const proxyText = ref('正在检测网络环境...');
 const showVpn = ref(false);
 
-const logLines = ref([]);
+const { logLines, log, clear: clearLog } = useLog();
 const progress = ref({ show: false, done: 0, ok: 0, fail: 0, total: 0 });
 const summary = ref({ show: false, text: '', color: '' });
 
@@ -29,11 +29,6 @@ const validCount = computed(() => {
 const progressPct = computed(() =>
   progress.value.total ? Math.round((progress.value.done / progress.value.total) * 100) : 0
 );
-
-function log(message, cls = 'info', title = '') {
-  const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-  logLines.value.push({ time, cls, title, message });
-}
 
 // ---------- 代理状态 ----------
 async function checkNetwork() {
@@ -120,7 +115,7 @@ async function startDownload() {
   }
   downloading.value = true;
   showVpn.value = false;
-  logLines.value = [];
+  clearLog();
   summary.value = { show: false, text: '', color: '' };
 
   log(`开始任务：共 ${list.length} 个链接`, 'title', '任务');
@@ -252,7 +247,7 @@ onMounted(() => {
   margin-right: 8px;
 }
 .dot.off { background: #f5a623; }
-.empty-hint { color: #767b8a; font-size: 12.5px; margin-top: 8px; }
+.empty-hint { color: var(--text-3, #767b8a); font-size: 12.5px; margin-top: 8px; }
 .actions { margin-top: 18px; }
 .progress-line {
   display: flex;

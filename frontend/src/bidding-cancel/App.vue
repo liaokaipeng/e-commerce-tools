@@ -5,7 +5,7 @@ import LoginCard from '../components/LoginCard.vue';
 import StorePicker from '../components/StorePicker.vue';
 import LogPanel from '../components/LogPanel.vue';
 import { useShopeeSession } from '../composables/useShopeeSession.js';
-import { readSSE } from '../composables/useToolPage.js';
+import { useLog, readSSE } from '../composables/useToolPage.js';
 
 // ---------- 登录状态 + 店铺列表（与竞价导出共用） ----------
 const {
@@ -14,12 +14,7 @@ const {
 } = useShopeeSession('Cookie 已就绪，可直接选择店铺操作。');
 
 // ---------- 日志 ----------
-const logLines = ref([]);
-
-function log(msg, cls) {
-  const time = new Date().toLocaleTimeString();
-  logLines.value.push({ time, msg, cls });
-}
+const { logLines, log, clear: clearLog } = useLog();
 
 // ---------- 扫描（预览待改进竞价） ----------
 const scanning = ref(false);
@@ -35,7 +30,7 @@ async function doScan() {
   scanning.value = true;
   previewDone.value = false;
   previewShops.value = [];
-  logLines.value = [];
+  clearLog();
   log('开始扫描选中的 ' + selected.size + ' 个店铺的「待改进」竞价…', 'info');
   try {
     const resp = await fetch('/api/bidding-cancel/preview', {
@@ -90,7 +85,7 @@ async function doCancel() {
     return; // 用户取消
   }
   cancelling.value = true;
-  logLines.value = [];
+  clearLog();
   log('开始撤销，共 ' + selected.size + ' 个店铺…', 'info');
   try {
     const resp = await fetch('/api/bidding-cancel/run', {
@@ -213,7 +208,6 @@ async function doCancel() {
 
 <style scoped>
 .danger-card { border: 1px solid #ffd2cc; }
-.sel-count { font-size: 13px; color: #666; }
 .sel-count.warn { color: #d84315; font-weight: 600; }
 .danger-tip { font-size: 13px; color: #c62828; flex: 1; min-width: 220px; }
 .preview-table { margin-top: 14px; }
@@ -233,5 +227,5 @@ async function doCancel() {
 .expand-empty { color: #999; padding: 8px; }
 .cnt-bad { color: #c62828; font-weight: 700; }
 .cnt-ok { color: #2e7d32; }
-.log-box { margin-top: 14px; }
+/* .log-box 为全局类（styles/base.css） */
 </style>

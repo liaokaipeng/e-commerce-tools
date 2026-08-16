@@ -1,7 +1,25 @@
-// 页面通用组合式函数：默认目录设置 / 日志自动滚动 / SSE 流读取
-// tiktok 与 bidding 两页共用，避免重复实现。
+// 页面通用组合式函数：控制台日志 / 默认目录设置 / 日志自动滚动 / SSE 流读取
+// tiktok / bidding / bidding-cancel / video 四页共用，避免重复实现。
 import { ref, watch, nextTick } from 'vue';
 import { ElMessage } from 'element-plus';
+
+/** 控制台日志：返回统一结构的 logLines 与 log 函数（配合 components/LogPanel.vue 使用）
+ *  @returns {{ logLines: Ref<Array>, log: (msg: string, cls?: string, title?: string) => void,
+ *               clear: () => void }} */
+export function useLog() {
+  const logLines = ref([]);
+
+  function log(msg, cls = 'info', title = '') {
+    const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    logLines.value.push({ time, msg, cls, title });
+  }
+
+  function clear() {
+    logLines.value = [];
+  }
+
+  return { logLines, log, clear };
+}
 
 /**
  * 保存目录相关（读取/设置默认目录、打开目录）

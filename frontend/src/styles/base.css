@@ -1,9 +1,27 @@
-/* 工具页公共基础样式（tiktok / bidding / bidding-cancel / video / openapi 共用）
-   monitor 大屏为深色主题，不使用本文件。 */
+/* 工具页公共基础样式与设计令牌（tiktok / bidding / bidding-cancel / video / openapi 共用）
+   monitor 大屏为深色主题，不使用本文件；门户页样式在 portal/App.vue 内维护。 */
+:root {
+  --brand: #ee4d2d;          /* Shopee 品牌橙 */
+  --bg: #f4f6fb;             /* 页面背景 */
+  --text: #1f2330;           /* 主文字 */
+  --text-2: #666;            /* 次要文字 */
+  --text-3: #8a90a3;         /* 弱化文字 / 提示 */
+  --border: #e5e5e5;         /* 卡片 / 格子边线 */
+  --radius: 14px;            /* 卡片圆角 */
+
+  /* Element Plus 主色统一为品牌橙（按钮 / 开关 / 勾选 / 输入焦点） */
+  --el-color-primary: #ee4d2d;
+  --el-color-primary-light-3: #f3826c;
+  --el-color-primary-light-5: #f7a696;
+  --el-color-primary-light-7: #facac0;
+  --el-color-primary-light-8: #fcdbd5;
+  --el-color-primary-light-9: #fdedea;
+  --el-color-primary-dark-2: #be3e24;
+}
 .page {
   font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", sans-serif;
-  background: #f4f6fb;
-  color: #1f2330;
+  background: var(--bg);
+  color: var(--text);
   min-height: 100vh;
   padding: 28px 20px 0;
   box-sizing: border-box;
@@ -15,11 +33,11 @@
 }
 .card {
   margin-bottom: 18px;
-  border-radius: 14px;
+  border-radius: var(--radius);
 }
 .hint {
   font-size: 12px;
-  color: #8a90a3;
+  color: var(--text-3);
 }
 .row {
   display: flex;
@@ -33,3 +51,7 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+/* 已选店铺计数（bidding / bidding-cancel 共用） */
+.sel-count { font-size: 13px; color: var(--text-2); }
+/* 日志面板与上方内容的间距（bidding / bidding-cancel / video 共用） */
+.log-box { margin-top: 14px; }
