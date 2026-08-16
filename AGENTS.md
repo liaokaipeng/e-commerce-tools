@@ -11,7 +11,7 @@
 ## 关键约束（务必遵守）
 
 1. **极简零配置**，双击 `启动.bat` 即用，不加环境变量/额外安装步骤。
-2. **不新增运行时依赖**。
+2. **后端不新增运行时依赖**；前端新增依赖需同步更新 `frontend/package.json`、本文件技术栈速查与 `docs/README.md`（当前前端含 echarts，用于监控大屏折线图）。
 3. **接口还原，不用 UI 自动化**：直接调 Shopee 内部 HTTP 接口，遵循抓包链路；不要改成 Playwright/Selenium。
 4. **端口固定 8765**，扩展与文档已硬编码。
 5. **凭证不入库**，日志不完整打印 Cookie/Authorization。
@@ -22,8 +22,8 @@
 ## 技术栈速查
 
 - 后端一律 **CommonJS**（`require`/`module.exports`）；前端用 **Vue3 SFC**。改代码时保持文件原有风格，不混用。
-- 后端依赖仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端仅 `vue` / `element-plus` / `vite`。
-- 前端 tiktok/bidding/bidding-cancel 三页共用逻辑抽在 `frontend/src/composables/useToolPage.js`（默认目录 / 日志滚动 / SSE 流读取），改动时优先复用，不重复实现。
+- 后端依赖仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端依赖 `vue` / `element-plus` / `vite` / `echarts`（监控大屏折线图，按需引入，仅 monitor 入口加载）。
+- 前端共享代码优先复用：`frontend/src/composables/useToolPage.js`（默认目录 / 日志滚动 / SSE 流读取，tiktok/bidding/video 等页共用）、`frontend/src/composables/useShopeeSession.js`（Shopee 登录状态轮询 + 店铺分组勾选，bidding/bidding-cancel 共用）、`frontend/src/components/` 下 LogPanel（控制台日志）/ DirRow（目录行）/ LoginCard（登录卡）/ StorePicker（店铺选择）；公共页面样式在 `frontend/src/styles/base.css`。
 - `tiktok.js` / `video.js` / `openapi.js` / `monitor.js` 只做路由注册，链路拆到 `server/tiktok/` / `server/video/` / `server/openapi/` / `server/monitor/` 子模块；新增逻辑放对应子模块，不要塞回入口文件。
 
 ## 关键注意点（详见 docs/架构.md）

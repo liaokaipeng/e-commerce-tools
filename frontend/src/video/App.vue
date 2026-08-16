@@ -1,7 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
-import { useLogScroll } from '../composables/useToolPage.js';
+import { UploadFilled } from '@element-plus/icons-vue';
+import LogPanel from '../components/LogPanel.vue';
 
 // ---------- 站点（门户已按站点拆分为「跨境视频上传」「本土视频上传」两个入口） ----------
 // 本页站点由 URL 参数 ?mode=cn|ph 固定，不再提供站内切换。
@@ -154,7 +155,8 @@ const mapPath = ref('');
 const mapCaption = ref('');
 const mapProduct = ref('');
 const showMapping = ref(false);
-const fileInput = ref(null);
+const uploadRef = ref(null);
+const pendingFile = ref(null); // el-upload 选中的原始 File 对象
 
 const rows = ref([]); // 预览行：{ idx, path, caption, product, error, status }
 const hasRows = computed(() => rows.value.length > 0);
@@ -223,7 +225,7 @@ function validateRow({ path, caption }) {
 }
 
 async function parseFile() {
-  const file = fileInput.value && fileInput.value.files ? fileInput.value.files[0] : null;
+  const file = pendingFile.value;
   if (!file) {
     ElMessage.warning('请先选择表格文件');
     return;
@@ -268,6 +270,22 @@ function onMappingChange() {
   rebuildRows(rawRows);
 }
 
+function onFileChange(uploadFile) {
+  if (!uploadFile) return;
+  pendingFile.value = uploadFile.raw || null;
+}
+
+function onFileExceed(files) {
+  // 已选 1 个文件时再次选择：替换为新文件
+  uploadRef.value?.clearFiles();
+  pendingFile.value = files[0] || null;
+  uploadRef.value?.handleStart(files[0]);
+}
+
+function onFileRemove() {
+  pendingFile.value = null;
+}
+
 function statusTag(type) {
   return { wait: 'info', run: 'warning', ok: 'success', err: 'danger' }[type] || 'info';
 }
@@ -296,7 +314,6 @@ function downloadTemplate() {
 // ---------- 日志 ----------
 const autoScroll = ref(true);
 const logLines = ref([]);
-const { logEl } = useLogScroll(logLines, autoScroll);
 
 function log(msg, cls) {
   const time = new Date().toLocaleTimeString();
@@ -457,7 +474,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="wrap">
+  <div class="page">
     <div class="container">
 
     <!-- 凭证 -->
@@ -483,12 +500,26 @@ onUnmounted(() => {
         <span>① 选择表格</span>
         <el-tag size="small" effect="light" class="pill">支持 .xlsx / .xls / .csv</el-tag>
       </template>
-      <div class="file-row">
-        <input ref="fileInput" type="file" accept=".xlsx,.xls" class="file-input" />
-        <div class="hint">
-          表头需包含：<b>视频路径</b>、<b>视频说明</b>、<b>商品编码</b>；如列名不同，可在下方手动映射。
-        </div>
-      </div>
+      <el-upload
+        ref="uploadRef"
+        class="file-upload"
+        drag
+        action="#"
+        :auto-upload="false"
+        :limit="1"
+        accept=".xlsx,.xls,.csv"
+        :on-change="onFileChange"
+        :on-exceed="onFileExceed"
+        :on-remove="onFileRemove"
+      >
+        <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+        <div class="el-upload__text">把表格文件拖到这里，或 <em>点击选择文件</em></div>
+        <template #tip>
+          <div class="el-upload__tip">
+            表头需包含：<b>视频路径</b>、<b>视频说明</b>、<b>商品编码</b>；如列名不同，可在下方手动映射。
+          </div>
+        </template>
+      </el-upload>
 
       <div v-if="showMapping" class="mapping">
         <div class="grid3">
@@ -545,35 +576,19 @@ onUnmounted(() => {
           取消上传
         </el-button>
         <el-button @click="clearLog">清空日志</el-button>
-        <el-button @click="autoScroll = !autoScroll">{{ autoScroll ? '暂停滚动' : '继续滚动' }}</el-button>
+        <el-switch v-model="autoScroll" inline-prompt active-text="自动滚动" inactive-text="手动滚动" />
       </div>
       <div v-if="summary" class="hint" style="margin-top: 10px">{{ summary }}</div>
-      <div ref="logEl" class="log">
-        <div v-for="(l, i) in logLines" :key="i" class="log-line" :class="l.cls">[{{ l.time }}] {{ l.msg }}</div>
-      </div>
+      <LogPanel class="log-box" :lines="logLines" height="320px" fixed :auto-scroll="autoScroll" />
     </el-card>
     </div>
   </div>
 </template>
 
 <style scoped>
-.wrap {
-  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", sans-serif;
-  background: #f4f6fb;
-  color: #1f2330;
-  line-height: 1.5;
-  min-height: 100vh;
-  padding: 28px 20px 0;
-  box-sizing: border-box;
-}
-.container { max-width: 900px; margin: 0 auto; padding-bottom: 60px; }
-.card { margin-bottom: 18px; border-radius: 14px; }
 .pill { margin-left: 8px; }
-.file-row { display: flex; flex-direction: column; gap: 8px; }
-.file-input { padding: 4px 0; }
-.hint { font-size: 12px; color: #9aa0ad; margin-top: 6px; }
+.file-upload { margin-top: 4px; }
 .field-label { font-size: 12px; color: #6b7280; margin-right: 8px; }
-.creds-status { align-self: center; margin: 0; }
 .btn-row { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
 .mapping { margin-top: 14px; }
 .grid3 {
@@ -586,19 +601,5 @@ onUnmounted(() => {
 }
 .grid3 label { display: block; font-size: 12px; color: #6b7280; margin: 0 0 4px; }
 .preview { margin-top: 14px; }
-.log {
-  background: #10131c;
-  color: #c8e1ff;
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 12.5px;
-  border-radius: 10px;
-  padding: 14px;
-  height: 320px;
-  overflow: auto;
-  margin-top: 12px;
-  white-space: pre-wrap;
-}
-.log-line { margin: 0 0 2px; }
-.log-line.err { color: #ff7b72; }
-.log-line.ok { color: #5fd08a; }
+.log-box { margin-top: 12px; }
 </style>

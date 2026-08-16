@@ -3,7 +3,29 @@
 // 数据流：GET /api/monitor/overview（总览+矩阵定级）/alerts（告警流）/trend（趋势）/rules（规则）
 //         + /api/monitor/events SSE 实时推送（告警变更/采集结果，迟到回放），30s 兜底轮询。
 // 告警只在本页展示（本期不接 IM）：P0 红色脉冲置顶 + 声音提醒，P1 橙色，P2 黄色。
-import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { ElMessage } from 'element-plus';
+import * as echarts from 'echarts/core';
+import { LineChart } from 'echarts/charts';
+import {
+  GridComponent,
+  TooltipComponent,
+  MarkLineComponent,
+  MarkPointComponent,
+  AxisPointerComponent,
+} from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+
+// 按需注册：折线图 + 网格 + tooltip + 阈值线/末点标注 + 轴指针 + Canvas 渲染
+echarts.use([
+  LineChart,
+  GridComponent,
+  TooltipComponent,
+  MarkLineComponent,
+  MarkPointComponent,
+  AxisPointerComponent,
+  CanvasRenderer,
+]);
 
 const LEVEL_COLOR = { P0: '#FF3B30', P1: '#FF9500', P2: '#FFD60A' };
 const LEVEL_NAME = { P0: '紧急', P1: '重要', P2: '提醒' };
@@ -72,7 +94,6 @@ const soundOn = ref(true);
 const rotateOn = ref(true);
 const sseOk = ref(false);
 const flashIds = reactive(new Set());
-const toastMsg = ref('');
 const rulesDrawer = ref(false);
 const ruleEdits = ref([]);
 const savingRules = ref(false);
@@ -83,7 +104,6 @@ const shopSearch = ref('');
 const now = ref(Date.now());
 
 let es = null;
-let toastTimer = null;
 let refreshTimer = null;
 let rotateTimer = null;
 let audioCtx = null;
@@ -124,6 +144,8 @@ const shownAlerts = computed(() => {
 
 const openTopAlerts = computed(() => alerts.value.filter((a) => a.status === 'open' && (a.level === 'P0' || a.level === 'P1')));
 
+const openCount = computed(() => alerts.value.filter((a) => a.status !== 'recovered').length);
+
 const tickerText = computed(() => openTopAlerts.value
   .map((a) => `【${a.level}】${shopName(overview.shops.find((s) => s.shopId === a.shopId))} ${a.title}：${a.message}`)
   .join('　·　'));
@@ -135,7 +157,7 @@ const selectedShopObj = computed(() => overview.shops.find((s) => s.shopId === s
 const selectedFail = computed(() => (selectedShopObj.value && selectedMetric.value
   ? failInfo(selectedShopObj.value, selectedMetric.value) : null));
 
-// ---------- 趋势图几何计算（SVG 自绘，零依赖） ----------
+// ---------- 趋势图（ECharts 折线图：面积填充 + 阈值虚线 + 末点按级别着色） ----------
 function levelOfValue(metric, th, v) {
   if (th == null || v == null) return null;
   const dir = (metric && metric.direction) || 'up';
@@ -146,62 +168,165 @@ function levelOfValue(metric, th, v) {
   return null;
 }
 
-const chartView = computed(() => {
-  const pts = trend.points || [];
-  const w = 860;
-  const h = 170;
-  const pad = { l: 52, r: 14, t: 14, b: 26 };
-  const base = {
-    viewBox: `0 0 ${w} ${h}`,
-    w, h, pad,
-    gridY: [], thresholdLines: [], xLabels: [],
-    area: '', line: '', dots: [], last: null,
+const chartEl = ref(null);
+let chart = null;
+
+/** 把 [min, max] 外扩到 1/2/5×10^k 的整齐边界（splitNumber=3），
+ *  避免 ECharts 对带浮点尾差的 min/max 切出 14.879999999999999 之类的刻度标签 */
+function niceRange(min, max, parts = 3) {
+  const raw = (max - min) / parts;
+  if (!isFinite(raw) || raw <= 0) return { min: min - 1, max: max + 1 };
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const ratio = raw / mag;
+  const step = ratio > 5 ? mag * 10 : ratio > 2 ? mag * 5 : ratio > 1 ? mag * 2 : mag;
+  return {
+    min: Math.floor(min / step) * step,
+    max: Math.ceil(max / step) * step,
   };
-  if (!pts.length) return base;
+}
+
+/** 纵轴标签舍入（与旧版 SVG 图口径一致：≥100 取整、≥1 保留 1 位小数、更小保留 3 位） */
+function fmtAxisVal(v) {
+  const n = Number(v);
+  if (!isFinite(n)) return '';
+  const a = Math.abs(n);
+  if (a >= 100) return String(Math.round(n));
+  if (a >= 1) return String(Math.round(n * 10) / 10);
+  return String(Number(n.toFixed(3)));
+}
+
+function buildTrendOption() {
+  const pts = trend.points || [];
   const th = trend.thresholds || {};
-  const vals = pts.map((p) => p.v);
   const thVals = Object.values(th).filter((x) => typeof x === 'number');
+  const vals = pts.map((p) => p.v);
   let min = Math.min(...vals, ...thVals);
   let max = Math.max(...vals, ...thVals);
   if (min === max) { min -= 1; max += 1; }
   const span = max - min;
   min -= span * 0.12; max += span * 0.12;
-  const X = (i) => pad.l + (pts.length === 1 ? (w - pad.l - pad.r) / 2 : (i / (pts.length - 1)) * (w - pad.l - pad.r));
-  const Y = (v) => pad.t + (1 - (v - min) / (max - min)) * (h - pad.t - pad.b);
-  for (let i = 0; i <= 3; i++) {
-    const v = min + ((max - min) * i) / 3;
-    base.gridY.push({ y: Y(v), label: v >= 100 ? String(Math.round(v)) : String(Math.round(v * 10) / 10) });
-  }
+  const nice = niceRange(min, max);
+  min = nice.min;
+  max = nice.max;
+
+  const p2 = (n) => String(n).padStart(2, '0');
+  const fmtTick = (at) => {
+    // 类目轴的类别值是字符串（数字时间戳被转成 "1786864001032"），
+    // 必须先 Number() 再 new Date，否则得到 Invalid Date（横轴全是 NaN）
+    const d = new Date(Number(at));
+    if (Number.isNaN(d.getTime())) return '';
+    return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+  };
   const thMeta = [
     { key: 'p0', color: '#FF3B30', label: 'P0 阈值' },
     { key: 'p1', color: '#FF9500', label: 'P1 阈值' },
     { key: 'p2', color: '#FFD60A', label: 'P2 阈值' },
   ];
-  for (const t of thMeta) {
-    if (typeof th[t.key] === 'number') {
-      base.thresholdLines.push({ y: Y(th[t.key]), color: t.color, label: t.label });
-    }
+  const markLines = thMeta
+    .filter((t) => typeof th[t.key] === 'number')
+    .map((t) => ({
+      yAxis: th[t.key],
+      lineStyle: { color: t.color, type: 'dashed', width: 1.2 },
+      label: { formatter: t.label, color: t.color, position: 'insideEndTop', fontSize: 9 },
+    }));
+  const last = pts[pts.length - 1];
+  const lv = levelOfValue(trend.metric, th, last.v);
+  const lastColor = lv ? (LEVEL_COLOR[lv] || '#ffffff') : OK_COLOR;
+  const lastLabel = `${last.v}${(trend.metric && trend.metric.unit) || ''}${lv ? '（' + lv + '）' : ''}`;
+  const mid = Math.floor((pts.length - 1) / 2);
+
+  return {
+    animationDuration: 200,
+    grid: { left: 52, right: 16, top: 18, bottom: 26 },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#171b2e',
+      borderColor: '#232a4a',
+      textStyle: { color: '#e6e9f2', fontSize: 12 },
+      axisPointer: { type: 'line', lineStyle: { color: '#4a5bd8' } },
+      formatter: (params) => {
+        const arr = Array.isArray(params) ? params : [params];
+        const unit = (trend.metric && trend.metric.unit) || '';
+        const head = fmtTick(arr[0] && arr[0].axisValue);
+        const lines = arr.map((p) => {
+          const v = p.value === null || p.value === undefined ? '—' : `${p.value}${unit}`;
+          return `${p.marker}${p.seriesName}：${v}`;
+        });
+        return [head, ...lines].join('<br/>');
+      },
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: pts.map((p) => p.at),
+      axisLine: { lineStyle: { color: '#1e2440' } },
+      axisTick: { show: false },
+      axisLabel: {
+        color: '#6d7690',
+        fontSize: 9,
+        formatter: (v) => fmtTick(v),
+        // 与旧版一致：仅显示首 / 中 / 尾三个时间标签
+        interval: (idx) => idx === 0 || idx === pts.length - 1 || idx === mid,
+      },
+    },
+    yAxis: {
+      type: 'value',
+      min,
+      max,
+      splitNumber: 3,
+      axisLabel: { color: '#6d7690', fontSize: 9, formatter: (v) => fmtAxisVal(v) },
+      splitLine: { lineStyle: { color: '#1e2440' } },
+    },
+    series: [
+      {
+        type: 'line',
+        name: (trend.metric && trend.metric.title) || '值',
+        data: vals,
+        symbol: 'circle',
+        symbolSize: 5,
+        lineStyle: { color: '#5a6ce0', width: 2 },
+        itemStyle: { color: '#5a6ce0' },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(74, 91, 216, 0.25)' },
+            { offset: 1, color: 'rgba(74, 91, 216, 0)' },
+          ]),
+        },
+        markLine: markLines.length ? { symbol: 'none', silent: true, data: markLines } : undefined,
+        markPoint: {
+          symbol: 'circle',
+          symbolSize: 9,
+          itemStyle: { color: lastColor },
+          label: { color: '#dfe3f2', fontSize: 10, fontWeight: 600, position: 'top', distance: 6 },
+          data: [{ coord: [pts.length - 1, last.v], value: lastLabel }],
+        },
+      },
+    ],
+  };
+}
+
+/** 初始化/更新 ECharts 实例（容器随 v-if 变化，DOM 更换时重建实例） */
+function renderChart() {
+  if (!chartEl.value) return;
+  if (chart && chart.getDom() !== chartEl.value) {
+    chart.dispose();
+    chart = null;
   }
-  base.line = pts.map((p, i) => `${X(i)},${Y(p.v)}`).join(' ');
-  base.area = `${pad.l},${h - pad.b} ${base.line} ${X(pts.length - 1)},${h - pad.b}`;
-  base.dots = pts.map((p, i) => ({ i, x: X(i), y: Y(p.v) }));
-  const lastP = pts[pts.length - 1];
-  const lv = levelOfValue(trend.metric, th, lastP.v);
-  base.last = {
-    x: X(pts.length - 1),
-    y: Y(lastP.v),
-    color: lv ? (LEVEL_COLOR[lv] || '#ffffff') : OK_COLOR,
-    label: `${lastP.v}${trend.metric.unit || ''}${lv ? '（' + lv + '）' : ''}`,
-  };
-  const mk = (i) => {
-    const d = new Date(pts[i].at);
-    const p2 = (n) => String(n).padStart(2, '0');
-    return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
-  };
-  const labels = [[0, 'start'], [Math.floor((pts.length - 1) / 2), 'middle'], [pts.length - 1, 'end']];
-  for (const [i, anchor] of labels) base.xLabels.push({ x: X(i), anchor, label: mk(i) });
-  return base;
-});
+  if (!chart) chart = echarts.init(chartEl.value);
+  if (trend.points && trend.points.length) chart.setOption(buildTrendOption(), true);
+}
+
+function onWinResize() {
+  if (chart) chart.resize();
+}
+
+watch(
+  () => trend.points,
+  async () => {
+    await nextTick();
+    renderChart();
+  }
+);
 
 // ---------- 工具函数 ----------
 function fmtClock(ms) {
@@ -228,10 +353,11 @@ function flash(id) {
   setTimeout(() => flashIds.delete(id), 4000);
 }
 
-function showToast(msg) {
-  toastMsg.value = msg;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toastMsg.value = ''; }, 3000);
+function showToast(msg, type = 'info') {
+  if (type === 'success') ElMessage.success(msg);
+  else if (type === 'error') ElMessage.error(msg);
+  else if (type === 'warning') ElMessage.warning(msg);
+  else ElMessage.info(msg);
 }
 
 function beep(times = 1) {
@@ -326,10 +452,10 @@ async function alertAction(a, action) {
     const j = await r.json();
     if (r.ok && j.ok) {
       upsertAlert(j.alert);
-      showToast(action === 'ack' ? '已确认' : '已关闭');
-    } else showToast(j.message || '操作失败');
+      showToast(action === 'ack' ? '已确认' : '已关闭', 'success');
+    } else showToast(j.message || '操作失败', 'error');
   } catch (e) {
-    showToast('本地服务异常：' + e.message);
+    showToast('本地服务异常：' + e.message, 'error');
   }
 }
 
@@ -341,9 +467,9 @@ async function manualCollect() {
       body: JSON.stringify({ shopId: selectedShop.value || '' }),
     });
     const j = await r.json();
-    showToast(r.ok && j.ok ? j.message || '已触发采集' : j.message || '触发失败');
+    showToast(r.ok && j.ok ? j.message || '已触发采集' : j.message || '触发失败', r.ok && j.ok ? 'success' : 'error');
   } catch (e) {
-    showToast('本地服务异常：' + e.message);
+    showToast('本地服务异常：' + e.message, 'error');
   }
 }
 
@@ -357,16 +483,16 @@ async function saveCurrencyMode() {
     });
     const j = await r.json();
     if (r.ok && j.ok) {
-      showToast(j.message || '已切换金额单位');
+      showToast(j.message || '已切换金额单位', 'success');
       await loadOverview();
       await loadAlerts();
       loadTrend(selectedShop.value, selectedMetric.value);
     } else {
-      showToast(j.message || '切换失败');
+      showToast(j.message || '切换失败', 'error');
       await loadOverview(); // 还原服务端生效值
     }
   } catch (e) {
-    showToast('本地服务异常：' + e.message);
+    showToast('本地服务异常：' + e.message, 'error');
   }
 }
 
@@ -387,9 +513,9 @@ function openRules() {
     title: r.title,
     unit: (overview.metrics[r.metric] || {}).unit || r.unit || '',
     enabled: r.enabled !== false,
-    p2: r.thresholds && typeof r.thresholds.p2 === 'number' ? r.thresholds.p2 : '',
-    p1: r.thresholds && typeof r.thresholds.p1 === 'number' ? r.thresholds.p1 : '',
-    p0: r.thresholds && typeof r.thresholds.p0 === 'number' ? r.thresholds.p0 : '',
+    p2: r.thresholds && typeof r.thresholds.p2 === 'number' ? r.thresholds.p2 : null,
+    p1: r.thresholds && typeof r.thresholds.p1 === 'number' ? r.thresholds.p1 : null,
+    p0: r.thresholds && typeof r.thresholds.p0 === 'number' ? r.thresholds.p0 : null,
   }));
   rulesDrawer.value = true;
 }
@@ -415,13 +541,13 @@ async function saveRules() {
     });
     const j = await r.json();
     if (r.ok && j.ok) {
-      showToast('规则已保存并生效');
+      showToast('规则已保存并生效', 'success');
       rulesDrawer.value = false;
       await loadRules();
       loadOverview();
-    } else showToast(j.message || '保存失败');
+    } else showToast(j.message || '保存失败', 'error');
   } catch (e) {
-    showToast('本地服务异常：' + e.message);
+    showToast('本地服务异常：' + e.message, 'error');
   } finally {
     savingRules.value = false;
   }
@@ -448,9 +574,9 @@ async function openShopsConfig() {
       shopConfig.value = (j.shops || []).map((s) => Object.assign({}, s));
       shopSearch.value = '';
       shopsDrawer.value = true;
-    } else showToast(j.message || '读取失败');
+    } else showToast(j.message || '读取失败', 'error');
   } catch (e) {
-    showToast('本地服务异常：' + e.message);
+    showToast('本地服务异常：' + e.message, 'error');
   }
 }
 
@@ -470,13 +596,13 @@ async function saveShopsConfig() {
     });
     const j = await r.json();
     if (r.ok && j.ok) {
-      showToast('监控店铺配置已保存');
+      showToast('监控店铺配置已保存', 'success');
       shopsDrawer.value = false;
       await loadOverview();
       await loadAlerts();
-    } else showToast(j.message || '保存失败');
+    } else showToast(j.message || '保存失败', 'error');
   } catch (e) {
-    showToast('本地服务异常：' + e.message);
+    showToast('本地服务异常：' + e.message, 'error');
   } finally {
     savingShops.value = false;
   }
@@ -583,6 +709,9 @@ function onVisibilityChange() {
 
 // ---------- 生命周期 ----------
 onMounted(async () => {
+  // Element Plus 深色主题（本页为 iframe 内独立 document，弹层/控件跟随暗色变量）
+  document.documentElement.classList.add('dark');
+  window.addEventListener('resize', onWinResize);
   await loadOverview();
   await loadAlerts();
   await loadRules();
@@ -614,8 +743,11 @@ onUnmounted(() => {
   clearInterval(rotateTimer);
   stopPresence();
   if (parentTimer) clearTimeout(parentTimer);
+  if (chart) { chart.dispose(); chart = null; }
+  window.removeEventListener('resize', onWinResize);
   window.removeEventListener('message', onParentMessage);
   document.removeEventListener('visibilitychange', onVisibilityChange);
+  document.documentElement.classList.remove('dark');
 });
 </script>
 
@@ -642,18 +774,18 @@ onUnmounted(() => {
         <div v-if="reAuthCount > 0" class="stat reauth"><b>{{ reAuthCount }}</b><span>待重新授权</span></div>
       </div>
       <div class="controls">
-        <label class="ctl" title="金额指标展示单位（告警规则阈值始终按人民币配置与比较）">金额
-          <select v-model="overview.currencyMode" class="cur-sel" @change="saveCurrencyMode">
-            <option value="local">当地货币</option>
-            <option value="rmb">人民币</option>
-          </select>
-        </label>
-        <label class="ctl" title="投屏/展示模式"><input type="checkbox" v-model="projectMode" />投影</label>
-        <label class="ctl" title="P0 告警声音提醒"><input type="checkbox" v-model="soundOn" />声音</label>
-        <label class="ctl" title="投影模式下每 20 秒轮换店铺"><input type="checkbox" v-model="rotateOn" />轮播</label>
-        <button class="btn" @click="manualCollect" title="立即采集所选店铺（未选择时全部店铺）">立即采集</button>
-        <button class="btn" @click="openShopsConfig" title="勾选哪些已授权店铺需要监控（未勾选的不采集、不进大屏）">监控店铺</button>
-        <button class="btn" @click="openRules">告警规则</button>
+        <span class="ctl" title="金额指标展示单位（告警规则阈值始终按人民币配置与比较）">金额
+          <el-select v-model="overview.currencyMode" size="small" class="cur-sel" @change="saveCurrencyMode">
+            <el-option label="当地货币" value="local" />
+            <el-option label="人民币" value="rmb" />
+          </el-select>
+        </span>
+        <span class="ctl" title="投屏/展示模式"><el-switch v-model="projectMode" size="small" />投影</span>
+        <span class="ctl" title="P0 告警声音提醒"><el-switch v-model="soundOn" size="small" />声音</span>
+        <span class="ctl" title="投影模式下每 20 秒轮换店铺"><el-switch v-model="rotateOn" size="small" />轮播</span>
+        <el-button size="small" title="立即采集所选店铺（未选择时全部店铺）" @click="manualCollect">立即采集</el-button>
+        <el-button size="small" title="勾选哪些已授权店铺需要监控（未勾选的不采集、不进大屏）" @click="openShopsConfig">监控店铺</el-button>
+        <el-button size="small" @click="openRules">告警规则</el-button>
       </div>
       <div class="clock">
         <b>{{ fmtClock(now) }}</b>
@@ -666,23 +798,29 @@ onUnmounted(() => {
       <span class="rb-ico">⚠</span>
       <span><b>{{ reAuthCount }}</b> 家店铺的开放平台授权已失效（主账号共享 token 被刷新绑定或已过期），已自动暂停这些店铺的采集。
         到「开放平台」页用<b>主账号重新授权一次</b>即可全部恢复，无需逐店操作。</span>
-      <button class="rb-btn" @click="goOpenapi">去重新授权</button>
+      <el-button type="danger" size="small" class="rb-btn" @click="goOpenapi">去重新授权</el-button>
     </div>
 
     <div v-if="!overview.configured || !overview.shops.length" class="empty">
-      <template v-if="!overview.configured">
-        <h2>尚未配置开放平台 App</h2>
-        <p>请先到门户页「开放平台」Tab 完成 App 配置与店铺授权，本大屏会自动开始巡检采集。</p>
-      </template>
-      <template v-else-if="overview.excludedCount > 0">
-        <h2>当前没有启用监控的店铺</h2>
-        <p>已授权 {{ overview.excludedCount }} 家店铺，但都被停用了监控。请在「监控店铺」中勾选需要巡检的店铺。</p>
-        <button class="btn primary" @click="openShopsConfig">配置监控店铺</button>
-      </template>
-      <template v-else>
-        <h2>当前没有已授权店铺</h2>
-        <p>请先到门户页「开放平台」Tab 完成 App 配置与店铺授权，本大屏会自动开始巡检采集。</p>
-      </template>
+      <el-empty :image-size="110">
+        <template #description>
+          <template v-if="!overview.configured">
+            <h2>尚未配置开放平台 App</h2>
+            <p>请先到门户页「开放平台」Tab 完成 App 配置与店铺授权，本大屏会自动开始巡检采集。</p>
+          </template>
+          <template v-else-if="overview.excludedCount > 0">
+            <h2>当前没有启用监控的店铺</h2>
+            <p>已授权 {{ overview.excludedCount }} 家店铺，但都被停用了监控。请在「监控店铺」中勾选需要巡检的店铺。</p>
+          </template>
+          <template v-else>
+            <h2>当前没有已授权店铺</h2>
+            <p>请先到门户页「开放平台」Tab 完成 App 配置与店铺授权，本大屏会自动开始巡检采集。</p>
+          </template>
+        </template>
+        <el-button v-if="overview.configured && overview.excludedCount > 0" type="primary" size="small" @click="openShopsConfig">
+          配置监控店铺
+        </el-button>
+      </el-empty>
       <p class="dim2">授权后无需任何额外设置：打开本页即开始按需巡检（订单履约 10 分钟 / 商品库存 30 分钟 / 账户健康·广告·资金·售后评价 60 分钟），离开本页自动暂停采集。</p>
     </div>
 
@@ -748,22 +886,7 @@ onUnmounted(() => {
             </div>
           </div>
           <div v-if="!selectedShopObj" class="chart-empty">选择一家店铺查看 7 天趋势曲线</div>
-          <svg v-else-if="trend.points.length" class="chart" :viewBox="chartView.viewBox" preserveAspectRatio="none">
-            <g v-for="g in chartView.gridY" :key="'gy' + g.y">
-              <line :x1="chartView.pad.l" :x2="chartView.w - chartView.pad.r" :y1="g.y" :y2="g.y" class="gridline" />
-              <text :x="chartView.pad.l - 6" :y="g.y + 4" class="ylab" text-anchor="end">{{ g.label }}</text>
-            </g>
-            <g v-for="th in chartView.thresholdLines" :key="'th' + th.label">
-              <line :x1="chartView.pad.l" :x2="chartView.w - chartView.pad.r" :y1="th.y" :y2="th.y" class="thline" :style="{ stroke: th.color }" stroke-dasharray="5 4" />
-              <text :x="chartView.w - chartView.pad.r - 4" :y="th.y - 4" class="thlab" :style="{ fill: th.color }" text-anchor="end">{{ th.label }}</text>
-            </g>
-            <polygon :points="chartView.area" class="area" />
-            <polyline :points="chartView.line" class="pline" />
-            <circle v-for="p in chartView.dots" :key="'d' + p.i" :cx="p.x" :cy="p.y" r="2.2" class="dot" />
-            <circle v-if="chartView.last" :cx="chartView.last.x" :cy="chartView.last.y" r="4.5" class="lastdot" :style="{ fill: chartView.last.color, stroke: chartView.last.color }" />
-            <text v-if="chartView.last" :x="Math.min(chartView.w - chartView.pad.r - 30, chartView.last.x + 8)" :y="chartView.last.y - 8" class="lastlab">{{ chartView.last.label }}</text>
-            <text v-for="t in chartView.xLabels" :key="'x' + t.x" :x="t.x" :y="chartView.h - 8" class="xlab" :text-anchor="t.anchor">{{ t.label }}</text>
-          </svg>
+          <div v-else-if="trend.points.length" ref="chartEl" class="chart"></div>
           <div v-else class="chart-empty">暂无「{{ trend.metric.title }}」采样数据，等待采集（订单 10 分钟 / 商品 30 分钟 / 健康·广告·资金·售后 60 分钟）</div>
         </div>
 
@@ -800,11 +923,13 @@ onUnmounted(() => {
       <aside class="panel alerts">
         <h3>实时告警流</h3>
         <div class="filter">
-          <button :class="{ active: filterLevel === '' }" @click="filterLevel = ''">全部({{ alerts.filter((a) => a.status !== 'recovered').length }})</button>
-          <button :class="{ active: filterLevel === 'P0' }" @click="filterLevel = 'P0'">P0</button>
-          <button :class="{ active: filterLevel === 'P1' }" @click="filterLevel = 'P1'">P1</button>
-          <button :class="{ active: filterLevel === 'P2' }" @click="filterLevel = 'P2'">P2</button>
-          <button :class="{ active: filterLevel === 'recovered' }" @click="filterLevel = 'recovered'">已恢复</button>
+          <el-radio-group v-model="filterLevel" size="small">
+            <el-radio-button :value="''">全部({{ openCount }})</el-radio-button>
+            <el-radio-button value="P0">P0</el-radio-button>
+            <el-radio-button value="P1">P1</el-radio-button>
+            <el-radio-button value="P2">P2</el-radio-button>
+            <el-radio-button value="recovered">已恢复</el-radio-button>
+          </el-radio-group>
         </div>
         <div class="alert-list">
           <div v-if="!shownAlerts.length" class="alert-empty">暂无告警，一切正常 🎉</div>
@@ -830,8 +955,8 @@ onUnmounted(() => {
                 <i v-else-if="a.status === 'ack'" class="ai-ack">已确认</i>
               </div>
               <div v-if="a.status === 'open' || a.status === 'ack'" class="ai-ops">
-                <button v-if="a.status === 'open'" @click="alertAction(a, 'ack')">确认</button>
-                <button @click="alertAction(a, 'close')">关闭</button>
+                <el-button v-if="a.status === 'open'" size="small" @click="alertAction(a, 'ack')">确认</el-button>
+                <el-button size="small" type="danger" plain @click="alertAction(a, 'close')">关闭</el-button>
               </div>
             </div>
           </div>
@@ -857,85 +982,88 @@ onUnmounted(() => {
       </div>
     </footer>
 
-    <!-- ===== 规则编辑抽屉 ===== -->
-    <div v-if="rulesDrawer" class="drawer-mask" @click.self="rulesDrawer = false">
-      <div class="drawer">
-        <h3>告警规则（阈值修改后立即生效）</h3>
-        <p class="dim2">值越大越严重（店铺评分为「越小越严重」）。留空的级别不触发。金额类规则阈值<b>一律按人民币</b>填写与比较（大屏展示可切换当地货币/人民币，告警自动换算）。</p>
-        <div class="rule-table">
-          <div class="rt-row rt-head">
-            <span>启用</span><span>规则</span><span>P2 提醒</span><span>P1 重要</span><span>P0 紧急</span>
-          </div>
-          <div v-for="e in ruleEdits" :key="e.id" class="rt-row">
-            <input type="checkbox" v-model="e.enabled" />
-            <span class="rt-title">{{ e.title }}<i v-if="e.unit" class="dim2">（{{ e.unit }}）</i></span>
-            <input type="number" v-model="e.p2" class="num" :class="{ p2c: e.p2 !== '' }" />
-            <input type="number" v-model="e.p1" class="num" :class="{ p1c: e.p1 !== '' }" />
-            <input type="number" v-model="e.p0" class="num" :class="{ p0c: e.p0 !== '' }" />
-          </div>
-        </div>
-        <div class="drawer-ops">
-          <button class="btn" @click="rulesDrawer = false">取消</button>
-          <button class="btn primary" :disabled="savingRules" @click="saveRules">保存</button>
-        </div>
+    <!-- ===== 规则编辑抽屉（728px：560 放大 30%，避免规则表格出现横向滚动条） ===== -->
+    <el-drawer v-model="rulesDrawer" title="告警规则（阈值修改后立即生效）" size="728px" direction="rtl">
+      <p class="dim2">值越大越严重（店铺评分为「越小越严重」）。留空的级别不触发。金额类规则阈值<b>一律按人民币</b>填写与比较（大屏展示可切换当地货币/人民币，告警自动换算）。</p>
+      <el-table :data="ruleEdits" size="small" border class="rule-table">
+        <el-table-column label="启用" width="60" align="center">
+          <template #default="{ row }"><el-switch v-model="row.enabled" size="small" /></template>
+        </el-table-column>
+        <el-table-column label="规则" min-width="170">
+          <template #default="{ row }">{{ row.title }}<i v-if="row.unit" class="dim2">（{{ row.unit }}）</i></template>
+        </el-table-column>
+        <el-table-column label="P2 提醒" width="112">
+          <template #default="{ row }">
+            <el-input-number v-model="row.p2" :controls="false" size="small" placeholder="不触发" class="num" :class="{ p2c: row.p2 !== null }" />
+          </template>
+        </el-table-column>
+        <el-table-column label="P1 重要" width="112">
+          <template #default="{ row }">
+            <el-input-number v-model="row.p1" :controls="false" size="small" placeholder="不触发" class="num" :class="{ p1c: row.p1 !== null }" />
+          </template>
+        </el-table-column>
+        <el-table-column label="P0 紧急" width="112">
+          <template #default="{ row }">
+            <el-input-number v-model="row.p0" :controls="false" size="small" placeholder="不触发" class="num" :class="{ p0c: row.p0 !== null }" />
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="drawer-ops">
+        <el-button @click="rulesDrawer = false">取消</el-button>
+        <el-button type="primary" :loading="savingRules" @click="saveRules">保存</el-button>
       </div>
-    </div>
+    </el-drawer>
 
     <!-- ===== 监控店铺配置抽屉 ===== -->
-    <div v-if="shopsDrawer" class="drawer-mask" @click.self="shopsDrawer = false">
-      <div class="drawer">
-        <h3>监控店铺配置</h3>
-        <p class="dim2">
-          已授权的店铺默认全部监控；取消勾选的店铺<b>不再巡检采集、不出现在大屏</b>，其未关闭的告警会自动关闭。
-          重新勾选后立即恢复采集，历史快照与告警记录仍保留。
-        </p>
-        <div class="shopcfg-search-row">
-          <div class="scfg-input-wrap">
-            <input
-              v-model="shopSearch"
-              class="shopcfg-search"
-              type="text"
-              placeholder="搜索店铺名 / 店铺ID（空格分隔多关键词）"
-              @keydown.esc="shopSearch = ''"
-            />
-            <span v-if="shopSearch.trim()" class="scfg-clear" title="清空搜索" @click="shopSearch = ''">✕</span>
-          </div>
-          <span class="dim2 scfg-sum">{{ monitoredCount }} / {{ shopConfig.length }} 家监控中</span>
-        </div>
-        <div class="shopcfg-ops">
-          <button class="mini-btn" @click="setAllMonitored(true)">
-            {{ shopSearch.trim() ? '匹配项全部监控' : '全部监控' }}
-          </button>
-          <button class="mini-btn" @click="setAllMonitored(false)">
-            {{ shopSearch.trim() ? '匹配项全部停用' : '全部停用' }}
-          </button>
-          <span v-if="shopSearch.trim()" class="dim2">当前操作只作用于 {{ shownShopConfig.length }} 家匹配店铺</span>
-        </div>
-        <div class="shopcfg-list">
-          <label v-for="s in shownShopConfig" :key="s.shopId" class="shopcfg-row">
-            <input type="checkbox" v-model="s.monitored" />
-            <span class="scfg-name">{{ s.name || '店铺…' + String(s.shopId).slice(-4) }}</span>
-            <i v-if="s.authBroken" class="b-reauth" title="授权已失效，重新授权后自动恢复采集">待重新授权</i>
-            <i v-else class="scfg-state" :class="{ on: s.monitored }">{{ s.monitored ? '监控中' : '不监控' }}</i>
-            <span class="scfg-id">{{ s.shopId }}</span>
-          </label>
-          <div v-if="!shopConfig.length" class="dim2">暂无已授权店铺，请先在「开放平台」Tab 完成 App 配置与店铺授权。</div>
-          <div v-else-if="!shownShopConfig.length" class="dim2">没有匹配「{{ shopSearch }}」的店铺，换个关键词试试。</div>
-        </div>
-        <div class="drawer-ops">
-          <button class="btn" @click="shopsDrawer = false">取消</button>
-          <button class="btn primary" :disabled="savingShops" @click="saveShopsConfig">保存</button>
-        </div>
+    <el-drawer v-model="shopsDrawer" title="监控店铺配置" size="560px" direction="rtl">
+      <p class="dim2">
+        已授权的店铺默认全部监控；取消勾选的店铺<b>不再巡检采集、不出现在大屏</b>，其未关闭的告警会自动关闭。
+        重新勾选后立即恢复采集，历史快照与告警记录仍保留。
+      </p>
+      <div class="shopcfg-search-row">
+        <el-input
+          v-model="shopSearch"
+          class="shopcfg-search"
+          size="small"
+          clearable
+          placeholder="搜索店铺名 / 店铺ID（空格分隔多关键词）"
+          @keydown.esc="shopSearch = ''"
+        />
+        <span class="dim2 scfg-sum">{{ monitoredCount }} / {{ shopConfig.length }} 家监控中</span>
       </div>
-    </div>
-
-    <!-- ===== 轻提示 ===== -->
-    <div v-if="toastMsg" class="toast">{{ toastMsg }}</div>
+      <div class="shopcfg-ops">
+        <el-button size="small" @click="setAllMonitored(true)">
+          {{ shopSearch.trim() ? '匹配项全部监控' : '全部监控' }}
+        </el-button>
+        <el-button size="small" @click="setAllMonitored(false)">
+          {{ shopSearch.trim() ? '匹配项全部停用' : '全部停用' }}
+        </el-button>
+        <span v-if="shopSearch.trim()" class="dim2">当前操作只作用于 {{ shownShopConfig.length }} 家匹配店铺</span>
+      </div>
+      <div class="shopcfg-list">
+        <label v-for="s in shownShopConfig" :key="s.shopId" class="shopcfg-row">
+          <el-switch v-model="s.monitored" size="small" />
+          <span class="scfg-name">{{ s.name || '店铺…' + String(s.shopId).slice(-4) }}</span>
+          <i v-if="s.authBroken" class="b-reauth" title="授权已失效，重新授权后自动恢复采集">待重新授权</i>
+          <i v-else class="scfg-state" :class="{ on: s.monitored }">{{ s.monitored ? '监控中' : '不监控' }}</i>
+          <span class="scfg-id">{{ s.shopId }}</span>
+        </label>
+        <div v-if="!shopConfig.length" class="dim2">暂无已授权店铺，请先在「开放平台」Tab 完成 App 配置与店铺授权。</div>
+        <div v-else-if="!shownShopConfig.length" class="dim2">没有匹配「{{ shopSearch }}」的店铺，换个关键词试试。</div>
+      </div>
+      <div class="drawer-ops">
+        <el-button @click="shopsDrawer = false">取消</el-button>
+        <el-button type="primary" :loading="savingShops" @click="saveShopsConfig">保存</el-button>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <style scoped>
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* { box-sizing: border-box; }
+/* 只重置自定义元素的边距；不能用 scoped `* { padding: 0 }`，会命中 Element Plus 组件
+   根节点（如 .el-button），把按钮自带的左右内边距清零导致文字贴边 */
+.dash, h2, h3, p { margin: 0; padding: 0; }
 .dash {
   font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", sans-serif;
   background: #0b0e17;
@@ -984,32 +1112,19 @@ onUnmounted(() => {
 }
 .reauth-banner .rb-ico { font-size: 18px; flex: none; }
 .reauth-banner b { color: #ffb340; }
-.rb-btn {
-  margin-left: auto; flex: none;
-  background: #ee4d2d; color: #fff; border: none; border-radius: 7px;
-  padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit;
-}
-.rb-btn:hover { background: #f05b3d; }
+.rb-btn { margin-left: auto; flex: none; }
 @keyframes cardPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.5); }
   50% { box-shadow: 0 0 16px 3px rgba(255, 59, 48, 0.55); }
 }
-.controls { display: flex; gap: 10px; align-items: center; }
-.ctl { font-size: 12px; color: #aab2c8; display: flex; gap: 4px; align-items: center; cursor: pointer; }
-.ctl input { accent-color: #ee4d2d; }
-.cur-sel {
-  background: #1d2340; color: #dfe3f2; border: 1px solid #2c3560; border-radius: 5px;
-  padding: 2px 4px; font-size: 12px; font-family: inherit; cursor: pointer; outline: none;
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.ctl { font-size: 12px; color: #aab2c8; display: flex; gap: 5px; align-items: center; white-space: nowrap; }
+.cur-sel { width: 110px; }
+/* EP 按钮横向留白：恢复默认后再略加宽，避免文字贴着两侧边 */
+.controls .el-button, .ai-ops .el-button, .drawer-ops .el-button, .shopcfg-ops .el-button {
+  padding-left: 14px;
+  padding-right: 14px;
 }
-.cur-sel:focus { border-color: #4a5bd8; }
-.btn {
-  background: #1d2340; color: #dfe3f2; border: 1px solid #2c3560;
-  padding: 6px 12px; border-radius: 7px; font-size: 12px; cursor: pointer;
-  font-family: inherit;
-}
-.btn:hover { background: #262e55; }
-.btn.primary { background: #ee4d2d; border-color: #ee4d2d; color: #fff; }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .clock { text-align: right; }
 .clock b { font-size: 19px; font-variant-numeric: tabular-nums; display: block; }
 .clock small { font-size: 10px; color: #7d86a0; }
@@ -1093,15 +1208,6 @@ onUnmounted(() => {
 }
 .chips button.active { background: #2b3560; color: #fff; border-color: #4a5bd8; }
 .chart { flex: 1; min-height: 0; width: 100%; padding: 4px 8px 8px; }
-.gridline { stroke: #1e2440; stroke-width: 1; }
-.ylab, .xlab { fill: #6d7690; font-size: 9px; }
-.thline { stroke-width: 1.2; }
-.thlab { font-size: 9px; }
-.area { fill: rgba(74, 91, 216, 0.12); }
-.pline { fill: none; stroke: #5a6ce0; stroke-width: 2; }
-.dot { fill: #5a6ce0; }
-.lastdot { stroke-width: 1.5; }
-.lastlab { fill: #dfe3f2; font-size: 10px; font-weight: 600; }
 .chart-empty {
   flex: 1; display: flex; align-items: center; justify-content: center;
   color: #6d7690; font-size: 12px; padding: 20px; text-align: center;
@@ -1124,11 +1230,6 @@ onUnmounted(() => {
 /* 告警流 */
 .alerts { min-width: 0; }
 .filter { display: flex; gap: 6px; padding: 8px 10px; flex: none; }
-.filter button {
-  background: #171b2e; color: #aab2c8; border: 1px solid #232a4a; border-radius: 6px;
-  padding: 3px 9px; font-size: 11px; cursor: pointer; font-family: inherit;
-}
-.filter button.active { background: #2b3560; color: #fff; border-color: #4a5bd8; }
 .alert-list { overflow-y: auto; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .alert-empty { color: #30D158; text-align: center; padding: 30px 0; font-size: 13px; }
 .alert-item {
@@ -1155,11 +1256,6 @@ onUnmounted(() => {
 .ai-recovered { font-style: normal; color: #30D158; margin-left: 6px; }
 .ai-ack { font-style: normal; color: #8a93ad; margin-left: 6px; }
 .ai-ops { margin-top: 6px; display: flex; gap: 6px; }
-.ai-ops button {
-  background: #1d2340; color: #dfe3f2; border: 1px solid #2c3560; border-radius: 5px;
-  padding: 2px 10px; font-size: 11px; cursor: pointer; font-family: inherit;
-}
-.ai-ops button:hover { background: #262e55; }
 /* 底部 */
 .foot {
   display: flex; gap: 10px; padding: 8px 16px;
@@ -1181,56 +1277,23 @@ onUnmounted(() => {
 .cs-item i { font-style: normal; margin-left: 4px; }
 .cs-item.bad { border-color: #FF3B30; color: #FF3B30; }
 /* 抽屉 */
-.drawer-mask {
-  position: fixed; inset: 0; background: rgba(4, 6, 12, 0.7);
-  display: flex; align-items: stretch; justify-content: flex-end; z-index: 50;
-}
-.drawer {
-  width: 560px; max-width: 92vw; background: #131730; border-left: 1px solid #2c3560;
-  padding: 18px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto;
-}
-.drawer h3 { font-size: 15px; }
-.rule-table { display: flex; flex-direction: column; gap: 6px; }
-.rt-row {
-  display: grid; grid-template-columns: 44px 1fr 88px 88px 88px;
-  gap: 8px; align-items: center; background: #171b2e; border-radius: 7px; padding: 6px 10px;
-}
-.rt-row.rt-head { background: transparent; color: #7d86a0; font-size: 11px; }
-.rt-head span { padding: 0 2px; }
-.rt-title { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rt-row input[type="checkbox"] { accent-color: #ee4d2d; width: 15px; height: 15px; }
-.rt-row .num {
-  background: #1d2340; color: #dfe3f2; border: 1px solid #2c3560; border-radius: 5px;
-  padding: 4px 6px; width: 100%; font-size: 12px; font-family: inherit;
-}
-.num.p2c { border-color: #FFD60A; } .num.p1c { border-color: #FF9500; } .num.p0c { border-color: #FF3B30; }
-.drawer-ops { display: flex; gap: 10px; justify-content: flex-end; margin-top: 6px; }
+.rule-table { margin-top: 6px; }
+.rule-table .num { width: 100%; }
+/* 阈值输入框按级别描边（留空 = 不触发） */
+.rule-table .p2c :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #FFD60A inset; }
+.rule-table .p1c :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #FF9500 inset; }
+.rule-table .p0c :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #FF3B30 inset; }
+.drawer-ops { display: flex; gap: 10px; justify-content: flex-end; margin-top: 12px; }
 /* 监控店铺配置 */
 .stat.clickable { cursor: pointer; }
 .stat.clickable:hover { border-color: #4a5bd8; background: #1c2140; }
-.shopcfg-ops { display: flex; gap: 8px; align-items: center; }
-.shopcfg-search-row { display: flex; gap: 8px; align-items: center; }
-.scfg-input-wrap { position: relative; flex: 1; min-width: 0; }
-.shopcfg-search {
-  width: 100%; background: #1d2340; color: #e6e9f2; border: 1px solid #2c3560; border-radius: 6px;
-  padding: 6px 28px 6px 10px; font-size: 12px; font-family: inherit; outline: none;
-}
-.shopcfg-search:focus { border-color: #4a5bd8; }
-.shopcfg-search::placeholder { color: #6d7690; }
-.scfg-clear {
-  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-  color: #8a93ad; cursor: pointer; font-size: 12px; line-height: 1; padding: 2px;
-}
-.scfg-clear:hover { color: #dfe3f2; }
+.shopcfg-ops { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.shopcfg-search-row { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.shopcfg-search { flex: 1; min-width: 0; }
 .scfg-sum { flex: none; white-space: nowrap; }
-.mini-btn {
-  background: #1d2340; color: #dfe3f2; border: 1px solid #2c3560; border-radius: 6px;
-  padding: 4px 12px; font-size: 12px; cursor: pointer; font-family: inherit;
-}
-.mini-btn:hover { background: #262e55; }
 .shopcfg-list {
   flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
-  border: 1px solid #1e2440; border-radius: 8px; padding: 8px;
+  border: 1px solid #1e2440; border-radius: 8px; padding: 8px; margin-top: 10px;
 }
 .shopcfg-row {
   display: flex; align-items: center; gap: 8px;
@@ -1238,17 +1301,10 @@ onUnmounted(() => {
   padding: 7px 10px; cursor: pointer; font-size: 12px;
 }
 .shopcfg-row:hover { background: #1c2140; }
-.shopcfg-row input[type="checkbox"] { accent-color: #ee4d2d; width: 15px; height: 15px; flex: none; }
 .scfg-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scfg-state { font-style: normal; font-size: 10px; color: #7d86a0; background: #1d2340; padding: 1px 6px; border-radius: 4px; flex: none; }
 .scfg-state.on { color: #30D158; background: rgba(48, 209, 88, 0.15); }
 .scfg-id { font-size: 10px; color: #6d7690; flex: none; font-variant-numeric: tabular-nums; }
-/* 轻提示 */
-.toast {
-  position: fixed; bottom: 54px; left: 50%; transform: translateX(-50%);
-  background: #1d2340; color: #dfe3f2; border: 1px solid #4a5bd8; border-radius: 8px;
-  padding: 9px 18px; font-size: 13px; z-index: 60; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-}
 /* 投影模式：字号放大 */
 .proj { font-size: 15px; }
 .proj .shop-card { padding: 10px 12px; }

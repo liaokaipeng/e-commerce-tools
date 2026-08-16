@@ -312,15 +312,16 @@ onUnmounted(() => {
           <el-input v-model="manualUrl" placeholder="粘贴授权跳转后的完整链接，如 https://example.com/?code=…&main_account_id=…" class="auth-url" />
           <el-button type="warning" :loading="manualing" @click="manualComplete">手动完成授权</el-button>
         </div>
-        <details class="domain-help">
-          <summary>有域名？放转发页实现全自动（免粘贴）</summary>
-          <div class="hint">
-            把下面代码放到你域名的一个页面（如 <b>https://你的域名/openapi-callback/</b>），后台与本页回调地址都填该地址，授权后自动跳回本工具。<br />
-            也可给域名加 A 记录 <b>local.你的域名 → 127.0.0.1</b>，回调地址填 <b>http://local.你的域名:8765/openapi/callback</b>。
-          </div>
-          <el-input :model-value="forwardSnippet" type="textarea" :rows="6" readonly class="snippet" />
-          <el-button size="small" style="margin-top: 6px" @click="copySnippet">复制代码</el-button>
-        </details>
+        <el-collapse class="domain-help">
+          <el-collapse-item title="有域名？放转发页实现全自动（免粘贴）" name="forward">
+            <div class="hint">
+              把下面代码放到你域名的一个页面（如 <b>https://你的域名/openapi-callback/</b>），后台与本页回调地址都填该地址，授权后自动跳回本工具。<br />
+              也可给域名加 A 记录 <b>local.你的域名 → 127.0.0.1</b>，回调地址填 <b>http://local.你的域名:8765/openapi/callback</b>。
+            </div>
+            <el-input :model-value="forwardSnippet" type="textarea" :rows="6" readonly class="snippet" />
+            <el-button size="small" style="margin-top: 6px" @click="copySnippet">复制代码</el-button>
+          </el-collapse-item>
+        </el-collapse>
       </el-card>
 
       <el-card shadow="never" class="card">
@@ -366,27 +367,14 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.page {
-  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", sans-serif;
-  background: #f4f6fb;
-  color: #1f2330;
-  min-height: 100vh;
-  padding: 28px 20px 0;
-  box-sizing: border-box;
-}
-.container { max-width: 960px; margin: 0 auto; padding-bottom: 60px; }
-.card { margin-bottom: 18px; border-radius: 14px; }
-.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.container { max-width: 960px; }
 .auth-url { flex: 1; min-width: 320px; }
-.hint { font-size: 12px; color: #8a90a3; }
 .domain-help {
   margin-top: 14px;
   border: 1px dashed #c9cede;
   border-radius: 8px;
-  padding: 10px 14px;
   background: #fafbfe;
 }
-.domain-help summary { cursor: pointer; font-size: 13px; color: #4a5064; font-weight: 600; }
 .domain-help .snippet { margin-top: 8px; }
 .domain-help .snippet :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12px; }
 </style>

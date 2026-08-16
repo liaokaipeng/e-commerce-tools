@@ -1,0 +1,35 @@
+/* 工具页公共基础样式（tiktok / bidding / bidding-cancel / video / openapi 共用）
+   monitor 大屏为深色主题，不使用本文件。 */
+.page {
+  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", sans-serif;
+  background: #f4f6fb;
+  color: #1f2330;
+  min-height: 100vh;
+  padding: 28px 20px 0;
+  box-sizing: border-box;
+}
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding-bottom: 60px;
+}
+.card {
+  margin-bottom: 18px;
+  border-radius: 14px;
+}
+.hint {
+  font-size: 12px;
+  color: #8a90a3;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}

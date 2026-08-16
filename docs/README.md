@@ -9,7 +9,7 @@
 - 后端：Node.js ≥ 18，**CommonJS**
 - 前端：**Vue3 + Element Plus + Vite** 多页（`frontend/`），构建产物 `frontend/dist` 由后端托管
 - 扩展：**Manifest V3**（`extension/`），名「KP工具合集助手」，负责竞价 Cookie 推送与视频上传凭证抓取
-- 依赖：后端 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端 `vue` / `element-plus` / `vite`
+- 依赖：后端 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端 `vue` / `element-plus` / `vite` / `echarts`（监控大屏折线图）
 
 ## 快速开始
 

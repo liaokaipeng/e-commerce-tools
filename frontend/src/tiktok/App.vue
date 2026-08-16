@@ -1,8 +1,9 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { ElMessage } from 'element-plus';
-import DirPicker from '../components/DirPicker.vue';
-import { useDirSettings, useLogScroll, readSSE } from '../composables/useToolPage.js';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import DirRow from '../components/DirRow.vue';
+import LogPanel from '../components/LogPanel.vue';
+import { useDirSettings, readSSE } from '../composables/useToolPage.js';
 
 // ---------- 状态 ----------
 const urls = ref('');
@@ -16,8 +17,7 @@ const logLines = ref([]);
 const progress = ref({ show: false, done: 0, ok: 0, fail: 0, total: 0 });
 const summary = ref({ show: false, text: '', color: '' });
 
-const { dir, hasDefault, dirPickerVisible, loadSettings, setDefaultDir, openDir } = useDirSettings('tiktok', log);
-const { logEl } = useLogScroll(logLines);
+const { dir, hasDefault, loadSettings, setDefaultDir, openDir } = useDirSettings('tiktok', log);
 
 const validCount = computed(() => {
   return urls.value
@@ -25,6 +25,10 @@ const validCount = computed(() => {
     .map((s) => s.trim())
     .filter((s) => /^https?:\/\/(www\.|vm\.|vt\.|v\.)?tiktok\.com\//i.test(s)).length;
 });
+
+const progressPct = computed(() =>
+  progress.value.total ? Math.round((progress.value.done / progress.value.total) * 100) : 0
+);
 
 function log(message, cls = 'info', title = '') {
   const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
@@ -103,8 +107,15 @@ async function startDownload() {
     return;
   }
   if (!hasDefault.value) {
-    if (confirm(`是否将「${d}」设为默认目录？\n下次打开会自动使用该目录。`)) {
+    try {
+      await ElMessageBox.confirm(
+        `是否将「${d}」设为默认目录？下次打开会自动使用该目录。`,
+        '默认目录',
+        { confirmButtonText: '设为默认', cancelButtonText: '暂不', type: 'info' }
+      );
       await setDefaultDir(d);
+    } catch {
+      /* 用户取消，继续下载 */
     }
   }
   downloading.value = true;
@@ -194,14 +205,13 @@ onMounted(() => {
 
       <el-card shadow="never" class="card">
         <template #header>② 选择保存位置</template>
-        <div class="dir-row">
-          <el-input v-model="dir" placeholder="例如 D:\videos\tiktok" class="dir-field">
-            <template #prepend>保存目录（不存在将自动创建）</template>
-          </el-input>
-          <el-button @click="dirPickerVisible = true">浏览</el-button>
-          <el-button @click="setDefaultDir(dir)">设为默认目录</el-button>
-          <el-button @click="openDir">打开目录</el-button>
-        </div>
+        <DirRow
+          v-model:dir="dir"
+          :has-default="hasDefault"
+          placeholder="例如 D:\videos\tiktok"
+          @set-default="setDefaultDir"
+          @open="openDir"
+        />
         <div class="actions">
           <template v-if="downloading">
             <el-button type="primary" size="large" :loading="true">下载中...</el-button>
@@ -215,37 +225,24 @@ onMounted(() => {
       <el-card shadow="never" class="card">
         <template #header>③ 下载日志</template>
         <div v-if="progress.show" class="progress-line">
-          进度：{{ progress.done }} / {{ progress.total }}
-          <span class="ok">成功 {{ progress.ok }}</span>
-          <span class="err">失败 {{ progress.fail }}</span>
-        </div>
-        <el-alert v-if="summary.show" :closable="false" :style="{ color: summary.color }" :title="summary.text" class="summary-alert" />
-        <div ref="logEl" class="log">
-          <div v-for="(l, i) in logLines" :key="i" class="log-line">
-            <span class="log-time">{{ l.time }}</span>
-            <span class="log-text" :class="'log-' + l.cls">{{ l.title ? `[${l.title}] ` : '' }}{{ l.message }}</span>
+          <el-progress :percentage="progressPct" :stroke-width="12" class="progress-bar" />
+          <div class="progress-text">
+            进度：{{ progress.done }} / {{ progress.total }}
+            <span class="ok">成功 {{ progress.ok }}</span>
+            <span class="err">失败 {{ progress.fail }}</span>
           </div>
         </div>
+        <el-alert v-if="summary.show" :closable="false" :style="{ color: summary.color }" :title="summary.text" class="summary-alert" />
+        <LogPanel :lines="logLines" height="420px" />
       </el-card>
     </div>
-
-    <DirPicker v-model="dirPickerVisible" @select="(v) => (dir = v)" />
   </div>
 </template>
 
 <style scoped>
-.page {
-  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", sans-serif;
-  background: #f4f6fb;
-  color: #1f2330;
-  min-height: 100vh;
-  padding: 28px 20px 0;
-  box-sizing: border-box;
-}
-.container { max-width: 900px; margin: 0 auto; padding-bottom: 60px; }
-.card { margin-bottom: 20px; border-radius: 14px; }
 .proxy-on { margin-bottom: 20px; }
 .proxy-off { margin-bottom: 20px; }
+.vpn-alert { margin-bottom: 20px; }
 .dot {
   display: inline-block;
   width: 9px;
@@ -255,36 +252,21 @@ onMounted(() => {
   margin-right: 8px;
 }
 .dot.off { background: #f5a623; }
-.vpn-alert { margin-bottom: 20px; }
 .empty-hint { color: #767b8a; font-size: 12.5px; margin-top: 8px; }
-.dir-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.dir-field { flex: 1; min-width: 260px; }
-.actions { display: flex; gap: 10px; margin-top: 18px; }
+.actions { margin-top: 18px; }
 .progress-line {
-  font-size: 13.5px;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 14px;
   margin-bottom: 12px;
 }
-.progress-line .ok { color: #25c16d; }
-.progress-line .err { color: #e5484d; }
-.summary-alert { margin-bottom: 12px; }
-.log {
-  max-height: 420px;
-  overflow-y: auto;
-  background: #10131c;
-  border-radius: 10px;
-  padding: 14px 16px;
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 12.5px;
-  line-height: 1.8;
+.progress-bar { flex: 1; min-width: 160px; }
+.progress-text {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
 }
-.log-line { display: flex; gap: 8px; word-break: break-all; }
-.log-line + .log-line { margin-top: 3px; }
-.log-time { color: #5c6370; flex-shrink: 0; }
-.log-info { color: #b8c0cc; }
-.log-warn { color: #ffc95c; }
-.log-ok { color: #5fd08a; }
-.log-err { color: #ff7b72; }
-.log-network { color: #ff9d5c; font-weight: 600; }
-.log-title { color: #7d8aff; font-weight: 600; }
+.progress-text .ok { color: #25c16d; margin-left: 8px; }
+.progress-text .err { color: #e5484d; margin-left: 8px; }
+.summary-alert { margin-bottom: 12px; }
 </style>

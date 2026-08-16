@@ -11,7 +11,6 @@ import { ElMessage } from 'element-plus';
 export function useDirSettings(tool, log = () => {}) {
   const dir = ref('');
   const hasDefault = ref(false);
-  const dirPickerVisible = ref(false);
 
   async function loadSettings() {
     try {
@@ -69,7 +68,7 @@ export function useDirSettings(tool, log = () => {}) {
     }
   }
 
-  return { dir, hasDefault, dirPickerVisible, loadSettings, setDefaultDir, openDir };
+  return { dir, hasDefault, loadSettings, setDefaultDir, openDir };
 }
 
 /** 日志自动滚动：logLines 数量变化时把 logEl 滚到底部；enabled 为 ref 时支持暂停滚动 */
