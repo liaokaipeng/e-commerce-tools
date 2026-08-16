@@ -1,11 +1,12 @@
 'use strict';
-// 采集调度器：定时巡检已授权店铺，按各域间隔把到期任务排入「每店串行队列」执行
+// 采集调度器：定时巡检已启用监控的授权店铺，按各域间隔把到期任务排入「每店串行队列」执行
 // （同店不并发避免触发限频，跨店并发 ≤ MAX_SHOP_CONCURRENCY）。
 // 采集成功：快照落盘 + 规则引擎入库 + meta 更新 + SSE 广播；
 // 采集失败：连续失败计数并触发系统自检告警（engine.systemFail）。
 // 未配置开放平台 App 或无已授权店铺时调度器空转，不发起任何网络请求。
 // **按需采集**：仅当监控大屏页面打开（前端心跳报告在场）时才执行巡检；
 // 离开页面即停采（前端发离开事件），心跳超时（PRESENCE_LEASE_MS）自动兜底停采。
+// **监控开关**：店铺在监控配置（config.json 排除名单）之外的才采集，未启用监控的店铺跳过。
 const { JOBS } = require('./constants');
 const { collectDomain, fetchShopName } = require('./collectors');
 const engine = require('./engine');
@@ -54,6 +55,13 @@ function notifyAuthChanged() {
   if (isPresenceActive()) tick();
 }
 
+/** 监控店铺配置（排除名单）变化后调用：刷新各店 monitored 标记并立即补一轮巡检 */
+function notifyConfigChanged() {
+  if (!state.running) return;
+  refreshShops();
+  if (isPresenceActive()) tick();
+}
+
 function metaShop(shopId) {
   const meta = store.getMeta();
   const m = meta.shops[shopId] || {};
@@ -81,7 +89,12 @@ function refreshShops() {
       // 重新授权后 collection 成功会重新开新告警（如有需要）
       engine.closeAlert(s.shopId + ':system.collect_fail');
     }
-    return { shopId: s.shopId, name: (old && old.name) || metaShop(s.shopId).name || '', authBroken };
+    return {
+      shopId: s.shopId,
+      name: (old && old.name) || metaShop(s.shopId).name || '',
+      authBroken,
+      monitored: store.isMonitored(s.shopId),
+    };
   });
   // 恢复内存中的最近执行时间（重启后避免立刻重复采集）
   if (!state.lastRun || !Object.keys(state.lastRun).length) {
@@ -159,11 +172,12 @@ async function runJob(shopId, domain) {
   }
 }
 
-/** 入队（同店串行；已在执行或已排队则跳过） */
+/** 入队（同店串行；已在执行或已排队则跳过；未启用监控的店铺不入队） */
 function enqueue(shopId, domain) {
   const key = shopId + ':' + domain;
   if (state.inFlight.has(key)) return false;
-  if (!state.shops.some((s) => s.shopId === shopId)) return false;
+  const shop = state.shops.find((s) => s.shopId === shopId);
+  if (!shop || !shop.monitored) return false;
   state.inFlight.add(key);
   const prev = state.queue.get(shopId) || Promise.resolve();
   const task = prev.then(async () => {
@@ -190,7 +204,7 @@ function tick() {
   }
   refreshShops();
   for (const shop of state.shops) {
-    if (shop.authBroken) continue;
+    if (shop.authBroken || !shop.monitored) continue;
     const last = state.lastRun[shop.shopId] || {};
     for (const job of JOBS) {
       if (!last[job.domain] || now - last[job.domain] >= job.intervalMs) {
@@ -218,7 +232,7 @@ function stop() {
   if (state.timer) { clearInterval(state.timer); state.timer = null; }
 }
 
-/** 手动触发采集：指定店铺或全部店铺，强制立即入队（正在执行的跳过；授权失效的店铺跳过；隐含在场） */
+/** 手动触发采集：指定店铺或全部店铺，强制立即入队（正在执行的跳过；未启用监控/授权失效的店铺跳过；隐含在场） */
 function collectNow(shopId) {
   setPresence(true); // 手动采集必然发生在大屏打开时，顺便续期在场租约
   if (!state.shops.length) {
@@ -229,6 +243,7 @@ function collectNow(shopId) {
   const st = openapiStore.status();
   const targets = state.shops.filter((s) => {
     if (shopId && s.shopId !== shopId) return false;
+    if (!s.monitored) return false; // 未启用监控的店铺不采集
     // 手动采集时用最新凭证状态复核（店铺列表每 5 分钟才刷新一次）
     const live = (st.shops || []).find((x) => x.shopId === s.shopId);
     if (live && live.state === 're_auth') {
@@ -243,6 +258,7 @@ function collectNow(shopId) {
   if (shopId) {
     const s = state.shops.find((x) => x.shopId === shopId);
     if (!s) throw new Error('店铺 ' + shopId + ' 不在已授权列表中');
+    if (!s.monitored) throw new Error(`店铺 ${shopId} 未启用监控，请先在大屏「监控店铺」配置中勾选`);
     if (!targets.length) {
       const live = (st.shops || []).find((x) => x.shopId === shopId);
       throw new Error(live && live.invalidReason
@@ -256,7 +272,7 @@ function collectNow(shopId) {
       if (enqueue(s.shopId, job.domain)) started.push(s.shopId + ':' + job.domain);
     }
   }
-  if (!started.length && !shopId) throw new Error('没有可采集的店铺（可能全部待重新授权），请先在「开放平台」页重新授权');
+  if (!started.length && !shopId) throw new Error('没有可采集的店铺（可能全部未启用监控或待重新授权），请检查大屏「监控店铺」配置与授权状态');
   return started;
 }
 
@@ -275,5 +291,5 @@ function status() {
 
 module.exports = {
   start, stop, tick, collectNow, status,
-  setPresence, isPresenceActive, notifyAuthChanged, _state: state,
+  setPresence, isPresenceActive, notifyAuthChanged, notifyConfigChanged, _state: state,
 };

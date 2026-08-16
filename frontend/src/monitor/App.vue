@@ -13,6 +13,35 @@ const MATRIX_METRICS = [
   'product.violations', 'health.late_shipment_rate', 'health.non_fulfilment_rate', 'health.rating',
 ];
 const DOMAIN_LABEL = { order: '订单', product: '商品', health: '健康' };
+// 指标 id 前缀 → 采集域（与调度任务域一致，用于定位「哪个域采集失败」）
+const METRIC_DOMAIN = [
+  ['order', ['order.', 'firstmile.']],
+  ['product', ['product.']],
+  ['health', ['health.']],
+];
+function domainOf(metric) {
+  for (const [dom, prefixes] of METRIC_DOMAIN) {
+    if (prefixes.some((p) => metric.startsWith(p))) return dom;
+  }
+  return '';
+}
+
+/** 该店该指标所属域的最近采集失败信息（无失败返回 null） */
+function failInfo(s, metric) {
+  const dom = domainOf(metric);
+  const count = dom && s.failCount ? s.failCount[dom] || 0 : 0;
+  if (!count) return null;
+  const err = s.lastError && s.lastError[dom];
+  return { dom, count, message: err && err.message ? err.message : '' };
+}
+
+/** 矩阵单元格悬浮提示（仅采集失败时非空） */
+function cellTitle(s, m) {
+  const fi = failInfo(s, m.metric);
+  if (!fi) return '';
+  const val = m.v === null ? '无数据' : `值 ${m.v}（上次成功采集的旧值）`;
+  return `${val} · ${DOMAIN_LABEL[fi.dom]}域最近采集失败 ${fi.count} 次${fi.message ? '：' + fi.message : ''}`;
+}
 
 // ---------- 状态 ----------
 const overview = reactive({
@@ -20,6 +49,7 @@ const overview = reactive({
   scheduler: { running: false, active: 0, lastTickAt: 0 },
   totals: { P0: 0, P1: 0, P2: 0, recovered: 0 },
   reAuthCount: 0,
+  excludedCount: 0,
   metrics: {},
   shops: [],
   at: 0,
@@ -39,6 +69,10 @@ const toastMsg = ref('');
 const rulesDrawer = ref(false);
 const ruleEdits = ref([]);
 const savingRules = ref(false);
+const shopsDrawer = ref(false);
+const shopConfig = ref([]);
+const savingShops = ref(false);
+const shopSearch = ref('');
 const now = ref(Date.now());
 
 let es = null;
@@ -90,6 +124,9 @@ const tickerText = computed(() => openTopAlerts.value
 const metricChips = computed(() => MATRIX_METRICS.map((id) => Object.assign({ id }, overview.metrics[id] || { title: id, unit: '' })));
 
 const selectedShopObj = computed(() => overview.shops.find((s) => s.shopId === selectedShop.value) || null);
+/** 当前所选店铺+指标的采集失败信息（趋势面板警示用） */
+const selectedFail = computed(() => (selectedShopObj.value && selectedMetric.value
+  ? failInfo(selectedShopObj.value, selectedMetric.value) : null));
 
 // ---------- 趋势图几何计算（SVG 自绘，零依赖） ----------
 function levelOfValue(metric, th, v) {
@@ -105,7 +142,7 @@ function levelOfValue(metric, th, v) {
 const chartView = computed(() => {
   const pts = trend.points || [];
   const w = 860;
-  const h = 240;
+  const h = 170;
   const pad = { l: 52, r: 14, t: 14, b: 26 };
   const base = {
     viewBox: `0 0 ${w} ${h}`,
@@ -216,7 +253,14 @@ async function loadOverview() {
   try {
     const r = await fetch('/api/monitor/overview');
     const j = await r.json();
-    if (j && j.ok) Object.assign(overview, j);
+    if (j && j.ok) {
+      Object.assign(overview, j);
+      // 所选店铺可能已被停用监控：不在列表中则改选第一家
+      if (selectedShop.value && !overview.shops.some((s) => s.shopId === selectedShop.value)) {
+        const first = overview.shops.find((s) => s.alerts.maxLevel) || overview.shops[0];
+        selectShop(first ? first.shopId : '');
+      }
+    }
   } catch { /* 服务未就绪，兜底轮询重试 */ }
 }
 
@@ -353,6 +397,61 @@ async function saveRules() {
   }
 }
 
+// ---------- 监控店铺配置面板 ----------
+/** 按关键词过滤（店铺名 / 店铺ID，大小写不敏感，空格分隔多关键词需同时命中） */
+const shownShopConfig = computed(() => {
+  const kws = shopSearch.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!kws.length) return shopConfig.value;
+  return shopConfig.value.filter((s) => {
+    const hay = `${s.name || ''} ${s.shopId}`.toLowerCase();
+    return kws.every((k) => hay.includes(k));
+  });
+});
+
+const monitoredCount = computed(() => shopConfig.value.filter((s) => s.monitored).length);
+
+async function openShopsConfig() {
+  try {
+    const r = await fetch('/api/monitor/shops-config');
+    const j = await r.json();
+    if (j && j.ok) {
+      shopConfig.value = (j.shops || []).map((s) => Object.assign({}, s));
+      shopSearch.value = '';
+      shopsDrawer.value = true;
+    } else showToast(j.message || '读取失败');
+  } catch (e) {
+    showToast('本地服务异常：' + e.message);
+  }
+}
+
+/** 勾选/取消当前列表（无搜索词时作用于全部店铺，有搜索词时只作用于匹配项） */
+function setAllMonitored(v) {
+  for (const s of shownShopConfig.value) s.monitored = v;
+}
+
+async function saveShopsConfig() {
+  savingShops.value = true;
+  try {
+    const excludedShopIds = shopConfig.value.filter((s) => !s.monitored).map((s) => s.shopId);
+    const r = await fetch('/api/monitor/shops-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ excludedShopIds }),
+    });
+    const j = await r.json();
+    if (r.ok && j.ok) {
+      showToast('监控店铺配置已保存');
+      shopsDrawer.value = false;
+      await loadOverview();
+      await loadAlerts();
+    } else showToast(j.message || '保存失败');
+  } catch (e) {
+    showToast('本地服务异常：' + e.message);
+  } finally {
+    savingShops.value = false;
+  }
+}
+
 // ---------- SSE 与轮播 ----------
 function onSseEvent(ev) {
   if (!ev || typeof ev !== 'object') return;
@@ -371,6 +470,10 @@ function onSseEvent(ev) {
   } else if (ev.type === 'rules') {
     loadRules();
     refreshSoon();
+  } else if (ev.type === 'config') {
+    // 其他页面修改了监控店铺配置：同步刷新总览与告警
+    loadOverview();
+    loadAlerts();
   }
 }
 
@@ -502,7 +605,9 @@ onUnmounted(() => {
         <div class="stat p1"><b>{{ overview.totals.P1 }}</b><span>P1 重要</span></div>
         <div class="stat p2"><b>{{ overview.totals.P2 }}</b><span>P2 提醒</span></div>
         <div class="stat ok"><b>{{ normalCount }}</b><span>正常</span></div>
-        <div class="stat dim"><b>{{ overview.totals.recovered }}</b><span>已恢复</span></div>
+        <div v-if="overview.excludedCount > 0" class="stat dim clickable" @click="openShopsConfig" title="已授权但未启用监控的店铺数，点击配置">
+          <b>{{ overview.excludedCount }}</b><span>未监控</span>
+        </div>
         <div v-if="reAuthCount > 0" class="stat reauth"><b>{{ reAuthCount }}</b><span>待重新授权</span></div>
       </div>
       <div class="controls">
@@ -510,6 +615,7 @@ onUnmounted(() => {
         <label class="ctl" title="P0 告警声音提醒"><input type="checkbox" v-model="soundOn" />声音</label>
         <label class="ctl" title="投影模式下每 20 秒轮换店铺"><input type="checkbox" v-model="rotateOn" />轮播</label>
         <button class="btn" @click="manualCollect" title="立即采集所选店铺（未选择时全部店铺）">立即采集</button>
+        <button class="btn" @click="openShopsConfig" title="勾选哪些已授权店铺需要监控（未勾选的不采集、不进大屏）">监控店铺</button>
         <button class="btn" @click="openRules">告警规则</button>
       </div>
       <div class="clock">
@@ -527,8 +633,19 @@ onUnmounted(() => {
     </div>
 
     <div v-if="!overview.configured || !overview.shops.length" class="empty">
-      <h2>{{ !overview.configured ? '尚未配置开放平台 App' : '当前没有已授权店铺' }}</h2>
-      <p>请先到门户页「开放平台」Tab 完成 App 配置与店铺授权，本大屏会自动开始巡检采集。</p>
+      <template v-if="!overview.configured">
+        <h2>尚未配置开放平台 App</h2>
+        <p>请先到门户页「开放平台」Tab 完成 App 配置与店铺授权，本大屏会自动开始巡检采集。</p>
+      </template>
+      <template v-else-if="overview.excludedCount > 0">
+        <h2>当前没有启用监控的店铺</h2>
+        <p>已授权 {{ overview.excludedCount }} 家店铺，但都被停用了监控。请在「监控店铺」中勾选需要巡检的店铺。</p>
+        <button class="btn primary" @click="openShopsConfig">配置监控店铺</button>
+      </template>
+      <template v-else>
+        <h2>当前没有已授权店铺</h2>
+        <p>请先到门户页「开放平台」Tab 完成 App 配置与店铺授权，本大屏会自动开始巡检采集。</p>
+      </template>
       <p class="dim2">授权后无需任何额外设置：打开本页即开始按需巡检（订单履约 10 分钟 / 商品库存 30 分钟 / 账户健康 60 分钟），离开本页自动暂停采集。</p>
     </div>
 
@@ -558,13 +675,7 @@ onUnmounted(() => {
                 </template>
               </span>
             </div>
-            <div class="sc-metrics">
-              <span v-for="m in s.matrix.slice(0, 4)" :key="m.metric" :title="(overview.metrics[m.metric] || {}).title || m.metric">
-                <i>{{ (overview.metrics[m.metric] || {}).title || m.metric }}</i>
-                <em :style="{ color: m.level ? LEVEL_COLOR[m.level] : '#9aa3b5' }">{{ m.v === null ? '—' : m.v }}</em>
-              </span>
-            </div>
-            <div class="sc-foot">
+            <div class="sc-foot" :title="s.lastError && Object.keys(s.lastError).length ? JSON.stringify(s.lastError) : ''">
               <span v-for="(label, dom) in DOMAIN_LABEL" :key="dom" :class="{ bad: s.failCount[dom] }">
                 {{ label }}{{ s.lastRun[dom] ? '✓' + fmtTime(s.lastRun[dom]) : s.failCount[dom] ? '✗' + s.failCount[dom] + '次' : '·' }}
               </span>
@@ -577,10 +688,14 @@ onUnmounted(() => {
       <section class="center">
         <div class="panel trend-panel">
           <div class="tp-head">
-            <select v-model="selectedShop" @change="selectShop($event.target.value)">
-              <option value="">全部店铺（仅矩阵对比）</option>
-              <option v-for="s in sortedShops" :key="s.shopId" :value="s.shopId">{{ shopName(s) }}</option>
-            </select>
+            <b class="tp-shop" :title="selectedShopObj ? '当前查看：' + shopName(selectedShopObj) + '（点左侧店铺卡或矩阵行切换）' : '点左侧店铺卡选择店铺'">
+              {{ selectedShopObj ? shopName(selectedShopObj) : '未选择店铺' }}
+            </b>
+            <i
+              v-if="selectedFail"
+              class="tp-fail"
+              :title="'该指标所属' + DOMAIN_LABEL[selectedFail.dom] + '域最近采集失败 ' + selectedFail.count + ' 次' + (selectedFail.message ? '：' + selectedFail.message : '')"
+            >⚠ {{ DOMAIN_LABEL[selectedFail.dom] }}域采集失败 {{ selectedFail.count }} 次</i>
             <div class="chips">
               <button
                 v-for="c in metricChips"
@@ -611,7 +726,7 @@ onUnmounted(() => {
         </div>
 
         <div class="panel matrix-panel">
-          <h3>多店指标对比矩阵 <small>底色 = 该店该指标当前告警级别 · 点击单元格看趋势</small></h3>
+          <h3>多店指标对比矩阵 <small>底色 = 该店该指标当前告警级别 · 红框 ✗ = 该域最近采集失败 · 点击单元格看趋势</small></h3>
           <div class="matrix-wrap">
             <table class="matrix">
               <thead>
@@ -627,7 +742,9 @@ onUnmounted(() => {
                     v-for="m in s.matrix"
                     :key="m.metric"
                     class="cell"
+                    :class="{ 'cell-fail': failInfo(s, m.metric) }"
                     :style="{ background: m.level ? LEVEL_COLOR[m.level] + '33' : 'rgba(255,255,255,0.03)', color: m.level ? LEVEL_COLOR[m.level] : '#9aa3b5' }"
+                    :title="cellTitle(s, m)"
                     @click="selectShop(s.shopId); selectMetric(m.metric)"
                   >{{ m.v === null ? '—' : m.v }}</td>
                 </tr>
@@ -639,9 +756,7 @@ onUnmounted(() => {
 
       <!-- 右：告警流 -->
       <aside class="panel alerts">
-        <h3>实时告警流
-          <small class="lvdot"><i style="background:#FF3B30"></i>P0 <i style="background:#FF9500"></i>P1 <i style="background:#FFD60A"></i>P2</small>
-        </h3>
+        <h3>实时告警流</h3>
         <div class="filter">
           <button :class="{ active: filterLevel === '' }" @click="filterLevel = ''">全部({{ alerts.filter((a) => a.status !== 'recovered').length }})</button>
           <button :class="{ active: filterLevel === 'P0' }" @click="filterLevel = 'P0'">P0</button>
@@ -697,18 +812,6 @@ onUnmounted(() => {
           {{ overview.scheduler.running ? (overview.scheduler.presenceActive ? '巡检运行中' : '巡检待机（离开本页即暂停采集）') : '巡检已停止' }}
           <i v-if="overview.scheduler.active">·{{ overview.scheduler.active }} 项采集中</i>
         </span>
-        <span
-          v-for="s in sortedShops"
-          :key="'cs' + s.shopId"
-          class="cs-item"
-          :class="{ bad: s.consecutiveFails > 0 }"
-          :title="s.lastError ? JSON.stringify(s.lastError) : ''"
-        >
-          {{ shopName(s) }}
-          <i v-for="(label, dom) in DOMAIN_LABEL" :key="dom" :class="{ fail: s.failCount[dom] }">
-            {{ label }}{{ s.lastRun[dom] ? '✓' + fmtTime(s.lastRun[dom]) : s.failCount[dom] ? '✗' : '·' }}
-          </i>
-        </span>
       </div>
     </footer>
 
@@ -732,6 +835,54 @@ onUnmounted(() => {
         <div class="drawer-ops">
           <button class="btn" @click="rulesDrawer = false">取消</button>
           <button class="btn primary" :disabled="savingRules" @click="saveRules">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 监控店铺配置抽屉 ===== -->
+    <div v-if="shopsDrawer" class="drawer-mask" @click.self="shopsDrawer = false">
+      <div class="drawer">
+        <h3>监控店铺配置</h3>
+        <p class="dim2">
+          已授权的店铺默认全部监控；取消勾选的店铺<b>不再巡检采集、不出现在大屏</b>，其未关闭的告警会自动关闭。
+          重新勾选后立即恢复采集，历史快照与告警记录仍保留。
+        </p>
+        <div class="shopcfg-search-row">
+          <div class="scfg-input-wrap">
+            <input
+              v-model="shopSearch"
+              class="shopcfg-search"
+              type="text"
+              placeholder="搜索店铺名 / 店铺ID（空格分隔多关键词）"
+              @keydown.esc="shopSearch = ''"
+            />
+            <span v-if="shopSearch.trim()" class="scfg-clear" title="清空搜索" @click="shopSearch = ''">✕</span>
+          </div>
+          <span class="dim2 scfg-sum">{{ monitoredCount }} / {{ shopConfig.length }} 家监控中</span>
+        </div>
+        <div class="shopcfg-ops">
+          <button class="mini-btn" @click="setAllMonitored(true)">
+            {{ shopSearch.trim() ? '匹配项全部监控' : '全部监控' }}
+          </button>
+          <button class="mini-btn" @click="setAllMonitored(false)">
+            {{ shopSearch.trim() ? '匹配项全部停用' : '全部停用' }}
+          </button>
+          <span v-if="shopSearch.trim()" class="dim2">当前操作只作用于 {{ shownShopConfig.length }} 家匹配店铺</span>
+        </div>
+        <div class="shopcfg-list">
+          <label v-for="s in shownShopConfig" :key="s.shopId" class="shopcfg-row">
+            <input type="checkbox" v-model="s.monitored" />
+            <span class="scfg-name">{{ s.name || '店铺…' + String(s.shopId).slice(-4) }}</span>
+            <i v-if="s.authBroken" class="b-reauth" title="授权已失效，重新授权后自动恢复采集">待重新授权</i>
+            <i v-else class="scfg-state" :class="{ on: s.monitored }">{{ s.monitored ? '监控中' : '不监控' }}</i>
+            <span class="scfg-id">{{ s.shopId }}</span>
+          </label>
+          <div v-if="!shopConfig.length" class="dim2">暂无已授权店铺，请先在「开放平台」Tab 完成 App 配置与店铺授权。</div>
+          <div v-else-if="!shownShopConfig.length" class="dim2">没有匹配「{{ shopSearch }}」的店铺，换个关键词试试。</div>
+        </div>
+        <div class="drawer-ops">
+          <button class="btn" @click="shopsDrawer = false">取消</button>
+          <button class="btn primary" :disabled="savingShops" @click="saveShopsConfig">保存</button>
         </div>
       </div>
     </div>
@@ -867,18 +1018,21 @@ onUnmounted(() => {
 .b-P2 { background: #FFD60A; color: #111; }
 .b-ok { background: rgba(48, 209, 88, 0.2); color: #30D158; }
 .b-reauth { background: rgba(143, 149, 168, 0.25); color: #aab2c8; }
-.sc-metrics { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
-.sc-metrics span { display: flex; flex-direction: column; font-size: 10px; color: #7d86a0; }
-.sc-metrics em { font-style: normal; font-size: 13px; font-weight: 600; }
 .sc-foot { display: flex; gap: 10px; margin-top: 6px; font-size: 10px; color: #6d7690; }
 .sc-foot span.bad, .sc-foot .fail { color: #FF3B30; }
 /* 中间列 */
 .center { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
-.trend-panel { flex: 1.2; }
+.trend-panel { flex: 0.8; }
 .tp-head { display: flex; gap: 8px; align-items: center; padding: 8px 12px; flex: none; }
-.tp-head select {
-  background: #1d2340; color: #e6e9f2; border: 1px solid #2c3560;
-  border-radius: 6px; padding: 5px 8px; font-size: 12px; max-width: 180px; font-family: inherit;
+.tp-shop {
+  flex: none; max-width: 200px; font-size: 12px; font-weight: 600; color: #dfe3f2;
+  background: #171b2e; border: 1px solid #232a4a; border-radius: 6px; padding: 5px 10px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tp-fail {
+  flex: none; font-style: normal; font-size: 11px; color: #FF3B30;
+  background: rgba(255, 59, 48, 0.12); border: 1px solid rgba(255, 59, 48, 0.45);
+  border-radius: 6px; padding: 4px 8px; white-space: nowrap;
 }
 .chips { display: flex; gap: 6px; overflow-x: auto; flex: 1; }
 .chips button {
@@ -909,6 +1063,12 @@ onUnmounted(() => {
 .matrix tr.selected td { outline: 1px solid #4a5bd8; outline-offset: -1px; }
 .matrix td.cell { cursor: pointer; font-variant-numeric: tabular-nums; }
 .matrix td.cell:hover { filter: brightness(1.5); }
+/* 采集失败标记：红色内框 + 右上角 ✗ */
+.matrix td.cell-fail { position: relative; box-shadow: inset 0 0 0 1px rgba(255, 59, 48, 0.65); }
+.matrix td.cell-fail::after {
+  content: '✗'; position: absolute; top: 1px; right: 2px;
+  font-size: 8px; line-height: 1; color: #FF3B30;
+}
 /* 告警流 */
 .alerts { min-width: 0; }
 .filter { display: flex; gap: 6px; padding: 8px 10px; flex: none; }
@@ -960,13 +1120,12 @@ onUnmounted(() => {
   0% { transform: translateX(0); }
   100% { transform: translateX(-50%); }
 }
-.coll-strip { display: flex; gap: 8px; overflow-x: auto; max-width: 45%; }
+.coll-strip { display: flex; gap: 8px; overflow-x: auto; }
 .cs-item {
   font-size: 10px; color: #7d86a0; background: #171b2e; border: 1px solid #232a4a;
   border-radius: 6px; padding: 3px 8px; white-space: nowrap;
 }
 .cs-item i { font-style: normal; margin-left: 4px; }
-.cs-item i.fail { color: #FF3B30; }
 .cs-item.bad { border-color: #FF3B30; color: #FF3B30; }
 /* 抽屉 */
 .drawer-mask {
@@ -993,6 +1152,44 @@ onUnmounted(() => {
 }
 .num.p2c { border-color: #FFD60A; } .num.p1c { border-color: #FF9500; } .num.p0c { border-color: #FF3B30; }
 .drawer-ops { display: flex; gap: 10px; justify-content: flex-end; margin-top: 6px; }
+/* 监控店铺配置 */
+.stat.clickable { cursor: pointer; }
+.stat.clickable:hover { border-color: #4a5bd8; background: #1c2140; }
+.shopcfg-ops { display: flex; gap: 8px; align-items: center; }
+.shopcfg-search-row { display: flex; gap: 8px; align-items: center; }
+.scfg-input-wrap { position: relative; flex: 1; min-width: 0; }
+.shopcfg-search {
+  width: 100%; background: #1d2340; color: #e6e9f2; border: 1px solid #2c3560; border-radius: 6px;
+  padding: 6px 28px 6px 10px; font-size: 12px; font-family: inherit; outline: none;
+}
+.shopcfg-search:focus { border-color: #4a5bd8; }
+.shopcfg-search::placeholder { color: #6d7690; }
+.scfg-clear {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  color: #8a93ad; cursor: pointer; font-size: 12px; line-height: 1; padding: 2px;
+}
+.scfg-clear:hover { color: #dfe3f2; }
+.scfg-sum { flex: none; white-space: nowrap; }
+.mini-btn {
+  background: #1d2340; color: #dfe3f2; border: 1px solid #2c3560; border-radius: 6px;
+  padding: 4px 12px; font-size: 12px; cursor: pointer; font-family: inherit;
+}
+.mini-btn:hover { background: #262e55; }
+.shopcfg-list {
+  flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid #1e2440; border-radius: 8px; padding: 8px;
+}
+.shopcfg-row {
+  display: flex; align-items: center; gap: 8px;
+  background: #171b2e; border: 1px solid #232a4a; border-radius: 7px;
+  padding: 7px 10px; cursor: pointer; font-size: 12px;
+}
+.shopcfg-row:hover { background: #1c2140; }
+.shopcfg-row input[type="checkbox"] { accent-color: #ee4d2d; width: 15px; height: 15px; flex: none; }
+.scfg-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scfg-state { font-style: normal; font-size: 10px; color: #7d86a0; background: #1d2340; padding: 1px 6px; border-radius: 4px; flex: none; }
+.scfg-state.on { color: #30D158; background: rgba(48, 209, 88, 0.15); }
+.scfg-id { font-size: 10px; color: #6d7690; flex: none; font-variant-numeric: tabular-nums; }
 /* 轻提示 */
 .toast {
   position: fixed; bottom: 54px; left: 50%; transform: translateX(-50%);

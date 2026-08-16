@@ -306,7 +306,7 @@ async function run() {
       // 测试服务未授权任何店铺：调度器空转、不触达真实站点；监控数据目录已隔离（helpers.startServer）
       const ov = await req('GET', '/api/monitor/overview');
       const ovj = JSON.parse(ov.text);
-      t('GET /api/monitor/overview 返回 200 且结构完整', ov.status === 200 && ovj.ok === true && Array.isArray(ovj.shops) && ovj.shops.length === 0 && ovj.totals.P0 === 0 && 'configured' in ovj, ov.text);
+      t('GET /api/monitor/overview 返回 200 且结构完整', ov.status === 200 && ovj.ok === true && Array.isArray(ovj.shops) && ovj.shops.length === 0 && ovj.totals.P0 === 0 && 'configured' in ovj && 'excludedCount' in ovj && ovj.excludedCount === 0, ov.text);
       const al = await req('GET', '/api/monitor/alerts');
       t('GET /api/monitor/alerts 返回空列表', al.status === 200 && JSON.parse(al.text).ok === true && JSON.parse(al.text).alerts.length === 0, al.text);
       const ru = await req('GET', '/api/monitor/rules');
@@ -329,6 +329,19 @@ async function run() {
       const rwReset = await req('POST', '/api/monitor/rules', { overrides: {} });
       const rwResetJ = JSON.parse(rwReset.text);
       t('POST /api/monitor/rules 清空覆盖还原默认', rwReset.status === 200 && rwResetJ.rules.find((r) => r.id === 'order.pending_24h').thresholds.p2 === 3, rwReset.text);
+      // 监控店铺配置
+      const scg = await req('GET', '/api/monitor/shops-config');
+      const scgj = JSON.parse(scg.text);
+      t('GET /api/monitor/shops-config 返回 200 且结构完整', scg.status === 200 && scgj.ok === true && Array.isArray(scgj.shops) && 'configured' in scgj, scg.text);
+      const scpBad = await req('POST', '/api/monitor/shops-config', { excludedShopIds: 'x' });
+      t('POST /api/monitor/shops-config 非数组返回 400', scpBad.status === 400, scpBad.text);
+      const scp = await req('POST', '/api/monitor/shops-config', { excludedShopIds: ['123', 456] });
+      const scpj = JSON.parse(scp.text);
+      t('POST /api/monitor/shops-config 保存排除名单（数字转字符串）', scp.status === 200 && scpj.ok === true && scpj.excludedShopIds.includes('456'), scp.text);
+      const scg2 = JSON.parse((await req('GET', '/api/monitor/shops-config')).text);
+      t('配置保存后 GET 可见且默认无店铺（未授权）', scg2.ok === true && scg2.shops.length === 0, JSON.stringify(scg2));
+      const scpReset = await req('POST', '/api/monitor/shops-config', { excludedShopIds: [] });
+      t('POST /api/monitor/shops-config 清空排除名单恢复默认', scpReset.status === 200 && JSON.parse(scpReset.text).ok === true, scpReset.text);
       const stt = await req('GET', '/api/monitor/status');
       const sttj = JSON.parse(stt.text);
       t('GET /api/monitor/status 返回运行状态', stt.status === 200 && sttj.ok === true && sttj.running === true && Array.isArray(sttj.shops) && sttj.shops.length === 0, stt.text);

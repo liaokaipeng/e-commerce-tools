@@ -1,6 +1,7 @@
 'use strict';
 // 监控数据存储：server/data/monitor/ 下
 //   rules.json      用户对默认规则的覆盖（阈值/开关），未覆盖项走 constants.DEFAULT_RULES
+//   config.json     监控店铺配置（excludedShopIds 排除名单，未列出的已授权店铺全部监控）
 //   alerts.json     告警全量（含状态，引擎变更后防抖落盘）
 //   meta.json       店铺名缓存 / 各指标最新值 / 各域最近采集时间与失败次数
 //   snapshots/{shopId}/{metric}/YYYY-MM-DD.json  当日采样数组 [{at, v}]
@@ -81,6 +82,37 @@ function setRuleOverrides(overrides) {
   rulesById = indexRules(mergedRules);
   writeJson(RULES_FILE, ruleOverrides);
   return mergedRules;
+}
+
+// ---------- 监控店铺配置（config.json：excludedShopIds 排除名单） ----------
+// 语义：已授权店铺默认全部监控；把不需要监控的店铺加进排除名单后，
+// 调度器跳过其采集、大屏不展示其数据与告警。名单为空 = 全部监控。
+const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+
+function loadExcluded() {
+  const c = readJson(CONFIG_FILE, {});
+  const arr = Array.isArray(c.excludedShopIds) ? c.excludedShopIds : [];
+  return new Set(arr.map(String).filter(Boolean));
+}
+
+let excludedShopIds = loadExcluded();
+
+/** 当前排除名单（shopId 集合，Set 共享引用勿修改） */
+function getExcludedShopIds() {
+  return excludedShopIds;
+}
+
+/** 店铺是否处于监控中（未在排除名单即监控） */
+function isMonitored(shopId) {
+  return !excludedShopIds.has(String(shopId));
+}
+
+/** 保存排除名单（校验为字符串数组；去重后写盘），返回新的排除集合 */
+function setExcludedShopIds(ids) {
+  if (!Array.isArray(ids)) throw new Error('excludedShopIds 必须是数组');
+  excludedShopIds = new Set(ids.map(String).filter(Boolean));
+  writeJson(CONFIG_FILE, { excludedShopIds: [...excludedShopIds] });
+  return excludedShopIds;
 }
 
 // ---------- 告警（全量落盘，由引擎调用） ----------
@@ -180,6 +212,9 @@ module.exports = {
   getRules,
   getRulesById,
   setRuleOverrides,
+  getExcludedShopIds,
+  isMonitored,
+  setExcludedShopIds,
   loadAlerts,
   saveAlerts,
   appendSample,

@@ -254,6 +254,20 @@ function closeAlert(id) {
   return Object.assign({}, a);
 }
 
+/** 关闭某店铺全部未关闭告警（停用监控时调用，重新启用后触发会重新打开）；已恢复的历史记录保留，返回关闭条数 */
+function closeShopAlerts(shopId) {
+  let n = 0;
+  for (const a of alerts) {
+    if (a.shopId !== shopId || a.status === 'closed' || a.status === 'recovered') continue;
+    a.status = 'closed';
+    a.updatedAt = Date.now();
+    broadcast('alert', Object.assign({}, a, { change: 'close' }));
+    n += 1;
+  }
+  if (n) alertsDirty = true;
+  return n;
+}
+
 /** 容量控制：超出上限时淘汰最旧的已关闭/已恢复，其次最旧 P2 */
 function prune() {
   if (alerts.length <= ALERT_CAP) return;
@@ -276,12 +290,13 @@ function getAlerts({ level, shopId, status, limit } = {}) {
   return list.map((a) => Object.assign({}, a));
 }
 
-/** 汇总：各店各级别未关闭告警数与最高级别，以及全局总数 */
-function summary() {
+/** 汇总：各店各级别未关闭告警数与最高级别，以及全局总数。可传 onlyShopIds（Set）只统计启用监控的店铺。 */
+function summary(onlyShopIds) {
   const totals = { P0: 0, P1: 0, P2: 0, recovered: 0 };
   const byShop = {};
   for (const a of alerts) {
     if (a.status === 'closed') continue;
+    if (onlyShopIds && !onlyShopIds.has(a.shopId)) continue;
     if (a.status === 'recovered') { totals.recovered += 1; continue; }
     totals[a.level] += 1;
     if (!byShop[a.shopId]) byShop[a.shopId] = { P0: 0, P1: 0, P2: 0, maxLevel: null };
@@ -309,6 +324,7 @@ module.exports = {
   systemOk,
   ackAlert,
   closeAlert,
+  closeShopAlerts,
   getAlerts,
   summary,
   addClient,

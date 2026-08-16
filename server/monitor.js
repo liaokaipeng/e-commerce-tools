@@ -56,12 +56,13 @@ function shopView(shopId, name) {
 
 // ============ 路由注册 ============
 function register({ get, post }) {
-  // 大屏总览：店铺列表（含告警计数/最高级别/矩阵定级/授权状态）+ 全局统计
+  // 大屏总览：店铺列表（仅启用监控的店铺；含告警计数/最高级别/矩阵定级/授权状态）+ 全局统计
   get('/api/monitor/overview', (req, res) => {
     const openapiStatus = openapiStore.status();
-    const sum = engine.summary();
     const sched = scheduler.status();
-    const shops = sched.shops.map((s) => {
+    const monitoredSet = new Set(sched.shops.filter((s) => s.monitored).map((s) => s.shopId));
+    const sum = engine.summary(monitoredSet);
+    const shops = sched.shops.filter((s) => s.monitored).map((s) => {
       const alerts = sum.byShop[s.shopId] || { P0: 0, P1: 0, P2: 0, maxLevel: null };
       return Object.assign(shopView(s.shopId, s.name), { alerts, authBroken: !!s.authBroken });
     });
@@ -71,15 +72,17 @@ function register({ get, post }) {
       scheduler: { running: sched.running, active: sched.active, lastTickAt: sched.lastTickAt, presenceActive: sched.presenceActive },
       totals: sum.totals,
       reAuthCount: shops.filter((s) => s.authBroken).length,
+      excludedCount: sched.shops.length - shops.length,
       metrics: METRICS,
       shops,
       at: Date.now(),
     });
   });
 
-  // 告警列表（?level=&shopId=&status=&limit=，默认不含 closed）
+  // 告警列表（?level=&shopId=&status=&limit=，默认不含 closed；未启用监控店铺的告警不展示）
   get('/api/monitor/alerts', (req, res, url) => {
     const q = url.searchParams;
+    const excluded = store.getExcludedShopIds();
     sendJson(res, 200, {
       ok: true,
       alerts: engine.getAlerts({
@@ -87,7 +90,7 @@ function register({ get, post }) {
         shopId: q.get('shopId') || '',
         status: q.get('status') || '',
         limit: Number(q.get('limit')) || 0,
-      }),
+      }).filter((a) => !excluded.has(a.shopId)),
     });
   });
 
@@ -136,6 +139,38 @@ function register({ get, post }) {
       const rules = store.setRuleOverrides(body.overrides);
       engine.broadcast('rules', { at: Date.now() });
       sendJson(res, 200, { ok: true, rules });
+    } catch (e) {
+      sendJson(res, 400, { ok: false, message: e.message });
+    }
+  });
+
+  // 监控店铺配置：GET 返回全部已授权店铺及其监控状态（含未监控的，供配置面板勾选）；
+  // POST 保存排除名单 { excludedShopIds: [] }（未列出的已授权店铺默认监控）。
+  get('/api/monitor/shops-config', (req, res) => {
+    const openapiStatus = openapiStore.status();
+    const excluded = store.getExcludedShopIds();
+    const shops = scheduler.status().shops.map((s) => ({
+      shopId: s.shopId,
+      name: s.name || '',
+      authBroken: !!s.authBroken,
+      monitored: !excluded.has(s.shopId),
+    }));
+    sendJson(res, 200, { ok: true, configured: openapiStatus.configured, shops });
+  });
+
+  post('/api/monitor/shops-config', async (req, res) => {
+    try {
+      const body = await parseBody(req);
+      if (!body || !Array.isArray(body.excludedShopIds)) throw new Error('excludedShopIds 必须是数组');
+      const before = store.getExcludedShopIds();
+      const after = store.setExcludedShopIds(body.excludedShopIds);
+      // 新排除的店铺：关闭其未关闭告警（不再占用大屏统计）；重新勾选后采集触发会重新打开
+      for (const id of after) {
+        if (!before.has(id)) engine.closeShopAlerts(id);
+      }
+      scheduler.notifyConfigChanged();
+      engine.broadcast('config', { at: Date.now() });
+      sendJson(res, 200, { ok: true, excludedShopIds: [...after], message: '监控店铺配置已保存' });
     } catch (e) {
       sendJson(res, 400, { ok: false, message: e.message });
     }

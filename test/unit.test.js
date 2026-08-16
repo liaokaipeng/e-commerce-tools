@@ -520,6 +520,12 @@ async function run() {
     // 汇总
     const s = engine.summary();
     t('引擎汇总：按店按级别计数', s.byShop['T1'].P2 === 1 && s.byShop['T3'].P1 === 1 && s.totals.P0 === 0 && s.totals.P1 === 1 && s.totals.P2 === 1 && s.totals.recovered === 1, JSON.stringify(s));
+    // 汇总白名单（只统计启用监控的店铺）
+    const s2 = engine.summary(new Set(['T1']));
+    t('引擎汇总：按监控店铺白名单过滤', !!s2.byShop['T1'] && !s2.byShop['T2'] && !s2.byShop['T3'] && s2.totals.P2 === 1, JSON.stringify(s2));
+    // 停用监控：关闭该店全部未关闭告警
+    const closedCount = engine.closeShopAlerts('T1');
+    t('引擎：closeShopAlerts 关闭该店全部未关闭告警', closedCount === 1 && engine.getAlerts({ shopId: 'T1', status: 'open' }).length === 0 && engine.getAlerts({ shopId: 'T3', status: 'open' }).length === 1, JSON.stringify({ closedCount, t3: engine.getAlerts({ shopId: 'T3' }) }));
   }
 
   // ===== 监控：快照存储与规则覆盖持久化 =====
@@ -537,6 +543,15 @@ async function run() {
     t('规则覆盖：保存并生效', rules.find((r) => r.id === 'order.pending_24h').thresholds.p2 === 6);
     monitorStore.setRuleOverrides({});
     t('规则覆盖：清空后还原默认', monitorStore.getRules().find((r) => r.id === 'order.pending_24h').thresholds.p2 === 3);
+    // 监控店铺配置（排除名单）：默认全部监控
+    t('店铺配置：默认全部监控', monitorStore.isMonitored('S1') && monitorStore.isMonitored('S9') && monitorStore.getExcludedShopIds().size === 0);
+    monitorStore.setExcludedShopIds(['S9', 'S9', 123]);
+    t('店铺配置：保存排除名单并去重转字符串', !monitorStore.isMonitored('S9') && !monitorStore.isMonitored('123') && monitorStore.isMonitored('S1') && monitorStore.getExcludedShopIds().size === 2);
+    let badThrew = false;
+    try { monitorStore.setExcludedShopIds('x'); } catch { badThrew = true; }
+    t('店铺配置：非数组报错', badThrew);
+    monitorStore.setExcludedShopIds([]);
+    t('店铺配置：清空排除名单后恢复监控', monitorStore.isMonitored('S9') && monitorStore.getExcludedShopIds().size === 0);
     // 收尾：落盘并清理临时目录
     monitorEngine.flushAlerts();
     monitorStore.flushMeta();
