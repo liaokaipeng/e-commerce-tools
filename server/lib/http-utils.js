@@ -19,6 +19,7 @@ const DIR_INDEX = {
   '/bidding-cancel/': '/bidding-cancel/index.html',
   '/video/': '/video/index.html',
   '/openapi/': '/openapi/index.html',
+  '/monitor/': '/monitor/index.html',
 };
 
 /** 统一 JSON 响应 */

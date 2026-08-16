@@ -45,7 +45,7 @@ async function run() {
     }
 
     console.log('  -- 页面静态资源 --');
-    for (const p of ['/', '/tiktok/', '/bidding/', '/bidding-cancel/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/openapi/', '/xlsx.full.min.js']) {
+    for (const p of ['/', '/tiktok/', '/bidding/', '/bidding-cancel/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/openapi/', '/monitor/', '/xlsx.full.min.js']) {
       const r = await req('GET', p);
       t(`GET ${p} 返回 200`, r.status === 200, `status=${r.status}`);
     }
@@ -299,6 +299,41 @@ async function run() {
 
       const cb = await req('GET', '/openapi/callback');
       t('GET /openapi/callback 返回 200 且含中文提示', cb.status === 200 && cb.text.includes('正在完成店铺授权'), `status=${cb.status}`);
+    }
+
+    console.log('  -- 监控大屏 API --');
+    {
+      // 测试服务未授权任何店铺：调度器空转、不触达真实站点；监控数据目录已隔离（helpers.startServer）
+      const ov = await req('GET', '/api/monitor/overview');
+      const ovj = JSON.parse(ov.text);
+      t('GET /api/monitor/overview 返回 200 且结构完整', ov.status === 200 && ovj.ok === true && Array.isArray(ovj.shops) && ovj.shops.length === 0 && ovj.totals.P0 === 0 && 'configured' in ovj, ov.text);
+      const al = await req('GET', '/api/monitor/alerts');
+      t('GET /api/monitor/alerts 返回空列表', al.status === 200 && JSON.parse(al.text).ok === true && JSON.parse(al.text).alerts.length === 0, al.text);
+      const ru = await req('GET', '/api/monitor/rules');
+      const ruj = JSON.parse(ru.text);
+      t('GET /api/monitor/rules 返回默认规则', ru.status === 200 && ruj.ok === true && Array.isArray(ruj.rules) && ruj.rules.length >= 11, ru.text);
+      const tr = await req('GET', '/api/monitor/trend?shopId=x&metric=order.pending_24h&days=7');
+      const trj = JSON.parse(tr.text);
+      t('GET /api/monitor/trend 无数据返回空点集', tr.status === 200 && trj.ok === true && Array.isArray(trj.points) && trj.points.length === 0 && trj.metric.id === 'order.pending_24h', tr.text);
+      const trBad = await req('GET', '/api/monitor/trend?shopId=x');
+      t('GET /api/monitor/trend 缺 metric 返回 400', trBad.status === 400, `status=${trBad.status}`);
+      const col = await req('POST', '/api/monitor/collect', {});
+      t('无授权店铺时手动采集返回 400', col.status === 400 && JSON.parse(col.text).message.includes('店铺'), col.text);
+      const act = await req('POST', '/api/monitor/alert-action', { id: 'x', action: 'ack' });
+      t('不存在的告警操作返回 400', act.status === 400, act.text);
+      const rb = await req('POST', '/api/monitor/rules', { overrides: { 'unknown.rule': { enabled: false } } });
+      t('POST /api/monitor/rules 未知规则返回 400', rb.status === 400, rb.text);
+      const rw = await req('POST', '/api/monitor/rules', { overrides: { 'order.pending_24h': { thresholds: { p2: 5 } } } });
+      const rwj = JSON.parse(rw.text);
+      t('POST /api/monitor/rules 覆盖阈值生效', rw.status === 200 && rwj.ok === true && rwj.rules.find((r) => r.id === 'order.pending_24h').thresholds.p2 === 5, rw.text);
+      const rwReset = await req('POST', '/api/monitor/rules', { overrides: {} });
+      const rwResetJ = JSON.parse(rwReset.text);
+      t('POST /api/monitor/rules 清空覆盖还原默认', rwReset.status === 200 && rwResetJ.rules.find((r) => r.id === 'order.pending_24h').thresholds.p2 === 3, rwReset.text);
+      const stt = await req('GET', '/api/monitor/status');
+      const sttj = JSON.parse(stt.text);
+      t('GET /api/monitor/status 返回运行状态', stt.status === 200 && sttj.ok === true && sttj.running === true && Array.isArray(sttj.shops) && sttj.shops.length === 0, stt.text);
+      const events = await readSSEUntil('/api/monitor/events', ['connected']);
+      t('GET /api/monitor/events 首事件为 connected', events.some((e) => e.type === 'connected'), JSON.stringify(events));
     }
 
     console.log('  -- 404 兜底 --');

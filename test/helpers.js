@@ -45,9 +45,11 @@ async function waitReady() {
 // （OPENAPI_SESSION_FILE 环境变量），避免误动用户真实 openapi-session.json。
 function startServer() {
   const openapiTestFile = path.join(os.tmpdir(), `kp_openapi_session_${process.pid}_${Date.now()}.json`);
+  // 监控数据目录同样隔离到临时目录（调度器在测试环境无 App 配置时空转，不会写文件）
+  const monitorTestDir = path.join(os.tmpdir(), `kp_monitor_data_${process.pid}_${Date.now()}`);
   const child = spawn(process.execPath, ['server/main.js'], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT), OPENAPI_SESSION_FILE: openapiTestFile },
+    env: { ...process.env, PORT: String(PORT), OPENAPI_SESSION_FILE: openapiTestFile, MONITOR_DATA_DIR: monitorTestDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let childErr = '';
@@ -71,6 +73,7 @@ function startServer() {
       if (settingsBackup) fs.writeFileSync(settingsFile, settingsBackup);
       else if (fs.existsSync(settingsFile)) fs.unlinkSync(settingsFile);
       if (fs.existsSync(openapiTestFile)) fs.unlinkSync(openapiTestFile);
+      try { fs.rmSync(monitorTestDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
     },
   };
 }

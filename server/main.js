@@ -20,6 +20,7 @@ const bidding = require('./bidding');
 const biddingCancel = require('./bidding-cancel');
 const video = require('./video');
 const openapi = require('./openapi');
+const monitor = require('./monitor');
 
 const PORT = process.env.PORT || 8765;
 // 前端为 Vite 构建产物（frontend/dist），由 main.js 托管
@@ -36,6 +37,7 @@ bidding.register({ get, post });
 biddingCancel.register({ get, post });
 video.register({ get, post });
 openapi.register({ get, post });
+monitor.register({ get, post });
 
 // ============ 工具默认目录（settings.json 持久化） ============
 // GET  /api/settings            读取各工具默认目录
@@ -160,5 +162,6 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log('  - 竞价导出/取消竞价：需先装扩展并点「发送登录信息到本地工具」');
   console.log('  - 视频上传：需先装扩展，在短视频页手动上传一次视频抓取凭证');
   console.log('  - 开放平台：录入 App 后生成授权链接登录（回调 redirect 后台与本工具填一致，默认 https://example.com/，授权后粘贴回调链接完成）');
+  console.log('  - 监控大屏：开放平台授权店铺后自动巡检采集，/monitor/ 查看三级告警大屏');
   console.log('  扩展安装：edge://extensions → 开发人员模式 → 加载解压缩的扩展');
 });

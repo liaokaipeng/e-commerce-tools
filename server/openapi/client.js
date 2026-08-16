@@ -33,7 +33,15 @@ const ERROR_HINTS = {
   error_param: '请求参数缺失或格式错误，请检查调用参数',
 };
 
-function hintOf(error) {
+function hintOf(error, message) {
+  const text = String(message || '');
+  // 网关对失效凭证的误导性报错（实测文案）→ 翻译成可执行的指引
+  if (/refresh token or shop_id is wrong/i.test(text)) {
+    return 'refresh_token 已失效或与该店铺不匹配（主账号授权的 token 被某店铺刷新绑定后，其余店铺需重新授权）';
+  }
+  if (/invalid_acceess_token|invalid access_token/i.test(text)) {
+    return 'access_token 对当前店铺无效，请刷新或重新授权该店铺';
+  }
   return ERROR_HINTS[error] || '';
 }
 
@@ -106,7 +114,7 @@ async function signedCall({ env, apiPath, business = {}, accessToken = '', shopI
         throw new Error(`开放平台返回异常（HTTP ${resp.status}）: ${(resp.text || '').slice(0, 200)}`);
       }
       if (j.error) {
-        const hint = hintOf(j.error);
+        const hint = hintOf(j.error, j.message);
         throw new Error(`开放平台错误 ${j.error}${j.message ? '：' + j.message : ''}${hint ? '（' + hint + '）' : ''}`);
       }
       return j;
@@ -166,13 +174,45 @@ async function exchangeToken(env, { code, shopId, mainAccountId }) {
   };
 }
 
-/** 刷新 token：POST /api/v2/auth/access_token/get（旧 refresh_token 调用后立即失效） */
+/** 刷新 token：POST /api/v2/auth/access_token/get
+ * 实测网关规则（2026-08 生产环境）：
+ * - 签名 base 只拼 partner_id + api_path + timestamp（不拼 access_token/shop_id）
+ * - 公共参数 partner_id/timestamp/sign 放 query
+ * - body 为 { partner_id: 数字, shop_id: 数字, refresh_token }（partner_id/shop_id 必须数字类型，
+ *   字符串会报 "the format of xxx parameter is wrong"）
+ * - 旧 refresh_token 调用后立即失效 */
 async function refreshToken(env, shopId, refreshToken) {
-  const j = await signedCall({
-    env,
-    apiPath: API_PATH.accessTokenGet,
-    business: { refresh_token: refreshToken, shop_id: shopId },
+  const app = store.getApp();
+  if (!app) throw new Error('尚未配置开放平台 App');
+  const host = ENV_HOSTS[env];
+  if (!host) throw new Error('无效的环境：' + env);
+  const timestamp = nowSec();
+  const base = buildBaseString(app.partnerId, API_PATH.accessTokenGet, timestamp);
+  const sign = hmacHex(app.partnerKey, base);
+  const url = `${host}${API_PATH.accessTokenGet}?${new URLSearchParams({
+    partner_id: app.partnerId,
+    timestamp: String(timestamp),
+    sign,
+  }).toString()}`;
+  const resp = await request({
+    method: 'POST',
+    url,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      partner_id: Number(app.partnerId),
+      shop_id: Number(shopId),
+      refresh_token: refreshToken,
+    }),
+    timeout: 30000,
   });
+  const j = resp.json;
+  if (!j || typeof j !== 'object') {
+    throw new Error(`开放平台返回异常（HTTP ${resp.status}）: ${(resp.text || '').slice(0, 200)}`);
+  }
+  if (j.error) {
+    const hint = hintOf(j.error, j.message);
+    throw new Error(`开放平台错误 ${j.error}${j.message ? '：' + j.message : ''}${hint ? '（' + hint + '）' : ''}`);
+  }
   if (!j.access_token || !j.refresh_token) {
     throw new Error('刷新未返回新 token');
   }
@@ -181,6 +221,24 @@ async function refreshToken(env, shopId, refreshToken) {
     refreshToken: j.refresh_token,
     expireIn: j.expire_in || 0,
   };
+}
+
+/**
+ * 把刷新结果写回凭证库（先拿到新 token 再写盘）。
+ * 实测语义（2026-08 生产环境）：主账号授权得到的 token 为账号级通用，但
+ * access_token/get 返回的新 token 对**绑定到发起刷新的那个 shop_id**——
+ * 其它店铺拿它调接口会报 Invalid access_token，拿它刷新会报 refresh token 或 shop_id 错误。
+ * 因此刷新结果只写回发起刷新的店铺，不跨店传播；其余店铺失效时需重新授权
+ * （大屏/开放平台页会给出对应提示）。
+ * @returns 更新的店铺数（恒为 1）
+ */
+function saveRefreshResult(env, shopId, oldRefreshToken, fresh) {
+  store.setShop(env, shopId, {
+    accessToken: fresh.accessToken,
+    refreshToken: fresh.refreshToken,
+    accessExpireAt: nowSec() + fresh.expireIn,
+  });
+  return 1;
 }
 
 /** 测试用：拉取店铺信息验证 token 有效性（get_shop_info 为 GET 查询类接口） */
@@ -192,6 +250,9 @@ async function getShopInfo(env, shopId, accessToken) {
 
 // per-shop 刷新锁：并发调用同一店铺接口时只触发一次刷新
 const refreshLocks = new Map(); // shopId -> Promise
+// 全局刷新串行链：主账号下各店铺共享同一 refresh_token（刷新即轮换），
+// 跨店铺并发刷新会互相踩踏（后发者拿到已失效的旧 token），统一串行执行
+let refreshChain = Promise.resolve();
 
 function ensureFresh(env, shopId) {
   const shop = store.getShop(env, shopId);
@@ -201,20 +262,22 @@ function ensureFresh(env, shopId) {
   // 过期：先刷新（同一店铺的并发刷新共享同一个 Promise）
   let p = refreshLocks.get(String(shopId));
   if (!p) {
-    p = (async () => {
+    p = refreshChain.then(async () => {
       try {
-        const fresh = await refreshToken(env, shopId, shop.refreshToken);
-        store.setShop(env, shopId, {
-          accessToken: fresh.accessToken,
-          refreshToken: fresh.refreshToken,
-          accessExpireAt: nowSec() + fresh.expireIn,
-        });
+        // 串行轮到本店时重读最新 refresh_token（可能已被其它店铺的刷新轮换）
+        const latest = store.getShop(env, shopId);
+        if (!latest) throw new Error(`店铺 ${shopId} 尚未授权，请先在「开放平台」页面完成店铺授权`);
+        const oldRefresh = latest.refreshToken;
+        const fresh = await refreshToken(env, shopId, oldRefresh);
+        saveRefreshResult(env, shopId, oldRefresh, fresh);
         return fresh.accessToken;
       } finally {
         refreshLocks.delete(String(shopId));
       }
-    })();
+    });
     refreshLocks.set(String(shopId), p);
+    // 单个刷新失败不能卡死后续排队（错误由本次调用方消化）
+    refreshChain = p.catch(() => {});
   }
   return p;
 }
@@ -238,8 +301,9 @@ async function callOpenApi(apiPath, business = {}, opts = {}) {
   try {
     return await signedCall({ env: app.env, apiPath, business, accessToken, shopId: id, signal, method });
   } catch (e) {
-    // 认证类错误：刷新一次后重试（一次机会，避免死循环）
-    if (autoRefresh && e.message && /error_auth|error_access_token|error_refresh_token/.test(e.message)) {
+    // 认证类错误：刷新一次后重试（一次机会，避免死循环）。
+    // 网关存在拼写变体 invalid_acceess_token，以及 refresh token 失效的误导性文案，一并纳入
+    if (autoRefresh && e.message && /error_auth|error_access_token|invalid_acceess_token|invalid access_token|refresh token or shop_id is wrong/.test(e.message)) {
       refreshLocks.delete(id);
       const fresh = await ensureFresh(app.env, id);
       return signedCall({ env: app.env, apiPath, business, accessToken: fresh, shopId: id, signal, method });
@@ -252,6 +316,7 @@ module.exports = {
   getAuthUrl,
   exchangeToken,
   refreshToken,
+  saveRefreshResult,
   getShopInfo,
   callOpenApi,
   signedCall,

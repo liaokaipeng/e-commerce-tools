@@ -22,6 +22,7 @@ export default defineConfig({
         'bidding-cancel': 'bidding-cancel/index.html',
         video: 'video/index.html',
         openapi: 'openapi/index.html',
+        monitor: 'monitor/index.html',
       },
     },
   },

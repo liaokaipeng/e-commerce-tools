@@ -1,8 +1,8 @@
 # 工具合集（shopee-tools-all-in-one）
 
-单服务、单端口（8765）、单网页，提供四个工具：**TikTok 视频下载**、**Shopee 竞价导出**、**Shopee 取消竞价**、**Shopee 视频批量上传**（门户页按站点拆分为「跨境视频上传」「本土视频上传」两个 Tab），另加「**开放平台**」Tab：录入 App 后生成授权链接完成店铺授权、管理 Token，为后续官方 Open API 功能统一提供登录与调用入口。
+单服务、单端口（8765）、单网页，提供四个工具：**TikTok 视频下载**、**Shopee 竞价导出**、**Shopee 取消竞价**、**Shopee 视频批量上传**（门户页按站点拆分为「跨境视频上传」「本土视频上传」两个 Tab），另加「**开放平台**」Tab（录入 App 完成店铺授权、管理 Token，为官方 Open API 功能统一提供登录与调用入口）与「**监控大屏**」Tab（对已授权店铺定时巡检采集，P0/P1/P2 三级告警大屏展示）。
 
-> 面向最终用户的操作教程见《[新手入门指南](../新手入门指南.md)》；面向开发者的架构与目录结构见《[架构](架构.md)》；开发流程与测试见《[开发指南](开发指南.md)》；Shopee 开放平台接口资料（开发者指南 / API 参考整站目录，中文版）见 [shopee_api_doc/README.md](../shopee_api_doc/README.md)。本文件为仓库概览与快速开始。
+> 面向最终用户的操作教程见《[新手入门指南](../新手入门指南.md)》；监控大屏的使用、指标口径、告警分级与后续待办见《[监控大屏](监控大屏.md)》；面向开发者的架构与目录结构见《[架构](架构.md)》；开发流程与测试见《[开发指南](开发指南.md)》；Shopee 开放平台接口资料（开发者指南 / API 参考整站目录，中文版）见 [shopee_api_doc/README.md](../shopee_api_doc/README.md)。本文件为仓库概览与快速开始。
 
 ## 技术栈
 
@@ -34,13 +34,14 @@ cd frontend && npm run build                 # 构建到 frontend/dist，由 mai
 | server/bidding-cancel.js | `POST /api/bidding-cancel/preview`（扫描待改进竞价）、`POST /api/bidding-cancel/run`（SSE 逐条撤销） |
 | server/video.js | `POST /api/start`、`GET /api/events`（SSE）、`POST /api/cancel`、`GET/POST /api/creds` |
 | server/openapi.js | `GET /api/openapi/status`、`POST /api/openapi/app` `/auth-url` `/auth-callback` `/refresh` `/remove-shop` `/test`、`GET /openapi/callback` |
+| server/monitor.js | `GET /api/monitor/overview` `/alerts` `/trend` `/rules` `/status` `/events`（SSE）、`POST /api/monitor/alert-action` `/rules` `/collect` |
 
 凭证由扩展自动抓取保存，页面无需手填。上传链路、流式处理、SSE 与任务取消等细节见《[架构](架构.md)》。
 
 ## 约定
 
 - 端口固定 **8765**。
-- 凭证不入库：`bidding-session.json` / `video-session.json` / `openapi-session.json` / `settings.json` 均 gitignored（统一存放在 `server/data/`）。
+- 凭证不入库：`bidding-session.json` / `video-session.json` / `openapi-session.json` / `settings.json` 均 gitignored（统一存放在 `server/data/`）；监控大屏的业务数据（快照/告警/规则覆盖）在 `server/data/monitor/`，同样不入库。
 - 后端保持 CommonJS，前端用 Vue SFC。
 - Shopee 开放平台接口资料统一放在 `shopee_api_doc/`（官方文档整站目录中文整理版，更新方式见 [shopee_api_doc/README.md](../shopee_api_doc/README.md)）。
 - 改入口 / 端口 / 结构时，同步更新 `启动.bat`、`docs/README.md`、`docs/架构.md`、`AGENTS.md`。

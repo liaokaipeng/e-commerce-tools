@@ -32,6 +32,19 @@ const biddingCancel = require('../server/bidding-cancel');
 const { nowSec, buildBaseString, hmacHex, maskToken } = require('../server/lib/openapi-utils');
 const openapi = require('../server/openapi');
 
+// ---------- 监控模块：数据目录隔离到临时目录（不碰 server/data） ----------
+const MONITOR_TMP = path.join(os.tmpdir(), `kp_monitor_test_${process.pid}_${Date.now()}`);
+process.env.MONITOR_DATA_DIR = MONITOR_TMP;
+const {
+  evaluateRule, isMoreSevere, mergeRules, levelOf,
+} = require('../server/monitor/rules');
+const {
+  listOf, orderAgeBuckets, stockOfModel, stockSummary, itemStockState, normalizeHealth,
+  totalOf, orderSnDate,
+} = require('../server/monitor/collectors');
+const monitorStore = require('../server/monitor/store');
+const monitorEngine = require('../server/monitor/engine');
+
 // ---------- 合成一个可被 probeVideo 解析的 MP4（仅盒结构，无真实媒体数据） ----------
 function box(type, payload) {
   const b = Buffer.alloc(8 + payload.length);
@@ -320,6 +333,186 @@ async function run() {
     t('取消：中途取消收到 cancelled', evsB.some((e) => e.type === 'cancelled'), JSON.stringify(evsB));
     t('取消：row-done 与 cancelled 同时存在', evsB.some((e) => e.type === 'row-done') && evsB.some((e) => e.type === 'cancelled'));
     finishJob(jobB);
+  }
+
+  // ===== 监控：规则引擎（纯函数） =====
+  {
+    const upRule = { id: 'r1', metric: 'order.pending_24h', type: 'threshold', thresholds: { p2: 3, p1: 8, p0: 15 } };
+    t('规则评估 up：低于 p2 不触发', evaluateRule(upRule, 2) === null);
+    t('规则评估 up：命中 p2', evaluateRule(upRule, 5) === 'P2');
+    t('规则评估 up：边界值命中 p2', evaluateRule(upRule, 3) === 'P2');
+    t('规则评估 up：命中 p1', evaluateRule(upRule, 9) === 'P1');
+    t('规则评估 up：命中 p0', evaluateRule(upRule, 16) === 'P0');
+    const downRule = { id: 'r2', metric: 'health.rating', type: 'threshold', thresholds: { p2: 4.5, p1: 4.2, p0: 4.0 } };
+    t('规则评估 down：评分低触发 P1', evaluateRule(downRule, 4.1) === 'P1');
+    t('规则评估 down：评分正常不触发', evaluateRule(downRule, 4.8) === null);
+    const noP2 = { id: 'r3', metric: 'health.penalty_points', type: 'threshold', thresholds: { p1: 1, p0: 3 } };
+    t('规则评估 缺 p2 阈值：低值不触发', evaluateRule(noP2, 0) === null);
+    t('规则评估 缺 p2 阈值：直接命中 p1', evaluateRule(noP2, 2) === 'P1');
+    t('规则评估 非法值返回 null', evaluateRule(upRule, NaN) === null && evaluateRule(upRule, '5') === null && evaluateRule(null, 5) === null);
+    t('isMoreSevere 级别比较', isMoreSevere('P0', 'P1') && isMoreSevere('P1', 'P2') && !isMoreSevere('P2', 'P1') && isMoreSevere('P0', null) && !isMoreSevere(null, 'P1'));
+    {
+      const merged = mergeRules({ 'order.pending_24h': { thresholds: { p2: 5 }, enabled: false } });
+      const r = merged.find((x) => x.id === 'order.pending_24h');
+      t('mergeRules 覆盖阈值且未覆盖级别保留默认', r.thresholds.p2 === 5 && r.thresholds.p1 === 8);
+      t('mergeRules 覆盖开关', r.enabled === false);
+      t('mergeRules 未覆盖规则保持默认', merged.find((x) => x.id === 'order.cancel_pending').thresholds.p2 === 3);
+      t('mergeRules 空覆盖返回默认全集', mergeRules(null).length === mergeRules({}).length);
+    }
+    {
+      const r = levelOf('product.violations', 5);
+      t('levelOf 矩阵定级', r.level === 'P1' && r.rule != null, JSON.stringify(r));
+      t('levelOf 未注册指标返回 null', levelOf('nope.x', 5).level === null);
+    }
+  }
+
+  // ===== 监控：采集解析纯函数 =====
+  {
+    const now = Date.now();
+    // 生成指定天数偏移的 order_sn（YYMMDD 前缀 + 任意后缀）
+    const daySn = (offsetDays) => {
+      const d = new Date(now + offsetDays * 86400000);
+      const p = (n) => String(n).padStart(2, '0');
+      return String(d.getFullYear()).slice(2) + p(d.getMonth() + 1) + p(d.getDate()) + 'ABCDEF';
+    };
+    const b = orderAgeBuckets([{ order_sn: daySn(0) }, { order_sn: daySn(-1) }, { order_sn: daySn(-2) }, { order_sn: daySn(-3) }], now);
+    t('orderAgeBuckets 按单号日期分桶', b.pending_12_24h === 1 && b.pending_24h === 3, JSON.stringify(b));
+    t('orderAgeBuckets 空数组全 0', orderAgeBuckets([], now).pending_24h === 0 && orderAgeBuckets(null, now).pending_12_24h === 0);
+    t('orderSnDate 解析 YYMMDD 前缀', (() => {
+      const d = orderSnDate('260816G8NXB128');
+      return d && d.getFullYear() === 2026 && d.getMonth() === 7 && d.getDate() === 16;
+    })());
+    t('orderSnDate 非法单号返回 null', orderSnDate('ABC123') === null && orderSnDate('') === null && orderSnDate(null) === null);
+    {
+      const items = [
+        { stock_info_v2: { summary_info: { total_available_stock: 0 } } },
+        { stock_info_v2: { summary_info: { total_available_stock: 3 } } },
+        { stock_info_v2: { summary_info: { total_available_stock: 20 } } },
+        { stock: 0 },
+        { stock: 2 },
+        {},
+      ];
+      const s = stockSummary(items, 5);
+      t('stockSummary 断货/低库存统计', s.out_of_stock === 2 && s.low_stock === 2, JSON.stringify(s));
+      t('stockOfModel 读 summary_info', stockOfModel(items[0]) === 0 && stockOfModel(items[1]) === 3);
+      t('stockOfModel 无库存字段返回 null', stockOfModel(items[5]) === null);
+      // 商品粒度：全型号合计（停产变体不撑爆断货数）
+      t('itemStockState 全 0 → out', itemStockState([{ stock: 0 }, { stock: 0 }]) === 'out');
+      t('itemStockState 合计 ≤ 安全线 → low', itemStockState([{ stock: 0 }, { stock: 3 }], 5) === 'low');
+      t('itemStockState 合计充足 → ok', itemStockState([{ stock: 0 }, { stock: 20 }], 5) === 'ok');
+      t('itemStockState 无库存数据 → null', itemStockState([{}, { stock: null }]) === null && itemStockState([]) === null);
+    }
+    {
+      const h = normalizeHealth({
+        response: {
+          metric_list: [
+            { metric_name: 'late_shipment_rate', current_period: 0.03 },
+            { metric_name: 'non_fulfillment_rate', current_period: 0.37 },
+            { metric_name: 'shop_rating', current_period: 4.78 },
+          ],
+          overall_performance: { rating: 4 },
+        },
+      });
+      t('normalizeHealth 解析 metric_list', h.late_shipment_rate === 0.03 && h.non_fulfilment_rate === 0.37 && h.rating === 4.78, JSON.stringify(h));
+      const h2 = normalizeHealth({ response: { overall_performance: { rating: '4.5' } } });
+      t('normalizeHealth 缺 metric_list 回退 overall_performance', h2.rating === 4.5 && h2.late_shipment_rate === null);
+      t('normalizeHealth 异常输入全 null', normalizeHealth(null).rating === null && normalizeHealth({}).late_shipment_rate === null);
+    }
+    t('totalOf 支持字符串数字与 response 包装', totalOf({ response: { total_count: '42' } }) === 42 && totalOf({ total: 7 }) === 7);
+    t('totalOf 缺失返回 null', totalOf({}) === null && totalOf(null) === null);
+    t('listOf 支持 response/顶层多字段', listOf({ response: { order_list: [1, 2] } }, ['order_list', 'list']).length === 2
+      && listOf({ list: [1] }, ['order_list', 'list']).length === 1
+      && listOf({ response: { model: [{ a: 1 }] } }, ['model', 'models']).length === 1);
+    t('listOf 异常输入返回空数组', listOf(null, ['x']).length === 0 && listOf({}, ['x']).length === 0);
+  }
+
+  // ===== 监控：告警引擎生命周期 =====
+  {
+    const engine = monitorEngine;
+    const now = Date.now();
+    // 触发与去重
+    engine.ingest('T1', 'order', { 'order.pending_24h': 4 }, now); // P2（阈值 p2=3）
+    let list = engine.getAlerts({ shopId: 'T1' });
+    t('引擎：首次触发生成 P2 告警', list.length === 1 && list[0].level === 'P2' && list[0].status === 'open' && list[0].count === 1, JSON.stringify(list));
+    engine.ingest('T1', 'order', { 'order.pending_24h': 6 }, now + 60000);
+    list = engine.getAlerts({ shopId: 'T1' });
+    t('引擎：同级别去重计数', list.length === 1 && list[0].count === 2);
+    // 升级
+    engine.ingest('T1', 'order', { 'order.pending_24h': 10 }, now + 120000); // P1
+    engine.ingest('T1', 'order', { 'order.pending_24h': 16 }, now + 180000); // P0
+    list = engine.getAlerts({ shopId: 'T1' });
+    t('引擎：阈值升级 P2→P1→P0', list.length === 1 && list[0].level === 'P0', JSON.stringify(list));
+    // 恢复
+    engine.ingest('T1', 'order', { 'order.pending_24h': 1 }, now + 240000);
+    list = engine.getAlerts({ shopId: 'T1', status: 'recovered' });
+    t('引擎：回到阈值内自动恢复', list.length === 1 && list[0].status === 'recovered' && list[0].recoveredAt != null);
+    // 恢复后再次触发 → 重新打开
+    engine.ingest('T1', 'order', { 'order.pending_24h': 4 }, now + 300000);
+    list = engine.getAlerts({ shopId: 'T1', status: 'open' });
+    t('引擎：恢复后再次触发重新打开', list.length === 1 && list[0].status === 'open');
+    // 确认 / 关闭 / 关闭后再触发 seq+1
+    const id = list[0].id;
+    engine.ackAlert(id);
+    t('引擎：确认后状态 ack', engine.getAlerts({ shopId: 'T1', status: 'ack' }).length === 1);
+    engine.closeAlert(id);
+    t('引擎：关闭后默认列表不可见', engine.getAlerts({ shopId: 'T1' }).filter((a) => a.id === id).length === 0);
+    const seqBefore = engine.getAlerts({ shopId: 'T1', status: 'closed' })[0].seq;
+    engine.ingest('T1', 'order', { 'order.pending_24h': 4 }, now + 360000);
+    list = engine.getAlerts({ shopId: 'T1', status: 'open' });
+    t('引擎：关闭后再次触发重新打开且 seq+1', list.length === 1 && list[0].seq === seqBefore + 1);
+  }
+
+  // ===== 监控：系统自检告警与时间升级 =====
+  {
+    const engine = monitorEngine;
+    const now = Date.now();
+    engine.systemFail('T2', 'order', '网络错误', now);
+    let a = engine.getAlerts({ shopId: 'T2' })[0];
+    t('系统告警：1 次失败 P2', !!a && a.domain === 'system' && a.level === 'P2' && a.status === 'open');
+    engine.systemFail('T2', 'order', '网络错误', now + 1000);
+    a = engine.getAlerts({ shopId: 'T2' })[0];
+    t('系统告警：2 次失败升级 P1', a.level === 'P1' && a.current === 2, JSON.stringify(a));
+    engine.systemFail('T2', 'order', '网络错误', now + 2000);
+    a = engine.getAlerts({ shopId: 'T2' })[0];
+    t('系统告警：3 次失败仍为 P1', a.level === 'P1');
+    engine.systemFail('T2', 'order', '网络错误', now + 3000);
+    engine.systemFail('T2', 'order', '网络错误', now + 4000);
+    a = engine.getAlerts({ shopId: 'T2' })[0];
+    t('系统告警：5 次失败升级 P0', a.level === 'P0' && a.current === 5);
+    engine.systemOk('T2', now + 5000);
+    a = engine.getAlerts({ shopId: 'T2', status: 'recovered' })[0];
+    t('系统告警：采集成功自动恢复', !!a && a.status === 'recovered');
+    // 时间升级：P2 挂 24h → P1
+    engine.ingest('T3', 'order', { 'order.pending_12_24h': 6 }, now); // P2（阈值 p2=5）
+    const t3 = monitorEngine._test.alerts.find((x) => x.shopId === 'T3');
+    t3.firstAt = now - 25 * 3600 * 1000;
+    engine.maintain(now + 60 * 1000);
+    a = engine.getAlerts({ shopId: 'T3' })[0];
+    t('引擎：P2 持续 24h 自动升级 P1', a.level === 'P1', JSON.stringify(a));
+    // 汇总
+    const s = engine.summary();
+    t('引擎汇总：按店按级别计数', s.byShop['T1'].P2 === 1 && s.byShop['T3'].P1 === 1 && s.totals.P0 === 0 && s.totals.P1 === 1 && s.totals.P2 === 1 && s.totals.recovered === 1, JSON.stringify(s));
+  }
+
+  // ===== 监控：快照存储与规则覆盖持久化 =====
+  {
+    const now = Date.now();
+    monitorStore.appendSample('S1', 'order.pending_24h', 5, now);
+    monitorStore.appendSample('S1', 'order.pending_24h', 8, now + 60000);
+    const pts = monitorStore.readTrend('S1', 'order.pending_24h', 7);
+    t('快照：写入后可读回且按时间升序', pts.length === 2 && pts[0].v === 5 && pts[1].v === 8, JSON.stringify(pts));
+    t('快照：不存在的店铺/指标返回空', monitorStore.readTrend('S1', 'nope.x', 7).length === 0);
+    let threw = false;
+    try { monitorStore.setRuleOverrides({ 'unknown.rule': { enabled: false } }); } catch { threw = true; }
+    t('规则覆盖：未知规则 id 报错', threw);
+    const rules = monitorStore.setRuleOverrides({ 'order.pending_24h': { thresholds: { p2: 6 } } });
+    t('规则覆盖：保存并生效', rules.find((r) => r.id === 'order.pending_24h').thresholds.p2 === 6);
+    monitorStore.setRuleOverrides({});
+    t('规则覆盖：清空后还原默认', monitorStore.getRules().find((r) => r.id === 'order.pending_24h').thresholds.p2 === 3);
+    // 收尾：落盘并清理临时目录
+    monitorEngine.flushAlerts();
+    monitorStore.flushMeta();
+    try { fs.rmSync(MONITOR_TMP, { recursive: true, force: true }); } catch { /* 忽略 */ }
   }
 }
 

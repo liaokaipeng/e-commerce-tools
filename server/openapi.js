@@ -208,7 +208,7 @@ function register({ get, post }) {
     }
   });
 
-  // 手动刷新某店铺 token（旧 refresh_token 刷新后立即失效，成功后自动落盘）
+  // 手动刷新某店铺 token（旧 refresh_token 刷新后立即失效；新 token 对绑定该店铺）
   post('/api/openapi/refresh', async (req, res) => {
     try {
       const body = await parseBody(req);
@@ -218,15 +218,13 @@ function register({ get, post }) {
       if (!app) throw new Error('尚未配置 App，请先保存 partner_id / partner_key');
       const shop = store.getShop(app.env, shopId);
       if (!shop) throw new Error(`店铺 ${shopId} 尚未授权`);
-      const fresh = await client.refreshToken(app.env, shopId, shop.refreshToken);
-      store.setShop(app.env, shopId, {
-        accessToken: fresh.accessToken,
-        refreshToken: fresh.refreshToken,
-        accessExpireAt: nowSec() + fresh.expireIn,
-      });
+      const oldRefresh = shop.refreshToken;
+      const fresh = await client.refreshToken(app.env, shopId, oldRefresh);
+      const synced = client.saveRefreshResult(app.env, shopId, oldRefresh, fresh);
       sendJson(res, 200, {
         ok: true,
         shopId,
+        syncedShops: synced,
         accessTokenMasked: maskToken(fresh.accessToken),
         accessExpireAt: nowSec() + fresh.expireIn,
         message: 'Token 刷新成功（旧 refresh_token 已失效）',

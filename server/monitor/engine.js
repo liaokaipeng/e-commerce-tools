@@ -1,0 +1,319 @@
+'use strict';
+// 告警引擎：快照指标入库 → 规则评估 → 告警生命周期（去重/升级/恢复/确认关闭）→ SSE 广播。
+// 告警只在大屏展示（本期不接 IM），页面经 /api/monitor/events 实时接收，迟到连接自动回放。
+const {
+  ALERT_CAP, EVENT_LOG_CAP, LEVELS, LEVEL_ORDER, METRICS,
+} = require('./constants');
+const { evaluateRule, isMoreSevere } = require('./rules');
+const store = require('./store');
+
+// ---------- 内存态 ----------
+let alerts = store.loadAlerts(); // [{ id, seq, shopId, ruleId, domain, metric, title, unit, level, status, current, count, firstAt, lastAt, updatedAt, recoveredAt, suggest, message }]
+let alertsDirty = false;
+
+// SSE：连接集合 + 事件回放缓存
+const clients = new Set();
+const eventLog = [];
+
+function broadcast(type, data) {
+  const ev = { type, data, at: Date.now() };
+  eventLog.push(ev);
+  if (eventLog.length > EVENT_LOG_CAP) eventLog.splice(0, eventLog.length - EVENT_LOG_CAP);
+  const line = `data: ${JSON.stringify(ev)}\n\n`;
+  for (const res of clients) {
+    try { res.write(line); } catch { /* 连接已断 */ }
+  }
+}
+
+function addClient(res) {
+  clients.add(res);
+}
+
+function removeClient(res) {
+  clients.delete(res);
+}
+
+function replayTo(res) {
+  for (const ev of eventLog) {
+    try { res.write(`data: ${JSON.stringify(ev)}\n\n`); } catch { /* 忽略 */ }
+  }
+}
+
+// ---------- 告警生命周期 ----------
+// 时间触发升级窗口：P2 持续 24h 升 P1；P1 每 2h 重闪（大屏重新置顶提醒）
+const ESCALATE_P2_MS = 24 * 3600 * 1000;
+const REFLASH_P1_MS = 2 * 3600 * 1000;
+
+function msgOf(alert) {
+  if (alert.domain === 'system') return alert.message || '采集异常';
+  const m = METRICS[alert.metric] || {};
+  const unit = alert.unit || m.unit || '';
+  return `当前 ${alert.current}${unit}，触发 ${alert.level} 阈值`;
+}
+
+/** 按 (shopId, ruleId) 找告警记录 */
+function findAlert(shopId, ruleId) {
+  return alerts.find((a) => a.shopId === shopId && a.ruleId === ruleId);
+}
+
+/**
+ * 指标快照入库：逐指标评估规则，触发/升级/去重计数。
+ * @param {string} shopId
+ * @param {string} domain 采集域（order/product/health）
+ * @param {object} metrics { metricId: number }
+ * @param {number} at 采样时间（ms）
+ */
+function ingest(shopId, domain, metrics, at) {
+  const now = at || Date.now();
+  const rulesById = store.getRulesById();
+  const changed = [];
+  for (const [metric, v] of Object.entries(metrics || {})) {
+    const rule = rulesById[metric];
+    if (!rule || rule.enabled === false) continue;
+    const level = evaluateRule(rule, v);
+    const existing = findAlert(shopId, rule.id);
+    if (!level) {
+      if (existing) existing.current = v; // 未触发但告警开着：更新当前值，供恢复判断
+      continue;
+    }
+    if (!existing) {
+      const a = {
+        id: shopId + ':' + rule.id,
+        seq: 1,
+        shopId,
+        ruleId: rule.id,
+        domain: rule.domain,
+        metric: rule.metric,
+        title: rule.title,
+        unit: (METRICS[rule.metric] || {}).unit || '',
+        level,
+        status: 'open',
+        current: v,
+        count: 1,
+        firstAt: now,
+        lastAt: now,
+        updatedAt: now,
+        recoveredAt: null,
+        suggest: rule.suggest,
+        message: '',
+      };
+      a.message = msgOf(a);
+      alerts.push(a);
+      changed.push(Object.assign({}, a, { change: 'new' }));
+      continue;
+    }
+    if (existing.status === 'closed') {
+      // 人工关闭后再次触发：重新打开（seq+1 便于前端识别新记录）
+      existing.seq = (existing.seq || 1) + 1;
+      existing.status = 'open';
+      existing.count = 1;
+      existing.current = v;
+      existing.level = level;
+      existing.firstAt = now;
+      existing.lastAt = now;
+      existing.updatedAt = now;
+      existing.recoveredAt = null;
+      existing.message = msgOf(existing);
+      changed.push(Object.assign({}, existing, { change: 'reopen' }));
+      continue;
+    }
+    existing.current = v;
+    existing.lastAt = now;
+    existing.count = (existing.count || 1) + 1;
+    const escalated = isMoreSevere(level, existing.level);
+    if (escalated) existing.level = level;
+    existing.message = msgOf(existing);
+    if (existing.status === 'recovered') existing.status = 'open';
+    existing.updatedAt = now;
+    changed.push(Object.assign({}, existing, { change: escalated ? 'escalate' : 'update' }));
+  }
+  // 例行维护：恢复检测 + 时间触发升级
+  maintain(now);
+  alertsDirty = true;
+  for (const a of changed) broadcast('alert', a);
+  prune();
+  return changed;
+}
+
+/**
+ * 例行维护：
+ * - 恢复检测：开着的告警当前值已回到阈值内 → recovered
+ * - 时间升级：open P2 持续 24h → P1；open P1 每 2h 重闪
+ */
+function maintain(now) {
+  const t = now || Date.now();
+  const rulesById = store.getRulesById();
+  for (const a of alerts) {
+    if (a.status !== 'open' && a.status !== 'ack') continue;
+    const rule = rulesById[a.ruleId];
+    if (!rule) continue;
+    if (a.domain !== 'system') {
+      const level = evaluateRule(rule, a.current);
+      if (!level) {
+        a.status = 'recovered';
+        a.recoveredAt = t;
+        a.updatedAt = t;
+        broadcast('alert', Object.assign({}, a, { change: 'recover' }));
+        continue;
+      }
+    }
+    if (a.status === 'open' && a.level === 'P2' && t - a.firstAt >= ESCALATE_P2_MS) {
+      a.level = 'P1';
+      a.updatedAt = t;
+      broadcast('alert', Object.assign({}, a, { change: 'escalate' }));
+    } else if (a.status === 'open' && a.level === 'P1' && t - a.updatedAt >= REFLASH_P1_MS) {
+      a.updatedAt = t; // 重新置顶闪烁提醒
+      broadcast('alert', Object.assign({}, a, { change: 'reflash' }));
+    }
+  }
+  alertsDirty = true;
+}
+
+/**
+ * 采集失败记录（系统自检告警）：
+ * 连续失败 1 次 P2 / 2 次 P1 / ≥5 次 P0（P0 留给「长时间失联」，
+ * 避免店铺统一失效时第一波 3 个域同时失败就把全场刷成红色）；
+ * 成功采集后调用 systemOk 恢复。
+ */
+function systemFail(shopId, domain, message, at) {
+  const now = at || Date.now();
+  const rule = store.getRulesById()['system.collect_fail'];
+  const existing = findAlert(shopId, 'system.collect_fail');
+  const count = (existing && existing.status !== 'closed' && existing.status !== 'recovered' ? existing.count : 0) + 1;
+  const level = count >= 5 ? 'P0' : count >= 2 ? 'P1' : 'P2';
+  const text = `店铺最近一次采集失败（${domain}）：${message || '未知错误'}（连续 ${count} 次）`;
+  if (!existing || existing.status === 'closed' || existing.status === 'recovered') {
+    const a = {
+      id: shopId + ':system.collect_fail',
+      seq: existing ? (existing.seq || 1) + 1 : 1,
+      shopId,
+      ruleId: 'system.collect_fail',
+      domain: 'system',
+      metric: 'system.collect_fail',
+      title: rule ? rule.title : '采集连续失败',
+      unit: '次',
+      level,
+      status: 'open',
+      current: count,
+      count,
+      firstAt: now,
+      lastAt: now,
+      updatedAt: now,
+      recoveredAt: null,
+      suggest: rule ? rule.suggest : '',
+      message: text,
+    };
+    alerts.push(a);
+    broadcast('alert', Object.assign({}, a, { change: 'new' }));
+  } else {
+    existing.current = count;
+    existing.count = count;
+    existing.lastAt = now;
+    existing.updatedAt = now;
+    const escalated = isMoreSevere(level, existing.level);
+    if (escalated) existing.level = level;
+    existing.message = text;
+    broadcast('alert', Object.assign({}, existing, { change: escalated ? 'escalate' : 'update' }));
+  }
+  alertsDirty = true;
+  prune();
+}
+
+/** 采集成功：系统自检告警标记恢复 */
+function systemOk(shopId, at) {
+  const a = findAlert(shopId, 'system.collect_fail');
+  if (a && (a.status === 'open' || a.status === 'ack')) {
+    a.status = 'recovered';
+    a.recoveredAt = at || Date.now();
+    a.updatedAt = at || Date.now();
+    broadcast('alert', Object.assign({}, a, { change: 'recover' }));
+    alertsDirty = true;
+  }
+}
+
+/** 人工确认告警 */
+function ackAlert(id) {
+  const a = alerts.find((x) => x.id === id);
+  if (!a) return null;
+  a.status = 'ack';
+  a.updatedAt = Date.now();
+  alertsDirty = true;
+  broadcast('alert', Object.assign({}, a, { change: 'ack' }));
+  return Object.assign({}, a);
+}
+
+/** 人工关闭告警（终端态；再次触发会重新打开） */
+function closeAlert(id) {
+  const a = alerts.find((x) => x.id === id);
+  if (!a) return null;
+  a.status = 'closed';
+  a.updatedAt = Date.now();
+  alertsDirty = true;
+  broadcast('alert', Object.assign({}, a, { change: 'close' }));
+  return Object.assign({}, a);
+}
+
+/** 容量控制：超出上限时淘汰最旧的已关闭/已恢复，其次最旧 P2 */
+function prune() {
+  if (alerts.length <= ALERT_CAP) return;
+  const rank = (a) => (a.status === 'closed' || a.status === 'recovered' ? 0 : LEVEL_ORDER[a.level] || 1);
+  alerts.sort((a, b) => rank(a) - rank(b) || a.lastAt - b.lastAt);
+  const removed = alerts.splice(0, alerts.length - ALERT_CAP);
+  if (removed.length) console.log(`[监控] 告警超过 ${ALERT_CAP} 条，淘汰 ${removed.length} 条最旧记录`);
+}
+
+/** 查询告警（默认含 open/ack/recovered，closed 需显式指定） */
+function getAlerts({ level, shopId, status, limit } = {}) {
+  let list = alerts.slice();
+  if (level) list = list.filter((a) => a.level === level);
+  if (shopId) list = list.filter((a) => a.shopId === shopId);
+  if (status) list = list.filter((a) => a.status === status);
+  else list = list.filter((a) => a.status !== 'closed');
+  // 排序：级别从重到轻 → 更新时间从新到旧
+  list.sort((a, b) => (LEVEL_ORDER[b.level] || 0) - (LEVEL_ORDER[a.level] || 0) || b.updatedAt - a.updatedAt);
+  if (limit && limit > 0) list = list.slice(0, limit);
+  return list.map((a) => Object.assign({}, a));
+}
+
+/** 汇总：各店各级别未关闭告警数与最高级别，以及全局总数 */
+function summary() {
+  const totals = { P0: 0, P1: 0, P2: 0, recovered: 0 };
+  const byShop = {};
+  for (const a of alerts) {
+    if (a.status === 'closed') continue;
+    if (a.status === 'recovered') { totals.recovered += 1; continue; }
+    totals[a.level] += 1;
+    if (!byShop[a.shopId]) byShop[a.shopId] = { P0: 0, P1: 0, P2: 0, maxLevel: null };
+    byShop[a.shopId][a.level] += 1;
+    if (!byShop[a.shopId].maxLevel || isMoreSevere(a.level, byShop[a.shopId].maxLevel)) {
+      byShop[a.shopId].maxLevel = a.level;
+    }
+  }
+  return { totals, byShop };
+}
+
+/** 落盘（防抖：5 秒内多次变更合并写一次） */
+function flushAlerts() {
+  if (!alertsDirty) return;
+  alertsDirty = false;
+  store.saveAlerts(alerts);
+}
+const flushTimer = setInterval(flushAlerts, 5000);
+if (flushTimer.unref) flushTimer.unref();
+
+module.exports = {
+  ingest,
+  maintain,
+  systemFail,
+  systemOk,
+  ackAlert,
+  closeAlert,
+  getAlerts,
+  summary,
+  addClient,
+  removeClient,
+  replayTo,
+  broadcast,
+  flushAlerts,
+  _test: { alerts },
+};
