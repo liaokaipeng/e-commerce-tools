@@ -34,7 +34,7 @@ cd frontend && npm run build                 # 构建到 frontend/dist，由 mai
 | server/bidding-cancel.js | `POST /api/bidding-cancel/preview`（扫描待改进竞价）、`POST /api/bidding-cancel/run`（SSE 逐条撤销） |
 | server/video.js | `POST /api/start`、`GET /api/events`（SSE）、`POST /api/cancel`、`GET/POST /api/creds` |
 | server/openapi.js | `GET /api/openapi/status`、`POST /api/openapi/app` `/auth-url` `/auth-callback` `/refresh` `/remove-shop` `/test`、`GET /openapi/callback` |
-| server/monitor.js | `GET /api/monitor/overview` `/alerts` `/trend` `/rules` `/status` `/events`（SSE）、`POST /api/monitor/alert-action` `/rules` `/collect` |
+| server/monitor.js | `GET /api/monitor/overview` `/alerts` `/trend` `/rules` `/shops-config` `/currency-config` `/status` `/events`（SSE）、`POST /api/monitor/alert-action` `/rules` `/shops-config` `/currency-config` `/collect` `/presence` |
 
 凭证由扩展自动抓取保存，页面无需手填。上传链路、流式处理、SSE 与任务取消等细节见《[架构](架构.md)》。
 

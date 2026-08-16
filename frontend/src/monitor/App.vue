@@ -11,13 +11,19 @@ const OK_COLOR = '#30D158';
 const MATRIX_METRICS = [
   'order.pending_24h', 'firstmile.unbound', 'product.out_of_stock', 'product.low_stock',
   'product.violations', 'health.late_shipment_rate', 'health.non_fulfilment_rate', 'health.rating',
+  'health.punishments', 'ads.spend_today', 'ads.roas_today', 'ads.cpc_today', 'ads.balance',
+  'funds.payout_15d', 'funds.pending_txn', 'funds.failed_txn', 'funds.wallet_balance',
+  'aftersale.returns_24h', 'aftersale.negative_24h',
 ];
-const DOMAIN_LABEL = { order: '订单', product: '商品', health: '健康' };
+const DOMAIN_LABEL = { order: '订单', product: '商品', health: '健康', ads: '广告', funds: '资金', aftersale: '售后' };
 // 指标 id 前缀 → 采集域（与调度任务域一致，用于定位「哪个域采集失败」）
 const METRIC_DOMAIN = [
   ['order', ['order.', 'firstmile.']],
   ['product', ['product.']],
   ['health', ['health.']],
+  ['ads', ['ads.']],
+  ['funds', ['funds.']],
+  ['aftersale', ['aftersale.']],
 ];
 function domainOf(metric) {
   for (const [dom, prefixes] of METRIC_DOMAIN) {
@@ -50,6 +56,7 @@ const overview = reactive({
   totals: { P0: 0, P1: 0, P2: 0, recovered: 0 },
   reAuthCount: 0,
   excludedCount: 0,
+  currencyMode: 'local', // 金额展示单位：local=当地货币（默认）/ rmb=人民币；规则阈值始终按人民币
   metrics: {},
   shops: [],
   at: 0,
@@ -340,6 +347,29 @@ async function manualCollect() {
   }
 }
 
+/** 切换金额展示单位（规则阈值始终按人民币配置与比较，仅影响展示与告警消息） */
+async function saveCurrencyMode() {
+  try {
+    const r = await fetch('/api/monitor/currency-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: overview.currencyMode }),
+    });
+    const j = await r.json();
+    if (r.ok && j.ok) {
+      showToast(j.message || '已切换金额单位');
+      await loadOverview();
+      await loadAlerts();
+      loadTrend(selectedShop.value, selectedMetric.value);
+    } else {
+      showToast(j.message || '切换失败');
+      await loadOverview(); // 还原服务端生效值
+    }
+  } catch (e) {
+    showToast('本地服务异常：' + e.message);
+  }
+}
+
 function selectShop(shopId) {
   selectedShop.value = shopId || '';
   loadTrend(selectedShop.value, selectedMetric.value);
@@ -471,9 +501,10 @@ function onSseEvent(ev) {
     loadRules();
     refreshSoon();
   } else if (ev.type === 'config') {
-    // 其他页面修改了监控店铺配置：同步刷新总览与告警
+    // 其他页面修改了监控店铺配置或金额单位：同步刷新总览/告警/趋势
     loadOverview();
     loadAlerts();
+    loadTrend(selectedShop.value, selectedMetric.value);
   }
 }
 
@@ -611,6 +642,12 @@ onUnmounted(() => {
         <div v-if="reAuthCount > 0" class="stat reauth"><b>{{ reAuthCount }}</b><span>待重新授权</span></div>
       </div>
       <div class="controls">
+        <label class="ctl" title="金额指标展示单位（告警规则阈值始终按人民币配置与比较）">金额
+          <select v-model="overview.currencyMode" class="cur-sel" @change="saveCurrencyMode">
+            <option value="local">当地货币</option>
+            <option value="rmb">人民币</option>
+          </select>
+        </label>
         <label class="ctl" title="投屏/展示模式"><input type="checkbox" v-model="projectMode" />投影</label>
         <label class="ctl" title="P0 告警声音提醒"><input type="checkbox" v-model="soundOn" />声音</label>
         <label class="ctl" title="投影模式下每 20 秒轮换店铺"><input type="checkbox" v-model="rotateOn" />轮播</label>
@@ -646,7 +683,7 @@ onUnmounted(() => {
         <h2>当前没有已授权店铺</h2>
         <p>请先到门户页「开放平台」Tab 完成 App 配置与店铺授权，本大屏会自动开始巡检采集。</p>
       </template>
-      <p class="dim2">授权后无需任何额外设置：打开本页即开始按需巡检（订单履约 10 分钟 / 商品库存 30 分钟 / 账户健康 60 分钟），离开本页自动暂停采集。</p>
+      <p class="dim2">授权后无需任何额外设置：打开本页即开始按需巡检（订单履约 10 分钟 / 商品库存 30 分钟 / 账户健康·广告·资金·售后评价 60 分钟），离开本页自动暂停采集。</p>
     </div>
 
     <!-- ===== 主体三栏 ===== -->
@@ -676,8 +713,13 @@ onUnmounted(() => {
               </span>
             </div>
             <div class="sc-foot" :title="s.lastError && Object.keys(s.lastError).length ? JSON.stringify(s.lastError) : ''">
-              <span v-for="(label, dom) in DOMAIN_LABEL" :key="dom" :class="{ bad: s.failCount[dom] }">
-                {{ label }}{{ s.lastRun[dom] ? '✓' + fmtTime(s.lastRun[dom]) : s.failCount[dom] ? '✗' + s.failCount[dom] + '次' : '·' }}
+              <span
+                v-for="(label, dom) in DOMAIN_LABEL"
+                :key="dom"
+                :class="{ bad: s.failCount[dom], off: s.unsupported && s.unsupported[dom] }"
+                :title="s.unsupported && s.unsupported[dom] ? '该域无权限/未开通，已跳过采集：' + s.unsupported[dom].reason : ''"
+              >
+                {{ label }}{{ s.unsupported && s.unsupported[dom] ? '—' : s.lastRun[dom] ? '✓' + fmtTime(s.lastRun[dom]) : s.failCount[dom] ? '✗' + s.failCount[dom] + '次' : '·' }}
               </span>
             </div>
           </div>
@@ -722,7 +764,7 @@ onUnmounted(() => {
             <text v-if="chartView.last" :x="Math.min(chartView.w - chartView.pad.r - 30, chartView.last.x + 8)" :y="chartView.last.y - 8" class="lastlab">{{ chartView.last.label }}</text>
             <text v-for="t in chartView.xLabels" :key="'x' + t.x" :x="t.x" :y="chartView.h - 8" class="xlab" :text-anchor="t.anchor">{{ t.label }}</text>
           </svg>
-          <div v-else class="chart-empty">暂无「{{ trend.metric.title }}」采样数据，等待采集（订单 10 分钟 / 商品 30 分钟 / 健康 60 分钟）</div>
+          <div v-else class="chart-empty">暂无「{{ trend.metric.title }}」采样数据，等待采集（订单 10 分钟 / 商品 30 分钟 / 健康·广告·资金·售后 60 分钟）</div>
         </div>
 
         <div class="panel matrix-panel">
@@ -819,7 +861,7 @@ onUnmounted(() => {
     <div v-if="rulesDrawer" class="drawer-mask" @click.self="rulesDrawer = false">
       <div class="drawer">
         <h3>告警规则（阈值修改后立即生效）</h3>
-        <p class="dim2">值越大越严重（店铺评分为「越小越严重」）。留空的级别不触发。</p>
+        <p class="dim2">值越大越严重（店铺评分为「越小越严重」）。留空的级别不触发。金额类规则阈值<b>一律按人民币</b>填写与比较（大屏展示可切换当地货币/人民币，告警自动换算）。</p>
         <div class="rule-table">
           <div class="rt-row rt-head">
             <span>启用</span><span>规则</span><span>P2 提醒</span><span>P1 重要</span><span>P0 紧急</span>
@@ -955,6 +997,11 @@ onUnmounted(() => {
 .controls { display: flex; gap: 10px; align-items: center; }
 .ctl { font-size: 12px; color: #aab2c8; display: flex; gap: 4px; align-items: center; cursor: pointer; }
 .ctl input { accent-color: #ee4d2d; }
+.cur-sel {
+  background: #1d2340; color: #dfe3f2; border: 1px solid #2c3560; border-radius: 5px;
+  padding: 2px 4px; font-size: 12px; font-family: inherit; cursor: pointer; outline: none;
+}
+.cur-sel:focus { border-color: #4a5bd8; }
 .btn {
   background: #1d2340; color: #dfe3f2; border: 1px solid #2c3560;
   padding: 6px 12px; border-radius: 7px; font-size: 12px; cursor: pointer;
@@ -978,12 +1025,15 @@ onUnmounted(() => {
 /* ===== 主体 ===== */
 .grid {
   flex: 1; display: grid; min-height: 0;
-  grid-template-columns: 300px 1fr 360px;
+  /* 中间列用 minmax(0,1fr)：19 列矩阵内容很宽，允许中间列收缩、矩阵在面板内横向滚动，
+     否则 1fr 的自动最小宽度会撑爆网格，把右侧告警流挤出屏幕 */
+  grid-template-columns: 300px minmax(0, 1fr) 360px;
   gap: 10px; padding: 10px;
 }
 .panel {
   background: #111527; border: 1px solid #1e2440; border-radius: 10px;
   display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  min-width: 0; /* 允许面板收缩到网格列宽以内（内容由内部滚动容器消化） */
 }
 .panel > h3 {
   font-size: 13px; padding: 10px 12px 8px; color: #dfe3f2;
@@ -991,10 +1041,11 @@ onUnmounted(() => {
 }
 .panel > h3 small { color: #7d86a0; font-weight: 400; font-size: 11px; margin-left: 6px; }
 /* 店铺墙 */
-.shop-list { overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.shop-list { overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .shop-card {
   background: #171b2e; border: 1px solid #232a4a; border-left-width: 3px;
   border-radius: 8px; padding: 8px 10px; cursor: pointer; transition: all 0.15s;
+  flex: none; /* 卡片不随列表高度压缩，溢出交给列表滚动 */
 }
 .shop-card:hover { background: #1c2140; }
 .shop-card.selected { outline: 1px solid #4a5bd8; }
@@ -1018,10 +1069,11 @@ onUnmounted(() => {
 .b-P2 { background: #FFD60A; color: #111; }
 .b-ok { background: rgba(48, 209, 88, 0.2); color: #30D158; }
 .b-reauth { background: rgba(143, 149, 168, 0.25); color: #aab2c8; }
-.sc-foot { display: flex; gap: 10px; margin-top: 6px; font-size: 10px; color: #6d7690; }
+.sc-foot { display: flex; gap: 10px; margin-top: 6px; font-size: 10px; color: #6d7690; flex-wrap: wrap; }
 .sc-foot span.bad, .sc-foot .fail { color: #FF3B30; }
+.sc-foot span.off { color: #4a5162; }
 /* 中间列 */
-.center { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.center { display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0; }
 .trend-panel { flex: 0.8; }
 .tp-head { display: flex; gap: 8px; align-items: center; padding: 8px 12px; flex: none; }
 .tp-shop {
@@ -1077,11 +1129,12 @@ onUnmounted(() => {
   padding: 3px 9px; font-size: 11px; cursor: pointer; font-family: inherit;
 }
 .filter button.active { background: #2b3560; color: #fff; border-color: #4a5bd8; }
-.alert-list { overflow-y: auto; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 8px; }
+.alert-list { overflow-y: auto; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .alert-empty { color: #30D158; text-align: center; padding: 30px 0; font-size: 13px; }
 .alert-item {
   display: flex; background: #171b2e; border: 1px solid #232a4a; border-radius: 8px;
   overflow: hidden; transition: opacity 0.2s;
+  flex: none; /* 条目不随列表高度压缩，避免「确认/关闭」按钮被裁掉；溢出交给列表滚动 */
 }
 .ai-bar { width: 4px; flex: none; }
 .alert-item.recovered { opacity: 0.55; }
@@ -1094,7 +1147,7 @@ onUnmounted(() => {
 .ai-body { flex: 1; padding: 7px 9px; min-width: 0; }
 .ai-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ai-level { font-style: normal; font-size: 10px; padding: 1px 6px; border-radius: 4px; color: #111; font-weight: 700; }
-.ai-head b { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-head b { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ai-shop { font-size: 10px; color: #7d86a0; background: #1d2340; padding: 1px 6px; border-radius: 4px; }
 .ai-time { margin-left: auto; font-size: 10px; color: #6d7690; }
 .ai-msg { font-size: 11px; color: #aab2c8; margin-top: 4px; line-height: 1.5; }

@@ -41,10 +41,12 @@ const {
 } = require('../server/monitor/rules');
 const {
   listOf, orderAgeBuckets, stockOfModel, stockSummary, itemStockState, normalizeHealth,
-  totalOf, orderSnDate,
+  totalOf, orderSnDate, formatDdMmYyyy, normalizeAdsHourly, normalizeBalance, normalizePunishments,
+  violationBreakdown, walletSummary, returnSummary, commentSummary, isPermissionDenied,
 } = require('../server/monitor/collectors');
 const monitorStore = require('../server/monitor/store');
 const monitorEngine = require('../server/monitor/engine');
+const currency = require('../server/monitor/currency');
 
 // ---------- 合成一个可被 probeVideo 解析的 MP4（仅盒结构，无真实媒体数据） ----------
 function box(type, payload) {
@@ -454,6 +456,74 @@ async function run() {
     t('listOf 异常输入返回空数组', listOf(null, ['x']).length === 0 && listOf({}, ['x']).length === 0);
   }
 
+  // ===== 监控：Roadmap 新增域解析纯函数（广告/资金/售后/处罚/明细/权限） =====
+  {
+    t('formatDdMmYyyy 月日补零', formatDdMmYyyy(new Date(2026, 7, 6)) === '06-08-2026', formatDdMmYyyy(new Date(2026, 7, 6)));
+    t('formatDdMmYyyy 年月日不补零', formatDdMmYyyy(new Date(2026, 10, 12)) === '12-11-2026');
+    const agg = normalizeAdsHourly([
+      { expense: 10, direct_gmv: 30, clicks: 5 },
+      { expense: 20, direct_gmv: 70, clicks: 15 },
+      {},
+      null,
+    ]);
+    t('normalizeAdsHourly 聚合花费/ROAS/CPC', agg.spend === 30 && agg.roas === 3.33 && agg.cpc === 1.5, JSON.stringify(agg));
+    t('normalizeAdsHourly 空数据全 null', normalizeAdsHourly([]).spend === null && normalizeAdsHourly(null).roas === null && normalizeAdsHourly([{}]).cpc === null);
+    t('normalizeAdsHourly 零点击不产出 CPC', normalizeAdsHourly([{ expense: 10, direct_gmv: 20, clicks: 0 }]).cpc === null);
+    t('normalizeAdsHourly 零花费不产出 ROAS', normalizeAdsHourly([{ expense: 0, direct_gmv: 20, clicks: 2 }]).roas === null);
+    t('normalizeBalance 读 response.total_balance', normalizeBalance({ response: { total_balance: 12.5 } }) === 12.5);
+    t('normalizeBalance 字符串数字兜底', normalizeBalance({ response: { total_balance: '7.5' } }) === 7.5);
+    t('normalizeBalance 缺失返回 null', normalizeBalance({}) === null && normalizeBalance(null) === null);
+    {
+      const p = normalizePunishments({ response: { total_count: 3, punishment_list: [{ reason: 1 }] } });
+      t('normalizePunishments 优先取 total_count', p.count === 3 && p.detail === 'Tier1×1', JSON.stringify(p));
+      const p2 = normalizePunishments({ response: { punishment_list: [{ reason: 2 }, { reason: 2 }, { reason: 5 }] } });
+      t('normalizePunishments 无 total_count 回退列表长度与级别分布', p2.count === 3 && p2.detail === 'Tier2×2/Tier5×1', JSON.stringify(p2));
+      t('normalizePunishments 空数据 count=0 明细空串', normalizePunishments({ response: {} }).count === 0 && normalizePunishments(null).detail === '');
+    }
+    t('violationBreakdown reason 中文映射聚合', violationBreakdown([{ item_id: 1, reason: 1 }, { item_id: 2, reason: 1 }, { item_id: 3, reason: 2 }, { item_id: 4 }]) === '违禁商品2/假冒商品1');
+    t('violationBreakdown 空列表空串', violationBreakdown([]) === '' && violationBreakdown(null) === '');
+    {
+      const ws = walletSummary([
+        { status: 'PENDING', current_balance: 100, create_time: 1 },
+        { status: 'FAILED', current_balance: 90, create_time: 2 },
+        { status: 'INITIAL', current_balance: 80, create_time: 3 },
+        { status: 'COMPLETED', current_balance: 70, create_time: 4 },
+      ]);
+      t('walletSummary 状态计数与最新余额', ws.pending === 2 && ws.failed === 1 && ws.balance === 70, JSON.stringify(ws));
+      t('walletSummary 空输入全 0/余额 null', walletSummary([]).pending === 0 && walletSummary(null).failed === 0 && walletSummary(null).balance === null);
+      t('walletSummary 状态大小写不敏感', walletSummary([{ status: 'pending', current_balance: 5 }]).pending === 1);
+    }
+    {
+      const now = Date.now();
+      const rs = returnSummary([
+        { reason: 'ITEM_DAMAGED', create_time: Math.floor((now - 3600000) / 1000) },
+        { reason: 'WRONG_ITEM', create_time: Math.floor((now - 2 * 3600000) / 1000) },
+        { reason: 'ITEM_DAMAGED', create_time: Math.floor((now - 3 * 3600000) / 1000) },
+        { reason: 'OTHER', create_time: Math.floor((now - 2 * 86400000) / 1000) }, // 超 24h 不计
+        {},
+      ], now);
+      t('returnSummary 24h 过滤与原因聚合', rs.count === 3 && rs.detail === '商品损坏2/发错商品1', rs.detail);
+      t('returnSummary 未知原因兜底', returnSummary([{ reason: 'XXX', create_time: Math.floor(now / 1000) }], now).detail === 'XXX1');
+      t('returnSummary 空输入全 0', returnSummary([], now).count === 0 && returnSummary(null, now).detail === '');
+    }
+    {
+      const now = Date.now();
+      const cs = commentSummary([
+        { rating_star: 1, comment: '质量差 假货', create_time: Math.floor((now - 3600000) / 1000) },
+        { rating_star: 2, comment: '太慢', create_time: Math.floor((now - 3 * 3600000) / 1000) },
+        { rating_star: 5, comment: '很好', create_time: Math.floor((now - 3600000) / 1000) },
+        { rating_star: 1, comment: '坏了', create_time: Math.floor((now - 2 * 86400000) / 1000) }, // 超 24h 不计
+      ], null, now);
+      t('commentSummary 1~3 星差评过滤', cs.count === 2, JSON.stringify(cs));
+      t('commentSummary 关键词命中明细', cs.detail.includes('质量差') && cs.detail.includes('假货') && cs.detail.includes('太慢'), cs.detail);
+      t('commentSummary 自定义关键词', commentSummary([{ rating_star: 1, comment: '色差', create_time: Math.floor(now / 1000) }], ['色差'], now).detail.includes('「色差」1'));
+      t('commentSummary 空输入全 0', commentSummary([], null, now).count === 0);
+    }
+    t('isPermissionDenied 命中权限类错误', isPermissionDenied('开放平台错误 error_no_permission：you have no permission to access this api') === true
+      && isPermissionDenied('not authorized for this api') === true && isPermissionDenied('无权访问该接口') === true);
+    t('isPermissionDenied 普通错误不误报', isPermissionDenied('网络连接超时') === false && isPermissionDenied('') === false && isPermissionDenied(null) === false);
+  }
+
   // ===== 监控：告警引擎生命周期 =====
   {
     const engine = monitorEngine;
@@ -488,6 +558,63 @@ async function run() {
     engine.ingest('T1', 'order', { 'order.pending_24h': 4 }, now + 360000);
     list = engine.getAlerts({ shopId: 'T1', status: 'open' });
     t('引擎：关闭后再次触发重新打开且 seq+1', list.length === 1 && list[0].seq === seqBefore + 1);
+  }
+
+  // ===== 监控：告警消息明细（ingest 第 5 参 details） =====
+  {
+    const engine = monitorEngine;
+    const now = Date.now();
+    engine.ingest('T4', 'product', { 'product.violations': 2 }, now, { 'product.violations': '明细 违禁商品1/假冒商品1' });
+    let a = engine.getAlerts({ shopId: 'T4' })[0];
+    t('引擎：details 明细拼入新建告警消息', !!a && a.message.includes('明细 违禁商品1/假冒商品1'), a && a.message);
+    engine.ingest('T4', 'product', { 'product.violations': 3 }, now + 60000, { 'product.violations': '明细 违禁商品2/滥用1' });
+    a = engine.getAlerts({ shopId: 'T4' })[0];
+    t('引擎：更新时刷新明细消息', !!a && a.count === 2 && a.message.includes('违禁商品2/滥用1'), a && a.message);
+    engine.ingest('T4', 'product', { 'product.violations': 1 }, now + 120000); // 不带 details
+    a = engine.getAlerts({ shopId: 'T4' })[0];
+    t('引擎：无 details 时消息回退基础文案（向后兼容）', !!a && !a.message.includes('明细'), a && a.message);
+    engine.closeAlert(a.id);
+  }
+
+  // ===== 监控：金额换算（人民币阈值口径 + 全局展示模式） =====
+  {
+    const { toRmb, fromRmb, regionCurrency, symbolOf, moneyText, roundMoney } = currency;
+    t('toRmb 人民币不换算', toRmb(100, 'CNY') === 100);
+    t('toRmb 泰铢按内置汇率换算', toRmb(500, 'THB') === 500 * 0.21, String(toRmb(500, 'THB')));
+    t('toRmb 未知币种按 1:1 保守处理', toRmb(50, 'XXX') === 50);
+    t('toRmb 非数值原样返回', toRmb(null, 'THB') === null && toRmb(undefined, 'THB') === undefined);
+    t('fromRmb 与 toRmb 互逆', Math.abs(fromRmb(toRmb(123.45, 'THB'), 'THB') - 123.45) < 1e-9);
+    t('regionCurrency 地区代码映射（大小写不敏感）', regionCurrency('TH') === 'THB' && regionCurrency('cn') === 'CNY' && regionCurrency('') === '' && regionCurrency(null) === '');
+    t('symbolOf 币种符号与未知兜底', symbolOf('THB') === '฿' && symbolOf('CNY') === '¥' && symbolOf('XXX') === 'XXX');
+    t('moneyText 当地货币展示原始值', moneyText(500, 'THB', 'local') === '500 ฿');
+    t('moneyText 人民币模式换算展示', moneyText(500, 'THB', 'rmb') === '105 元', moneyText(500, 'THB', 'rmb'));
+    t('moneyText 非数值显示 —', moneyText(null, 'THB', 'rmb') === '—');
+    t('roundMoney 保留两位小数', roundMoney(1.234) === 1.23 && roundMoney(105) === 105);
+  }
+  {
+    const engine = monitorEngine;
+    const now = Date.now();
+    monitorStore.patchMeta((meta) => { meta.shops['T5'] = { currency: 'THB' }; });
+    monitorStore.setCurrencyMode('rmb');
+    // ads.spend_today 阈值 p2=100 元（人民币）：500 泰铢 ≈ 105 元 → P2；400 泰铢 ≈ 84 元 → 不触发
+    engine.ingest('T5', 'ads', { 'ads.spend_today': 500 }, now);
+    let a = engine.getAlerts({ shopId: 'T5' })[0];
+    t('引擎：金额指标按人民币换算比较阈值（500泰铢≈105元触发P2）', !!a && a.level === 'P2' && a.current === 500, JSON.stringify(a));
+    engine.ingest('T5', 'ads', { 'ads.spend_today': 400 }, now + 60000);
+    a = engine.getAlerts({ shopId: 'T5' })[0];
+    t('引擎：换算后回落阈值内自动恢复（400泰铢≈84元）', a.status === 'recovered', JSON.stringify(a));
+    engine.ingest('T5', 'ads', { 'ads.spend_today': 500 }, now + 120000);
+    a = engine.getAlerts({ shopId: 'T5' })[0];
+    t('引擎：rmb 模式告警消息换算为人民币', !!a && a.status === 'open' && a.message.includes('105 元'), a && a.message);
+    monitorStore.setCurrencyMode('local');
+    t('引擎：local 模式告警消息为当地货币原始值', monitorEngine.renderAlertMessage(a).includes('500 ฿'), monitorEngine.renderAlertMessage(a));
+    // 未识别币种（CNY）：两种模式数值一致
+    monitorStore.patchMeta((meta) => { meta.shops['T6'] = { currency: 'CNY' }; });
+    monitorStore.setCurrencyMode('rmb');
+    engine.ingest('T6', 'ads', { 'ads.spend_today': 80 }, now);
+    t('引擎：人民币店铺按原值比较不触发', engine.getAlerts({ shopId: 'T6' }).length === 0, JSON.stringify(engine.getAlerts({ shopId: 'T6' })));
+    engine.closeAlert(a.id);
+    monitorStore.setCurrencyMode('rmb');
   }
 
   // ===== 监控：系统自检告警与时间升级 =====

@@ -5,6 +5,7 @@ const {
   ALERT_CAP, EVENT_LOG_CAP, LEVELS, LEVEL_ORDER, METRICS,
 } = require('./constants');
 const { evaluateRule, isMoreSevere } = require('./rules');
+const { toRmb, moneyText } = require('./currency');
 const store = require('./store');
 
 // ---------- 内存态 ----------
@@ -48,7 +49,24 @@ function msgOf(alert) {
   if (alert.domain === 'system') return alert.message || '采集异常';
   const m = METRICS[alert.metric] || {};
   const unit = alert.unit || m.unit || '';
+  // 金额指标：按当前全局模式展示（当地货币原始值 / 换算人民币）
+  if (m.unit === '元') {
+    return `当前 ${moneyText(alert.current, shopCurrency(alert.shopId), store.getCurrencyMode())}，触发 ${alert.level} 阈值`;
+  }
   return `当前 ${alert.current}${unit}，触发 ${alert.level} 阈值`;
+}
+
+/** 店铺当地货币（未识别按人民币处理） */
+function shopCurrency(shopId) {
+  const meta = store.getMeta();
+  const m = (meta.shops && meta.shops[shopId]) || {};
+  return String(m.currency || 'CNY');
+}
+
+/** 规则比较值：金额指标按人民币阈值比较，先换算；其余指标原值 */
+function compareValue(metricId, v, shopId) {
+  if ((METRICS[metricId] || {}).unit === '元') return toRmb(v, shopCurrency(shopId));
+  return v;
 }
 
 /** 按 (shopId, ruleId) 找告警记录 */
@@ -56,21 +74,29 @@ function findAlert(shopId, ruleId) {
   return alerts.find((a) => a.shopId === shopId && a.ruleId === ruleId);
 }
 
+/** 告警消息文本：基础消息 + 可选明细（如「明细 违禁商品2/假冒商品1」） */
+function msgWithDetail(alert, details) {
+  const base = msgOf(alert);
+  const d = details && details[alert.metric] ? String(details[alert.metric]) : '';
+  return d ? base + '；' + d : base;
+}
+
 /**
  * 指标快照入库：逐指标评估规则，触发/升级/去重计数。
  * @param {string} shopId
- * @param {string} domain 采集域（order/product/health）
+ * @param {string} domain 采集域（order/product/health/ads/funds/aftersale）
  * @param {object} metrics { metricId: number }
  * @param {number} at 采样时间（ms）
+ * @param {object} [details] { metricId: 明细文本 }，拼入告警消息（如问题商品原因分布/退货原因聚合）
  */
-function ingest(shopId, domain, metrics, at) {
+function ingest(shopId, domain, metrics, at, details) {
   const now = at || Date.now();
   const rulesById = store.getRulesById();
   const changed = [];
   for (const [metric, v] of Object.entries(metrics || {})) {
     const rule = rulesById[metric];
     if (!rule || rule.enabled === false) continue;
-    const level = evaluateRule(rule, v);
+    const level = evaluateRule(rule, compareValue(metric, v, shopId));
     const existing = findAlert(shopId, rule.id);
     if (!level) {
       if (existing) existing.current = v; // 未触发但告警开着：更新当前值，供恢复判断
@@ -97,7 +123,7 @@ function ingest(shopId, domain, metrics, at) {
         suggest: rule.suggest,
         message: '',
       };
-      a.message = msgOf(a);
+      a.message = msgWithDetail(a, details);
       alerts.push(a);
       changed.push(Object.assign({}, a, { change: 'new' }));
       continue;
@@ -113,7 +139,7 @@ function ingest(shopId, domain, metrics, at) {
       existing.lastAt = now;
       existing.updatedAt = now;
       existing.recoveredAt = null;
-      existing.message = msgOf(existing);
+      existing.message = msgWithDetail(existing, details);
       changed.push(Object.assign({}, existing, { change: 'reopen' }));
       continue;
     }
@@ -122,7 +148,7 @@ function ingest(shopId, domain, metrics, at) {
     existing.count = (existing.count || 1) + 1;
     const escalated = isMoreSevere(level, existing.level);
     if (escalated) existing.level = level;
-    existing.message = msgOf(existing);
+    existing.message = msgWithDetail(existing, details);
     if (existing.status === 'recovered') existing.status = 'open';
     existing.updatedAt = now;
     changed.push(Object.assign({}, existing, { change: escalated ? 'escalate' : 'update' }));
@@ -148,7 +174,7 @@ function maintain(now) {
     const rule = rulesById[a.ruleId];
     if (!rule) continue;
     if (a.domain !== 'system') {
-      const level = evaluateRule(rule, a.current);
+      const level = evaluateRule(rule, compareValue(a.metric, a.current, a.shopId));
       if (!level) {
         a.status = 'recovered';
         a.recoveredAt = t;
@@ -332,5 +358,8 @@ module.exports = {
   replayTo,
   broadcast,
   flushAlerts,
+  // 按当前金额单位模式重新渲染告警消息（金额指标随模式切换换算；路由层读取告警时调用）
+  renderAlertMessage: msgOf,
+  shopCurrency,
   _test: { alerts },
 };

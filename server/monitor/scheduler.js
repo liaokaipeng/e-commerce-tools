@@ -8,7 +8,8 @@
 // 离开页面即停采（前端发离开事件），心跳超时（PRESENCE_LEASE_MS）自动兜底停采。
 // **监控开关**：店铺在监控配置（config.json 排除名单）之外的才采集，未启用监控的店铺跳过。
 const { JOBS } = require('./constants');
-const { collectDomain, fetchShopName } = require('./collectors');
+const { collectDomain, fetchShopInfo } = require('./collectors');
+const { regionCurrency, ensureRates } = require('./currency');
 const engine = require('./engine');
 const store = require('./store');
 const openapiStore = require('../openapi/store');
@@ -70,6 +71,8 @@ function metaShop(shopId) {
     lastRun: m.lastRun || {},
     failCount: m.failCount || {},
     consecutiveFails: m.consecutiveFails || 0,
+    unsupported: m.unsupported || {},
+    currency: m.currency || '',
   };
 }
 
@@ -108,6 +111,21 @@ async function runJob(shopId, domain) {
   const now = Date.now();
   try {
     const result = await collectDomain(shopId, domain);
+    // 权限不足：该店该域不支持（App 未开通对应模块权限），按正常间隔退避、不计数失败、不触发系统自检告警
+    if (result.unsupported) {
+      state.lastRun[shopId] = state.lastRun[shopId] || {};
+      state.lastRun[shopId][domain] = now;
+      store.patchMeta((meta) => {
+        if (!meta.shops[shopId]) meta.shops[shopId] = {};
+        const m = meta.shops[shopId];
+        if (!m.lastRun) m.lastRun = {};
+        m.lastRun[domain] = now;
+        if (!m.unsupported) m.unsupported = {};
+        m.unsupported[domain] = { at: now, reason: String(result.reason || '无权限').slice(0, 200) };
+      });
+      engine.broadcast('collection', { shopId, domain, ok: true, skipped: 'unsupported', at: now, note: result.reason });
+      return true;
+    }
     const metrics = {};
     for (const [k, v] of Object.entries(result.metrics || {})) {
       if (typeof v === 'number' && isFinite(v)) {
@@ -122,18 +140,26 @@ async function runJob(shopId, domain) {
         if (!m.latest) m.latest = {};
         for (const [k, v] of Object.entries(metrics)) m.latest[k] = { v, at: now };
       });
-      engine.ingest(shopId, domain, metrics, now);
+      engine.ingest(shopId, domain, metrics, now, result.details);
     }
     engine.systemOk(shopId, now);
-    // 首次采集时补店铺名（失败不阻断）
-    if (!metaShop(shopId).name) {
-      const name = await fetchShopName(shopId);
-      if (name) store.patchMeta((meta) => {
-        if (!meta.shops[shopId]) meta.shops[shopId] = {};
-        meta.shops[shopId].name = name;
-        const s = state.shops.find((x) => x.shopId === shopId);
-        if (s) s.name = name;
-      });
+    // 首次采集时补店铺名与当地币种（get_shop_info 的 region → 货币代码；失败不阻断）
+    const cur = metaShop(shopId);
+    if (!cur.name || !cur.currency) {
+      const info = await fetchShopInfo(shopId);
+      if (info) {
+        store.patchMeta((meta) => {
+          if (!meta.shops[shopId]) meta.shops[shopId] = {};
+          const m = meta.shops[shopId];
+          if (info.name) {
+            m.name = info.name;
+            const s = state.shops.find((x) => x.shopId === shopId);
+            if (s) s.name = info.name;
+          }
+          if (info.region) m.currency = regionCurrency(info.region) || 'CNY';
+          else if (!m.currency) m.currency = 'CNY'; // 接口无地区字段：按人民币处理，避免每轮重复拉取
+        });
+      }
     }
     store.patchMeta((meta) => {
       if (!meta.shops[shopId]) meta.shops[shopId] = {};
@@ -224,6 +250,7 @@ function start() {
   if (state.timer.unref) state.timer.unref();
   if (state.shops.length) {
     console.log(`[监控] 采集调度已就绪：${state.shops.length} 个店铺，仅在大屏页面打开时按需巡检`);
+    ensureRates(); // 有店铺时懒加载汇率（在线拉取失败自动回退内置静态表；无店铺不发外部请求）
   }
 }
 

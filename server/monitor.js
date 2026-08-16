@@ -16,6 +16,7 @@
 const { sendJson, sse, readBody } = require('./lib/http-utils');
 const { MATRIX_METRICS, METRICS } = require('./monitor/constants');
 const { levelOf } = require('./monitor/rules');
+const { toRmb, fromRmb, roundMoney, symbolOf, ensureRates } = require('./monitor/currency');
 const store = require('./monitor/store');
 const engine = require('./monitor/engine');
 const scheduler = require('./monitor/scheduler');
@@ -30,17 +31,27 @@ async function parseBody(req) {
   }
 }
 
-/** 单店大屏数据：最新指标 + 矩阵定级 */
+/** 指标是否为金额类（单位「元」；阈值按人民币比较、展示按全局模式换算） */
+function isMoneyMetric(metricId) {
+  return (METRICS[metricId] || {}).unit === '元';
+}
+
+/** 单店大屏数据：最新指标 + 矩阵定级（金额指标按全局模式换算展示、按人民币定级） */
 function shopView(shopId, name) {
   const meta = store.getMeta();
   const m = (meta.shops && meta.shops[shopId]) || {};
   const latest = m.latest || {};
   const rulesById = store.getRulesById();
+  const mode = store.getCurrencyMode();
+  const currency = String(m.currency || 'CNY');
   const matrix = MATRIX_METRICS.map((metric) => {
     const p = latest[metric];
     const v = p && typeof p.v === 'number' ? p.v : null;
-    const { level } = levelOf(metric, v, rulesById);
-    return { metric, v, at: p ? p.at : null, level };
+    const money = isMoneyMetric(metric);
+    // 级别用人民币换算值比较（阈值口径固定人民币）；展示值按模式换算
+    const { level } = levelOf(metric, money && v != null ? toRmb(v, currency) : v, rulesById);
+    const display = money && v != null && mode === 'rmb' ? roundMoney(toRmb(v, currency)) : v;
+    return { metric, v: display, at: p ? p.at : null, level };
   });
   return {
     shopId,
@@ -49,6 +60,8 @@ function shopView(shopId, name) {
     failCount: m.failCount || {},
     consecutiveFails: m.consecutiveFails || 0,
     lastError: m.lastError || {},
+    unsupported: m.unsupported || {},
+    currency: currency,
     latest,
     matrix,
   };
@@ -73,6 +86,7 @@ function register({ get, post }) {
       totals: sum.totals,
       reAuthCount: shops.filter((s) => s.authBroken).length,
       excludedCount: sched.shops.length - shops.length,
+      currencyMode: store.getCurrencyMode(),
       metrics: METRICS,
       shops,
       at: Date.now(),
@@ -80,6 +94,7 @@ function register({ get, post }) {
   });
 
   // 告警列表（?level=&shopId=&status=&limit=，默认不含 closed；未启用监控店铺的告警不展示）
+  // 金额告警消息按当前全局金额单位模式重新渲染（切换模式后无需重启即生效）
   get('/api/monitor/alerts', (req, res, url) => {
     const q = url.searchParams;
     const excluded = store.getExcludedShopIds();
@@ -90,7 +105,7 @@ function register({ get, post }) {
         shopId: q.get('shopId') || '',
         status: q.get('status') || '',
         limit: Number(q.get('limit')) || 0,
-      }).filter((a) => !excluded.has(a.shopId)),
+      }).filter((a) => !excluded.has(a.shopId)).map((a) => Object.assign({}, a, { message: engine.renderAlertMessage(a) })),
     });
   });
 
@@ -109,7 +124,7 @@ function register({ get, post }) {
     }
   });
 
-  // 指标趋势（?shopId=&metric=&days=7）：采样点 + 阈值（画参考线用）
+  // 指标趋势（?shopId=&metric=&days=7）：采样点 + 阈值（画参考线用）；金额指标按模式换算展示
   get('/api/monitor/trend', (req, res, url) => {
     const shopId = String(url.searchParams.get('shopId') || '').trim();
     const metric = String(url.searchParams.get('metric') || '').trim();
@@ -120,11 +135,33 @@ function register({ get, post }) {
     }
     const m = METRICS[metric];
     const rule = store.getRulesById()[metric];
+    const meta = store.getMeta();
+    const shopMeta = (meta.shops && meta.shops[shopId]) || {};
+    const currency = String(shopMeta.currency || 'CNY');
+    const mode = store.getCurrencyMode();
+    let points = store.readTrend(shopId, metric, days);
+    let thresholds = (rule && rule.thresholds) || null;
+    let unit = (m || {}).unit || '';
+    if (isMoneyMetric(metric)) {
+      if (mode === 'rmb') {
+        points = points.map((p) => ({ at: p.at, v: roundMoney(toRmb(p.v, currency)) }));
+      } else {
+        // 当地货币展示：阈值参考线同步换算成当地金额（阈值口径固定人民币）
+        unit = symbolOf(currency);
+        if (thresholds) {
+          const th = {};
+          for (const [k, v] of Object.entries(thresholds)) {
+            if (typeof v === 'number') th[k] = roundMoney(fromRmb(v, currency));
+          }
+          thresholds = th;
+        }
+      }
+    }
     sendJson(res, 200, {
       ok: true,
-      metric: Object.assign({}, m || {}, { id: metric }),
-      thresholds: (rule && rule.thresholds) || null,
-      points: store.readTrend(shopId, metric, days),
+      metric: Object.assign({}, m || {}, { id: metric, unit }),
+      thresholds,
+      points,
     });
   });
 
@@ -171,6 +208,24 @@ function register({ get, post }) {
       scheduler.notifyConfigChanged();
       engine.broadcast('config', { at: Date.now() });
       sendJson(res, 200, { ok: true, excludedShopIds: [...after], message: '监控店铺配置已保存' });
+    } catch (e) {
+      sendJson(res, 400, { ok: false, message: e.message });
+    }
+  });
+
+  // 金额单位模式：GET 读取全局设置；POST 保存 { mode: 'local' | 'rmb' }（默认 local 当地货币）。
+  // 规则面板的金额阈值始终按人民币配置与比较，模式只影响大屏金额展示（矩阵/趋势/告警消息）。
+  get('/api/monitor/currency-config', (req, res) => {
+    sendJson(res, 200, { ok: true, mode: store.getCurrencyMode() });
+  });
+
+  post('/api/monitor/currency-config', async (req, res) => {
+    try {
+      const body = await parseBody(req);
+      const mode = store.setCurrencyMode(String(body && body.mode || ''));
+      if (openapiStore.status().shops.length) ensureRates(); // 有店铺时顺带刷新汇率（异步，不阻塞响应）
+      engine.broadcast('config', { at: Date.now() });
+      sendJson(res, 200, { ok: true, mode, message: mode === 'rmb' ? '金额展示已切换为人民币（阈值仍按人民币比较）' : '金额展示已切换为当地货币（阈值仍按人民币比较）' });
     } catch (e) {
       sendJson(res, 400, { ok: false, message: e.message });
     }

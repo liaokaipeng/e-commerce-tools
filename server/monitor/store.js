@@ -111,8 +111,34 @@ function isMonitored(shopId) {
 function setExcludedShopIds(ids) {
   if (!Array.isArray(ids)) throw new Error('excludedShopIds 必须是数组');
   excludedShopIds = new Set(ids.map(String).filter(Boolean));
-  writeJson(CONFIG_FILE, { excludedShopIds: [...excludedShopIds] });
+  writeJson(CONFIG_FILE, Object.assign({}, readJson(CONFIG_FILE, {}), { excludedShopIds: [...excludedShopIds] }));
   return excludedShopIds;
+}
+
+// ---------- 金额单位模式（config.json：currencyMode，大屏金额展示全局切换） ----------
+// 语义：'local'（默认，当地货币展示）/ 'rmb'（换算人民币展示）；规则面板金额阈值一律按人民币配置与比较。
+const VALID_CURRENCY_MODES = ['local', 'rmb'];
+
+function loadCurrencyMode() {
+  const c = readJson(CONFIG_FILE, {});
+  const m = String(c.currencyMode || 'local');
+  return VALID_CURRENCY_MODES.includes(m) ? m : 'local';
+}
+
+let currencyMode = loadCurrencyMode();
+
+/** 当前金额单位模式（'local' | 'rmb'） */
+function getCurrencyMode() {
+  return currencyMode;
+}
+
+/** 保存金额单位模式（校验后写盘），返回生效值 */
+function setCurrencyMode(mode) {
+  const m = String(mode || '');
+  if (!VALID_CURRENCY_MODES.includes(m)) throw new Error('无效的金额单位模式：' + m + '（可选 local / rmb）');
+  currencyMode = m;
+  writeJson(CONFIG_FILE, Object.assign({}, readJson(CONFIG_FILE, {}), { currencyMode: m }));
+  return currencyMode;
 }
 
 // ---------- 告警（全量落盘，由引擎调用） ----------
@@ -215,6 +241,8 @@ module.exports = {
   getExcludedShopIds,
   isMonitored,
   setExcludedShopIds,
+  getCurrencyMode,
+  setCurrencyMode,
   loadAlerts,
   saveAlerts,
   appendSample,

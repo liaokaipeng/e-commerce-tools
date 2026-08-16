@@ -307,11 +307,13 @@ async function run() {
       const ov = await req('GET', '/api/monitor/overview');
       const ovj = JSON.parse(ov.text);
       t('GET /api/monitor/overview 返回 200 且结构完整', ov.status === 200 && ovj.ok === true && Array.isArray(ovj.shops) && ovj.shops.length === 0 && ovj.totals.P0 === 0 && 'configured' in ovj && 'excludedCount' in ovj && ovj.excludedCount === 0, ov.text);
+      t('GET /api/monitor/overview metrics 含新增域指标', ovj.metrics && ovj.metrics['ads.balance'] && ovj.metrics['funds.pending_txn'] && ovj.metrics['aftersale.returns_24h'] && ovj.metrics['health.punishments'], JSON.stringify(Object.keys(ovj.metrics || {})));
       const al = await req('GET', '/api/monitor/alerts');
       t('GET /api/monitor/alerts 返回空列表', al.status === 200 && JSON.parse(al.text).ok === true && JSON.parse(al.text).alerts.length === 0, al.text);
       const ru = await req('GET', '/api/monitor/rules');
       const ruj = JSON.parse(ru.text);
       t('GET /api/monitor/rules 返回默认规则', ru.status === 200 && ruj.ok === true && Array.isArray(ruj.rules) && ruj.rules.length >= 11, ru.text);
+      t('GET /api/monitor/rules 包含新增域规则', ruj.rules.some((r) => r.id === 'ads.balance') && ruj.rules.some((r) => r.id === 'aftersale.negative_24h') && ruj.rules.some((r) => r.id === 'funds.pending_txn') && ruj.rules.some((r) => r.id === 'health.punishments'), ruj.rules.map((r) => r.id).join(','));
       const tr = await req('GET', '/api/monitor/trend?shopId=x&metric=order.pending_24h&days=7');
       const trj = JSON.parse(tr.text);
       t('GET /api/monitor/trend 无数据返回空点集', tr.status === 200 && trj.ok === true && Array.isArray(trj.points) && trj.points.length === 0 && trj.metric.id === 'order.pending_24h', tr.text);
@@ -342,6 +344,19 @@ async function run() {
       t('配置保存后 GET 可见且默认无店铺（未授权）', scg2.ok === true && scg2.shops.length === 0, JSON.stringify(scg2));
       const scpReset = await req('POST', '/api/monitor/shops-config', { excludedShopIds: [] });
       t('POST /api/monitor/shops-config 清空排除名单恢复默认', scpReset.status === 200 && JSON.parse(scpReset.text).ok === true, scpReset.text);
+      // 金额单位模式（阈值口径固定人民币；展示模式全局切换，默认当地货币）
+      const cg = await req('GET', '/api/monitor/currency-config');
+      const cgj = JSON.parse(cg.text);
+      t('GET /api/monitor/currency-config 默认当地货币', cg.status === 200 && cgj.ok === true && cgj.mode === 'local', cg.text);
+      const cbBad = await req('POST', '/api/monitor/currency-config', { mode: 'usd' });
+      t('POST /api/monitor/currency-config 非法模式返回 400', cbBad.status === 400, cbBad.text);
+      const cb = await req('POST', '/api/monitor/currency-config', { mode: 'rmb' });
+      const cbj = JSON.parse(cb.text);
+      t('POST /api/monitor/currency-config 切换人民币生效', cb.status === 200 && cbj.ok === true && cbj.mode === 'rmb', cb.text);
+      const ovCur = JSON.parse((await req('GET', '/api/monitor/overview')).text);
+      t('GET /api/monitor/overview 透出 currencyMode', ovCur.currencyMode === 'rmb');
+      const cbReset = await req('POST', '/api/monitor/currency-config', { mode: 'local' });
+      t('POST /api/monitor/currency-config 还原当地货币', cbReset.status === 200 && JSON.parse(cbReset.text).mode === 'local', cbReset.text);
       const stt = await req('GET', '/api/monitor/status');
       const sttj = JSON.parse(stt.text);
       t('GET /api/monitor/status 返回运行状态', stt.status === 200 && sttj.ok === true && sttj.running === true && Array.isArray(sttj.shops) && sttj.shops.length === 0, stt.text);
