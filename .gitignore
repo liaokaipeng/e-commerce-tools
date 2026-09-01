@@ -20,5 +20,8 @@ server/data/
 # 研究用临时工具（Playwright 抓包等，含登录态与抓包数据，整体不入库）
 research/
 
+# HAR 抓包文件（含登录 Cookie，不入库）
+*.har
+
 .DS_Store
 Thumbs.db
