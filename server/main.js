@@ -8,6 +8,7 @@
 //   /tiktok/          TikTok 下载
 //   /bidding/         Shopee 竞价导出
 //   /bidding-cancel/  Shopee 取消竞价
+//   /hotlisting-cancel/  Shopee 取消注册 Hot Listing
 //   /video/           Shopee 视频上传
 // main.js 只负责「路由注册 + 静态服务 + 服务启动」，业务路由与 SSE 由各模块 register 提供。
 const http = require('http');
@@ -18,9 +19,11 @@ const settings = require('./lib/settings');
 const tiktok = require('./tiktok');
 const bidding = require('./bidding');
 const biddingCancel = require('./bidding-cancel');
+const hotlistingCancel = require('./hotlisting-cancel');
 const video = require('./video');
 const openapi = require('./openapi');
 const monitor = require('./monitor');
+const productExport = require('./product-export');
 
 const PORT = process.env.PORT || 8765;
 // 前端为 Vite 构建产物（frontend/dist），由 main.js 托管
@@ -35,9 +38,11 @@ function post(p, fn) { routes.push({ m: 'POST', p, fn }); }
 tiktok.register({ get, post });
 bidding.register({ get, post });
 biddingCancel.register({ get, post });
+hotlistingCancel.register({ get, post });
 video.register({ get, post });
 openapi.register({ get, post });
 monitor.register({ get, post });
+productExport.register({ get, post });
 
 // ============ 工具默认目录（settings.json 持久化） ============
 // GET  /api/settings            读取各工具默认目录
@@ -48,6 +53,7 @@ get('/api/settings', (req, res) => {
     defaults: {
       tiktok: settings.getDefault('tiktok'),
       bidding: settings.getDefault('bidding'),
+      'product-export': settings.getDefault('product-export'),
     },
   });
 });
@@ -55,7 +61,7 @@ get('/api/settings', (req, res) => {
 post('/api/settings', async (req, res) => {
   try {
     const { tool, dir } = JSON.parse(await readBody(req));
-    if (tool !== 'tiktok' && tool !== 'bidding') {
+    if (tool !== 'tiktok' && tool !== 'bidding' && tool !== 'product-export') {
       sendJson(res, 400, { ok: false, message: '无效的工具' });
       return;
     }
@@ -158,11 +164,11 @@ server.on('error', (e) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log('==============================================');
-  console.log('  工具合集（Shopee：竞价导出 / 取消竞价 / 视频上传；TikTok：视频下载）');
+  console.log('  工具合集（Shopee：竞价导出 / 取消竞价 / 取消Hot Listing / 视频上传；TikTok：视频下载）');
   console.log('  请打开浏览器访问: http://127.0.0.1:' + PORT);
   console.log('==============================================');
   console.log('  - TikTok 下载     此页面即可直接使用');
-  console.log('  - 竞价导出/取消竞价：需先装扩展并点「发送登录信息到本地工具」');
+  console.log('  - 竞价导出/取消竞价/商品导出/取消Hot Listing：需先装扩展并点「发送登录信息到本地工具」');
   console.log('  - 视频上传：需先装扩展，在短视频页手动上传一次视频抓取凭证');
   console.log('  - 开放平台：录入 App 后生成授权链接登录（回调 redirect 后台与本工具填一致，默认 https://example.com/，授权后粘贴回调链接完成）');
   console.log('  - 监控大屏：开放平台授权店铺后自动巡检采集，/monitor/ 查看三级告警大屏');

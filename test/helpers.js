@@ -57,7 +57,7 @@ function startServer() {
 
   const settingsFile = path.join(ROOT, 'server', 'data', 'settings.json');
   const settingsBackup = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile) : null;
-  const sessionFiles = ['bidding-session.json', 'video-session.json', 'openapi-session.json'].map((f) => path.join(ROOT, 'server', 'data', f));
+  const sessionFiles = ['bidding-session.json', 'video-session.json', 'openapi-session.json', 'hotlisting-spu.json'].map((f) => path.join(ROOT, 'server', 'data', f));
   const sessionBackups = sessionFiles.map((fp) => (fs.existsSync(fp) ? fs.readFileSync(fp) : null));
 
   return {

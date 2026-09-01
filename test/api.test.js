@@ -45,7 +45,7 @@ async function run() {
     }
 
     console.log('  -- 页面静态资源 --');
-    for (const p of ['/', '/tiktok/', '/bidding/', '/bidding-cancel/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/openapi/', '/monitor/', '/xlsx.full.min.js']) {
+    for (const p of ['/', '/tiktok/', '/bidding/', '/bidding-cancel/', '/hotlisting-cancel/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/openapi/', '/monitor/', '/product-export/', '/xlsx.full.min.js']) {
       const r = await req('GET', p);
       t(`GET ${p} 返回 200`, r.status === 200, `status=${r.status}`);
     }
@@ -157,6 +157,88 @@ async function run() {
         }
       }
       t('无登录 Cookie 时 run 广播 fatal 事件', events.some((e) => e.type === 'fatal'), JSON.stringify(events));
+    }
+
+    console.log('  -- 取消注册 Hot Listing API --');
+    {
+      // SPU 配置读取/保存
+      const c1 = await req('GET', '/api/hotlisting-cancel/spu-config');
+      t('GET /api/hotlisting-cancel/spu-config 返回 200', c1.status === 200 && JSON.parse(c1.text).ok === true, c1.text);
+      const c2 = await req('POST', '/api/hotlisting-cancel/spu-config', { map: { 953673451: '42555837160\n123' } });
+      t('POST spu-config 保存成功并归一化', c2.status === 200 && JSON.parse(c2.text).map['953673451'] === '42555837160\n123', c2.text);
+      const c3 = await req('GET', '/api/hotlisting-cancel/spu-config');
+      t('保存后可读回', JSON.parse(c3.text).map['953673451'] === '42555837160\n123', c3.text);
+      // 清理（保存空 map），避免影响后续用例
+      await req('POST', '/api/hotlisting-cancel/spu-config', { map: {} });
+
+      const r = await req('POST', '/api/hotlisting-cancel/preview', { shopIds: [] });
+      t('POST /api/hotlisting-cancel/preview 未选店铺返回 400', r.status === 400, `status=${r.status}`);
+      const r2 = await req('POST', '/api/hotlisting-cancel/run', { shopIds: [] });
+      t('POST /api/hotlisting-cancel/run 未选店铺返回 400', r2.status === 400, `status=${r2.status}`);
+      // 有店铺但未配置 SPU（请求体空 map 即「清空也生效」语义）
+      const r3 = await req('POST', '/api/hotlisting-cancel/preview', { shopIds: ['953673451'], spuMap: {} });
+      t('preview 无 SPU 配置返回 400', r3.status === 400 && JSON.parse(r3.text).msg.includes('SPU'), r3.text);
+      // 无登录会话（上一用例已删除 bidding-session.json）：返回友好提示，不触达真实站点
+      const r4 = await req('POST', '/api/hotlisting-cancel/preview', { shopIds: ['953673451'], spuMap: { 953673451: '42555837160' } });
+      t('无登录 Cookie 时 preview 返回 400 且提示 Cookie', r4.status === 400 && JSON.parse(r4.text).msg.includes('Cookie'), r4.text);
+      // 暂停/继续：不存在的 jobId 返回 404
+      const p1 = await req('POST', '/api/hotlisting-cancel/pause', { jobId: 'job_not_exist' });
+      t('POST pause 无效 jobId 返回 404', p1.status === 404, `status=${p1.status}`);
+      const p2 = await req('POST', '/api/hotlisting-cancel/resume', { jobId: 'job_not_exist' });
+      t('POST resume 无效 jobId 返回 404', p2.status === 404, `status=${p2.status}`);
+
+      const resp = await fetch(BASE + '/api/hotlisting-cancel/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shopIds: ['953673451'], spuMap: { 953673451: '42555837160' } }),
+      });
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      const events = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const line = part.split('\n').find((l) => l.startsWith('data: '));
+          if (!line) continue;
+          try { events.push(JSON.parse(line.slice(6))); } catch { /* 忽略无法解析的事件 */ }
+        }
+      }
+      t('无登录 Cookie 时 run 广播 fatal 事件', events.some((e) => e.type === 'fatal'), JSON.stringify(events));
+    }
+
+    console.log('  -- 商品数据导出 API --');
+    {
+      const r = await req('POST', '/api/product-export/export', { shopIds: [], dir: '' });
+      t('POST /api/product-export/export 未选店铺返回 400', r.status === 400, `status=${r.status}`);
+      // 无登录会话（上一用例已删除 bidding-session.json）：SSE 报出 Cookie 提示后结束，不触达真实站点
+      const resp = await fetch(BASE + '/api/product-export/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shopIds: ['557630453'], dir: '' }),
+      });
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      const events = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const line = part.split('\n').find((l) => l.startsWith('data: '));
+          if (!line) continue;
+          try { events.push(JSON.parse(line.slice(6))); } catch { /* 忽略无法解析的事件 */ }
+        }
+      }
+      t('无登录 Cookie 时 export SSE 报告 done 失败且提示 Cookie', events.some((e) => e.type === 'done' && e.ok === false && e.msg.includes('Cookie')), JSON.stringify(events));
+      t('无登录 Cookie 时 export SSE 正常收尾 summary', events.some((e) => e.type === 'summary'), JSON.stringify(events));
     }
 
     console.log('  -- 视频上传 API --');
