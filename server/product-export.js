@@ -27,6 +27,8 @@ const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
 // 会话 / Cookie / 卖家中心域名 / 接口请求层：与竞价导出、取消竞价、取消 Hot Listing 共用同一实现
 const { HOST, apiGet, buildShopeeUrl, fetchShopRegion } = require('./lib/shopee-session');
 const { ensureDir, timestampText, styleExcelHeader } = require('./lib/export-utils');
+// 重试骨架统一走 lib/retry.js
+const { retry } = require('./lib/retry');
 
 const API_LIST = '/api/v3/opt/mpsku/list/v2/get_product_list';
 const API_INFO = '/api/v3/product/get_product_info';
@@ -348,21 +350,19 @@ async function fetchProductList(cookie, shopId, emit) {
 
 /** 拉取单个商品详情（失败返回 null，由调用方降级为列表数据） */
 async function fetchProductInfo(cookie, shopId, productId) {
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
+  try {
+    // 详情接口偶发抖动：立即重试 1 次（无退避，实测量级下等待无收益）
+    return await retry(async () => {
       const url = buildShopeeUrl(API_INFO, {
         shopId, spcCds: cookie.spcCds, business: { product_id: productId, is_draft: false },
       });
       const j = await apiGet(url, cookie.header, { referer: REFERER, label: `拉取商品 ${productId} 详情` });
       return (j.data && j.data.product_info) || null;
-    } catch (e) {
-      if (attempt === 2) {
-        console.warn(`拉取商品 ${productId} 详情失败（已重试）: ${e.message}`);
-        return null;
-      }
-    }
+    }, { attempts: 2, waitOf: () => 0 });
+  } catch (e) {
+    console.warn(`拉取商品 ${productId} 详情失败（已重试）: ${e.message}`);
+    return null;
   }
-  return null;
 }
 
 /** 并发小池：把任务数组以固定并发跑完（结果保持顺序） */

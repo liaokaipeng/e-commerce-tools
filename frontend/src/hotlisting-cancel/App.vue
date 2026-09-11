@@ -1,19 +1,20 @@
 <script setup>
+// Shopee 取消注册 Hot Listing：按店铺配置 SPU → 扫描已注册 SKU → 批量取消注册（可暂停 / 继续 / 取消）。
+// 通用能力与「取消竞价」页共用：useShopeeSession / useLog / useBatchJob / PreviewTableCard。
 import { ref, computed, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import LoginCard from '../components/LoginCard.vue';
 import StorePicker from '../components/StorePicker.vue';
-import LogPanel from '../components/LogPanel.vue';
+import PreviewTableCard from '../components/PreviewTableCard.vue';
 import { useShopeeSession } from '../composables/useShopeeSession.js';
-import { useLog, runSSE } from '../composables/useToolPage.js';
+import { useLog } from '../composables/useToolPage.js';
+import { useBatchJob, usePreviewScan } from '../composables/useBatchJob.js';
 
-// ---------- 登录状态 + 店铺列表（与竞价导出/取消竞价共用） ----------
 const {
   status, refreshing, flash, refreshStatus,
   stores, selected, selCount, clearAll,
 } = useShopeeSession('Cookie 已就绪，可直接选择店铺操作。');
 
-// ---------- 日志 ----------
 const { logLines, log, clear: clearLog } = useLog();
 
 // ---------- 各店铺 SPU 配置（持久化到后端，编辑后自动保存） ----------
@@ -69,108 +70,79 @@ function onSpuInput() {
 onMounted(loadSpuConfig);
 
 // ---------- 扫描（预览已注册 SKU） ----------
-const scanning = ref(false);
-const previewRows = ref([]);
-const totalSkuCount = computed(() => previewRows.value.reduce((n, s) => n + (s.skuCount || 0), 0));
-const previewDone = ref(false);
-
 function buildPayload() {
   return { shopIds: [...selected], spuMap: { ...spuMap.value } };
 }
 
-async function doScan() {
-  if (selected.size === 0) {
-    ElMessage.warning('请先选择至少一个店铺');
-    return;
+// 已注册 SKU 数（SPU 级行）
+const skuCountOf = (row) => row.skuCount || 0;
+
+const scan = usePreviewScan({
+  url: '/api/hotlisting-cancel/preview',
+  log,
+  summarize: (s) => {
+    if (!s.ok) return { ok: false, count: 0, msg: `✕ ${s.name}（${s.shopId}）扫描失败：${s.msg}` };
+    const n = (s.spus || []).reduce((a, p) => a + (p.skuCount || 0), 0);
+    return { ok: true, count: n, msg: `✓ ${s.name}（${s.shopId}）：已注册 SKU ${n} 个（${(s.spus || []).length} 个 SPU）` };
+  },
+});
+
+const { scanning, shops: previewShops, done: previewDone, totalCount: totalSkuCount, scan: doScan } = scan;
+
+/** 预览表格行：把「店铺 → SPU」展平，便于逐 SPU 展开查看 SKU 明细 */
+const previewRows = computed(() => {
+  const out = [];
+  for (const s of previewShops.value) {
+    if (!s.ok) {
+      out.push({ shopId: s.shopId, name: s.name, spuId: '-', ok: false, msg: s.msg, skuCount: 0, items: [], status: '' });
+      continue;
+    }
+    for (const p of s.spus || []) {
+      out.push({ shopId: s.shopId, name: s.name, spuId: p.spuId, ok: p.ok, msg: p.msg, skuCount: p.skuCount, items: p.items || [], status: '' });
+    }
   }
-  if (configuredSelCount.value === 0) {
-    ElMessage.warning('所选店铺均未配置 SPU ID，请先在第 ③ 步为店铺填写并保存');
-    return;
-  }
-  scanning.value = true;
-  previewDone.value = false;
-  previewRows.value = [];
+  return out;
+});
+
+async function onScan() {
+  if (selected.size === 0) { ElMessage.warning('请先选择至少一个店铺'); return; }
+  if (configuredSelCount.value === 0) { ElMessage.warning('所选店铺均未配置 SPU ID，请先在第 ③ 步为店铺填写并保存'); return; }
   clearLog();
   log(`开始扫描选中的 ${selected.size} 个店铺（其中 ${configuredSelCount.value} 个已配置 SPU）的「已注册」Hot Listing…`, 'info');
-  try {
-    const resp = await fetch('/api/hotlisting-cancel/preview', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildPayload()),
-    });
-    const j = await resp.json();
-    if (!j || !j.shops) {
-      log(j && j.msg ? j.msg : '扫描请求失败', 'err');
-      return;
-    }
-    // 展平为「店铺 × SPU」行，便于表格展开查看 SKU 明细
-    for (const s of j.shops) {
-      if (!s.ok) {
-        previewRows.value.push({ shopId: s.shopId, name: s.name, spuId: '-', ok: false, msg: s.msg, skuCount: 0, items: [] });
-        log(`✕ ${s.name}（${s.shopId}）扫描失败：${s.msg}`, 'err');
-        continue;
-      }
-      for (const p of s.spus) {
-        previewRows.value.push({ shopId: s.shopId, name: s.name, ...p });
-        if (p.ok) {
-          log(`✓ ${s.name}（${s.shopId}）SPU ${p.spuId}：已注册 SKU ${p.skuCount} 个`, 'ok');
-        } else {
-          log(`✕ ${s.name}（${s.shopId}）SPU ${p.spuId} 扫描失败：${p.msg}`, 'err');
-        }
-      }
-    }
-    const total = previewRows.value.reduce((n, s) => n + (s.skuCount || 0), 0);
-    log(`扫描完成：共发现 ${total} 个已注册 SKU。`, total > 0 ? 'info' : 'ok');
-    if (total === 0) {
-      ElMessage.info('没有发现已注册的 Hot Listing SKU，无需取消。');
-    }
-    previewDone.value = true;
-  } catch (e) {
-    log('扫描请求失败：' + e.message, 'err');
-  } finally {
-    scanning.value = false;
-  }
+  await doScan(buildPayload());
+  if (totalSkuCount.value === 0 && previewDone.value) ElMessage.info('没有发现已注册的 Hot Listing SKU，无需取消。');
 }
 
 // ---------- 取消注册 ----------
-const cancelling = ref(false);
-const curJobId = ref('');   // 当前执行任务的 jobId（run 的 start 事件下发）
-const paused = ref(false);  // 是否处于暂停状态
-const pausing = ref(false); // 暂停/继续请求进行中
+const job = useBatchJob({
+  runUrl: '/api/hotlisting-cancel/run',
+  controlBase: '/api/hotlisting-cancel',
+  log,
+  // 执行任务的 SSE 事件带 spuId；行键与预览行一致（店铺 + SPU）
+  rowKeyOf: (r) => `${r.shopId}-${r.spuId}`,
+  onFinish: () => { previewDone.value = false; },
+  overrides: {
+    'shop-start': (ev) => ({ cls: 'info', msg: `▶ ${ev.name}（${ev.shopId}）开始取消注册…` }),
+    'spu-done': (ev) => (ev.ok
+      ? { cls: 'ok', msg: `  ✓ SPU ${ev.spuId}：${ev.cancelled ? '取消注册 ' + ev.cancelled + ' 个 SKU' : (ev.msg || '无已注册 SKU')}` }
+      : { cls: 'err', msg: `  ✕ SPU ${ev.spuId} 失败：${ev.msg}` }),
+    'sku-start': (ev) => ({ cls: 'info', msg: `  · 取消注册 ${ev.itemName}${ev.modelName ? '（' + ev.modelName + '）' : ''}…` }),
+    'sku-done': (ev) => ({
+      cls: ev.ok ? 'ok' : 'err',
+      msg: ev.ok ? `    ✓ ${ev.itemName} 取消注册成功` : `    ✕ ${ev.itemName} 取消注册失败：${ev.msg}`,
+    }),
+  },
+});
 
-async function togglePause() {
-  if (!curJobId.value || pausing.value) return;
-  pausing.value = true;
-  try {
-    const next = !paused.value;
-    const resp = await fetch(`/api/hotlisting-cancel/${next ? 'pause' : 'resume'}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId: curJobId.value }),
-    });
-    const j = await resp.json().catch(() => ({}));
-    if (j && j.ok) {
-      paused.value = next;
-      log(next ? '⏸ 已暂停，点击「继续」恢复执行。' : '▶ 已恢复，继续取消注册…', 'info');
-    } else {
-      ElMessage.warning((j && j.msg) || '操作失败，任务可能已结束');
-    }
-  } catch (e) {
-    ElMessage.error('操作失败：' + e.message);
-  } finally {
-    pausing.value = false;
-  }
-}
+const { running: cancelling, jobId: curJobId, paused, pausing, start, togglePause, cancel } = job;
+
+const runningTip = computed(() => (cancelling.value
+  ? `进行中：已处理 ${job.progress.value.done} 项（失败 ${job.progress.value.fail}）。`
+  : '取消后 Hot Listing 立即失效，需重新注册才能恢复！建议先执行第 ④ 步扫描确认。'));
 
 async function doCancel() {
-  if (selected.size === 0) {
-    ElMessage.warning('请先选择至少一个店铺');
-    return;
-  }
-  if (configuredSelCount.value === 0) {
-    ElMessage.warning('所选店铺均未配置 SPU ID，请先在第 ③ 步为店铺填写并保存');
-    return;
-  }
+  if (selected.size === 0) { ElMessage.warning('请先选择至少一个店铺'); return; }
+  if (configuredSelCount.value === 0) { ElMessage.warning('所选店铺均未配置 SPU ID，请先在第 ③ 步为店铺填写并保存'); return; }
   const hint = previewDone.value
     ? `上次扫描共发现 ${totalSkuCount.value} 个已注册 SKU。`
     : '尚未扫描，将实时拉取并取消全部已注册 SKU。';
@@ -183,55 +155,9 @@ async function doCancel() {
   } catch {
     return; // 用户取消
   }
-  cancelling.value = true;
-  curJobId.value = '';
-  paused.value = false;
   clearLog();
-  log('开始取消注册，共 ' + selected.size + ' 个店铺…', 'info');
-  try {
-    await runSSE('/api/hotlisting-cancel/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildPayload()),
-    }, (ev) => {
-      if (ev.type === 'start') {
-        curJobId.value = ev.jobId;
-      } else if (ev.type === 'shop-start') {
-        log(`▶ ${ev.name}（${ev.shopId}）开始取消注册…`, 'info');
-      } else if (ev.type === 'spu-done') {
-        if (ev.ok) {
-          log(`  ✓ SPU ${ev.spuId}：${ev.cancelled ? '取消注册 ' + ev.cancelled + ' 个 SKU' : (ev.msg || '无已注册 SKU')}`, 'ok');
-        } else {
-          log(`  ✕ SPU ${ev.spuId} 失败：${ev.msg}`, 'err');
-        }
-      } else if (ev.type === 'sku-start') {
-        log(`  · 取消注册 ${ev.itemName}${ev.modelName ? '（' + ev.modelName + '）' : ''}…`, 'info');
-      } else if (ev.type === 'sku-done') {
-        if (ev.ok) {
-          log(`    ✓ ${ev.itemName} 取消注册成功`, 'ok');
-        } else {
-          log(`    ✕ ${ev.itemName} 取消注册失败：${ev.msg}`, 'err');
-        }
-      } else if (ev.type === 'shop-done') {
-        if (ev.ok) {
-          log(`✓ ${ev.name}（${ev.shopId}）完成：取消注册 ${ev.cancelled} 个，失败 ${ev.failed} 个。`, ev.failed ? 'err' : 'ok');
-        } else {
-          log(`✕ ${ev.name}（${ev.shopId}）失败：${ev.msg}`, 'err');
-        }
-      } else if (ev.type === 'summary') {
-        log(`全部完成：共取消注册 ${ev.cancelled} 个，失败 ${ev.failed} 个（${ev.success}/${ev.total} 个店铺成功）。`, ev.failed ? 'err' : 'ok');
-        previewDone.value = false; // 状态已变化，提示重新扫描
-      } else if (ev.type === 'fatal') {
-        log(ev.msg, 'err');
-      }
-    }, log);
-  } catch (e) {
-    log('取消注册请求失败：' + e.message, 'err');
-  } finally {
-    cancelling.value = false;
-    curJobId.value = '';
-    paused.value = false;
-  }
+  log(`开始取消注册，共 ${configuredSelCount.value} 个店铺…`, 'info');
+  await start(previewRows.value, buildPayload());
 }
 </script>
 
@@ -280,88 +206,70 @@ async function doCancel() {
         </div>
       </el-card>
 
-      <el-card shadow="never" class="card">
-        <template #header>④ 扫描已注册 Hot Listing（预览）</template>
-        <div class="actions">
-          <el-button type="primary" :disabled="selCount === 0 || configuredSelCount === 0" :loading="scanning" @click="doScan">
-            {{ scanning ? '扫描中…' : '扫描已注册 SKU' }}
-          </el-button>
-          <el-button @click="clearAll">清空店铺选择</el-button>
-          <span v-if="previewDone" class="sel-count warn">已注册 SKU 共 {{ totalSkuCount }} 个</span>
-        </div>
-        <el-table
-          v-if="previewRows.length"
-          :data="previewRows"
-          size="small"
-          border
-          class="preview-table"
-          row-key="shopId + '-' + spuId"
-          :default-expand-all="false"
-        >
-          <el-table-column type="expand">
-            <template #default="{ row }">
-              <div v-if="row.items && row.items.length" class="expand-list">
-                <div v-for="it in row.items" :key="it.rskuId" class="expand-row">
-                  <span class="e-name" :title="it.itemName">{{ it.itemName }}</span>
-                  <span v-if="it.modelName" class="e-model">{{ it.modelName }}</span>
-                  <a v-if="it.previewLink" :href="it.previewLink" target="_blank" class="e-link">前台预览</a>
-                </div>
-              </div>
-              <div v-else class="expand-empty">{{ row.ok ? '无已注册 SKU' : row.msg }}</div>
-            </template>
-          </el-table-column>
-          <el-table-column prop="name" label="店铺" min-width="140" />
-          <el-table-column prop="shopId" label="店铺ID" width="110" />
+      <PreviewTableCard
+        title="④ 扫描已注册 Hot Listing（预览）"
+        :badge="previewDone ? `已注册 SKU 共 ${totalSkuCount} 个` : ''"
+        :rows="previewRows"
+        :row-key-of="(r) => `${r.shopId}-${r.spuId}`"
+        count-label="已注册 SKU"
+        :count-of="skuCountOf"
+        :running="scanning"
+        :can-run="selected.size > 0 && configuredSelCount > 0 && !scanning"
+        action-text="扫描已注册 SKU"
+        running-text="扫描中…"
+        danger-tip="扫描只读，不会改动任何注册状态；确认个数后再执行下方取消注册。"
+        :cancellable="false"
+        :log-lines="[]"
+        @run="onScan"
+      >
+        <template #toolbar>
+          <div class="actions">
+            <el-button @click="clearAll">清空店铺选择</el-button>
+          </div>
+        </template>
+        <template #columns>
           <el-table-column prop="spuId" label="SPU ID" width="140" />
-          <el-table-column label="已注册 SKU" width="100" align="center">
-            <template #default="{ row }">
-              <span :class="row.ok && row.skuCount ? 'cnt-bad' : 'cnt-ok'">{{ row.skuCount }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="90" align="center">
-            <template #default="{ row }">
-              <el-tag v-if="row.ok" type="success" size="small">成功</el-tag>
-              <el-tag v-else type="danger" size="small">失败</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="msg" label="备注" min-width="140" show-overflow-tooltip />
-        </el-table>
-      </el-card>
+        </template>
+        <template #detail="{ row }">
+          <div v-if="row.items && row.items.length" class="expand-list">
+            <div v-for="it in row.items" :key="it.rskuId" class="expand-row">
+              <span class="e-name" :title="it.itemName">{{ it.itemName }}</span>
+              <span v-if="it.modelName" class="e-model">{{ it.modelName }}</span>
+              <a v-if="it.previewLink" :href="it.previewLink" target="_blank" class="e-link">前台预览</a>
+            </div>
+          </div>
+          <div v-else class="expand-empty">{{ row.ok ? '无已注册 SKU' : row.msg }}</div>
+        </template>
+      </PreviewTableCard>
 
-      <el-card shadow="never" class="card danger-card">
-        <template #header>⑤ 取消注册（危险操作）</template>
-        <div class="actions">
-          <el-button type="danger" size="large" :disabled="selCount === 0 || configuredSelCount === 0" :loading="cancelling && !paused" @click="doCancel">
-            {{ cancelling ? '取消注册中…' : '取消注册全部已注册 SKU' }}
-          </el-button>
-          <el-button
-            v-if="cancelling && curJobId"
-            size="large"
-            :type="paused ? 'success' : 'warning'"
-            :loading="pausing"
-            @click="togglePause"
-          >
-            {{ paused ? '继续' : '暂停' }}
-          </el-button>
-          <span v-if="cancelling && paused" class="paused-tip">已暂停：不再发起取消注册，点击「继续」恢复。</span>
-          <span v-else class="danger-tip">取消后 Hot Listing 立即失效，需重新注册才能恢复！建议先执行第 ④ 步扫描确认。</span>
-        </div>
-        <div class="log-box">
-          <LogPanel :lines="logLines" height="320px" />
-        </div>
-      </el-card>
+      <PreviewTableCard
+        title="⑤ 取消注册（危险操作）"
+        :rows="previewRows"
+        :row-key-of="(r) => `${r.shopId}-${r.spuId}`"
+        count-label="已注册 SKU"
+        :count-of="skuCountOf"
+        :badge="cancelling ? `进度：已处理 ${job.progress.value.done} 项` : ''"
+        :running="cancelling"
+        :can-run="selected.size > 0 && configuredSelCount > 0"
+        action-text="取消注册全部已注册 SKU"
+        running-text="取消注册中…"
+        :job-id="curJobId"
+        :paused="paused"
+        :pausing="pausing"
+        paused-tip="已暂停：不再发起取消注册，点击「继续」恢复。"
+        :danger-tip="runningTip"
+        :log-lines="logLines"
+        @run="doCancel"
+        @pause="togglePause"
+        @cancel="cancel"
+      />
     </div>
   </div>
 </template>
 
 <style scoped>
-.danger-card { border: 1px solid #ffd2cc; }
-.sel-count.warn { color: #d84315; font-weight: 600; }
-.danger-tip { font-size: 13px; color: #c62828; flex: 1; min-width: 220px; }
-.paused-tip { font-size: 13px; color: #b26a00; flex: 1; min-width: 220px; }
 .spu-tip { font-size: 13px; color: #666; margin-bottom: 10px; line-height: 1.7; }
 .spu-input { font-family: Consolas, Menlo, monospace; }
-.card-header-row { display: flex; align-items: center; justify-content: space-between; }
 .save-state { font-size: 12px; }
 .sv-saving { color: #888; }
 .sv-ok { color: #2e7d32; }
@@ -373,21 +281,5 @@ async function doCancel() {
 .spu-id { color: #999; font-size: 12px; }
 .spu-count { color: #b26a00; font-size: 12px; margin-left: auto; }
 .spu-count.ok { color: #2e7d32; }
-.preview-table { margin-top: 14px; }
-.expand-list { padding: 2px 10px 8px; }
-.expand-row {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  padding: 6px 8px;
-  border-bottom: 1px dashed #eee;
-  font-size: 13px;
-}
-.e-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.e-model { color: #888; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.e-link { color: #1e88e5; text-decoration: none; white-space: nowrap; }
-.expand-empty { color: #999; padding: 8px; }
-.cnt-bad { color: #c62828; font-weight: 700; }
-.cnt-ok { color: #2e7d32; }
-/* .log-box 为全局类（styles/base.css） */
+/* 预览表格 / 展开行 / 状态色等共用样式在 styles/base.css */
 </style>

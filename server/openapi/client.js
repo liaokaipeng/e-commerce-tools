@@ -16,9 +16,9 @@
 const { request } = require('../lib/http');
 const { ENV_HOSTS, API_PATH, ACCESS_EXPIRE_MARGIN } = require('./constants');
 const { buildBaseString, hmacHex, nowSec } = require('../lib/openapi-utils');
+// 重试 / 退避统一走 lib/retry.js（与视频上传、TikTok 解析等链路共用同一骨架）
+const { retry, fixedBackoff } = require('../lib/retry');
 const store = require('./store');
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 常见业务错误 -> 中文提示（响应 error 字段非空即失败；v2 成功时 error 为空字符串）
 const ERROR_HINTS = {
@@ -133,41 +133,34 @@ async function signedCall({ env, apiPath, business = {}, accessToken = '', shopI
   }
 
   const maxAttempts = 2;
-  let lastErr;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const resp = await request({
-        method: m,
-        url,
-        headers,
-        body,
-        timeout: 30000,
-        signal,
-      });
-      if (resp.status >= 500 && resp.status < 600 && attempt < maxAttempts) {
-        await sleep(1000);
-        continue;
-      }
-      const j = resp.json;
-      if (!j || typeof j !== 'object') {
-        throw new Error(`开放平台返回异常（HTTP ${resp.status}）: ${(resp.text || '').slice(0, 200)}`);
-      }
-      if (j.error) {
-        const hint = hintOf(j.error, j.message);
-        throw new Error(`开放平台错误 ${j.error}${j.message ? '：' + j.message : ''}${hint ? '（' + hint + '）' : ''}`);
-      }
-      return j;
-    } catch (e) {
-      lastErr = e;
-      if (signal && signal.aborted) throw e;
-      if (attempt < maxAttempts && e.message && e.message.includes('开放平台错误')) {
-        // 业务错误不重试（避免重复副作用）
-        break;
-      }
-      if (attempt < maxAttempts) await sleep(1000);
+  // 退避与重试骨架统一走 lib/retry.js（固定 1s 间隔：网关限流窗口固定，指数退避无收益）
+  return retry(async () => {
+    const resp = await request({
+      method: m,
+      url,
+      headers,
+      body,
+      timeout: 30000,
+      signal,
+    });
+    const j = resp.json;
+    if (!j || typeof j !== 'object') {
+      // 5xx 多为网关瞬时故障，交给 retry；其余（含 4xx 非 JSON）视为终态错误
+      if (resp.status >= 500 && resp.status < 600) throw new Error(`开放平台网关返回 HTTP ${resp.status}`);
+      throw new Error(`开放平台返回异常（HTTP ${resp.status}）: ${(resp.text || '').slice(0, 200)}`);
     }
-  }
-  throw lastErr || new Error('开放平台请求失败');
+    if (j.error) {
+      const hint = hintOf(j.error, j.message);
+      throw new Error(`开放平台错误 ${j.error}${j.message ? '：' + j.message : ''}${hint ? '（' + hint + '）' : ''}`);
+    }
+    return j;
+  }, {
+    attempts: maxAttempts,
+    waitOf: fixedBackoff(1000),
+    // 业务错误不重试（避免重复副作用）；仅网络 / 5xx 重试
+    shouldRetry: (e) => !(e.message && e.message.includes('开放平台错误')),
+    isAborted: () => !!(signal && signal.aborted),
+  });
 }
 
 /**

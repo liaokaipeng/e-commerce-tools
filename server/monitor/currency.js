@@ -43,7 +43,7 @@ let liveRates = null; // { fetchedAt, rates: { CUR: 1 单位 = 人民币数 } }
 let lastAttempt = 0;
 
 /** 读磁盘缓存（24h 内有效），失败/过期返回 null */
-function loadCachedRates() {
+let loadCachedRates = function () {
   try {
     if (!fs.existsSync(RATES_FILE)) return null;
     const j = JSON.parse(fs.readFileSync(RATES_FILE, 'utf8'));
@@ -52,7 +52,7 @@ function loadCachedRates() {
   } catch (e) {
     return null;
   }
-}
+};
 
 function saveCachedRates(j) {
   try {
@@ -170,6 +170,18 @@ const rateTimer = setInterval(() => {
 }, 6 * 3600 * 1000);
 if (rateTimer.unref) rateTimer.unref();
 
+/**
+ * 起测前把汇率表钉死在内置静态表（离线快照），并屏蔽磁盘缓存与在线拉取。
+ * 供单元测试使用：金额阈值用例断言「500 泰铢 ≈ 105 元」这类具体数值，
+ * 若放任在线汇率生效，断言会随当日真实汇率漂移而随机失败。
+ * 生产代码不调用本函数（仅测试显式调用）。
+ */
+function lockStaticRatesForTest() {
+  liveRates = null;
+  loadCachedRates = () => null;   // 覆盖为永远返回 null：不读磁盘缓存
+  lastAttempt = Date.now();       // 落在 RETRY_MS 窗口内：ensureRates 不发外部请求
+}
+
 module.exports = {
   STATIC_RMB_RATES,
   REGION_CURRENCY,
@@ -181,5 +193,5 @@ module.exports = {
   symbolOf,
   roundMoney,
   moneyText,
-  _test: { currentRates, loadCachedRates, fetchLiveRates },
+  _test: { currentRates, loadCachedRates, fetchLiveRates, lockStaticRatesForTest },
 };

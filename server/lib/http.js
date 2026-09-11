@@ -7,22 +7,43 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 
-const cookieJars = {}; // hostname -> { name: value }
+const cookieJars = {}; // hostname -> { jar: {name:value}, at: 最后写入时间 }
 
-function storeCookies(hostname, setCookieHeaders) {
-  if (!setCookieHeaders) return;
-  if (!cookieJars[hostname]) cookieJars[hostname] = {};
-  for (const sc of setCookieHeaders) {
-    const kv = sc.split(';')[0];
-    const idx = kv.indexOf('=');
-    if (idx > 0) cookieJars[hostname][kv.slice(0, idx).trim()] = kv.slice(idx + 1).trim();
+// Cookie 罐空闲回收：本服务是单机长跑进程，若只写不删，各站点 Cookie 会一直堆积
+// （切站点/换账号时旧罐也不再有用）。超过 TTL 未更新的罐整体丢弃——罐内是短期会话
+// Cookie（如视频上传的 vod 凭证），过期后本来也需要重新获取。
+const JAR_TTL_MS = 6 * 60 * 60 * 1000; // 6 小时
+const JAR_SWEEP_MS = 30 * 60 * 1000;   // 30 分钟巡检一次
+
+function sweepJars(now = Date.now()) {
+  for (const host of Object.keys(cookieJars)) {
+    if (now - cookieJars[host].at > JAR_TTL_MS) delete cookieJars[host];
   }
 }
 
+// 巡检定时器不阻止进程退出
+const jarTimer = setInterval(() => sweepJars(), JAR_SWEEP_MS);
+if (jarTimer.unref) jarTimer.unref();
+
+function storeCookies(hostname, setCookieHeaders) {
+  if (!setCookieHeaders) return;
+  sweepJars();
+  let entry = cookieJars[hostname];
+  if (!entry) entry = cookieJars[hostname] = { jar: {}, at: 0 };
+  for (const sc of setCookieHeaders) {
+    const kv = sc.split(';')[0];
+    const idx = kv.indexOf('=');
+    if (idx > 0) entry.jar[kv.slice(0, idx).trim()] = kv.slice(idx + 1).trim();
+  }
+  entry.at = Date.now();
+}
+
 function getCookieHeader(hostname) {
-  const j = cookieJars[hostname];
-  if (!j || !Object.keys(j).length) return '';
-  return Object.entries(j).map(([k, v]) => `${k}=${v}`).join('; ');
+  const entry = cookieJars[hostname];
+  if (!entry) return '';
+  const names = Object.keys(entry.jar);
+  if (!names.length) return '';
+  return names.map((k) => `${k}=${entry.jar[k]}`).join('; ');
 }
 
 /**
@@ -82,4 +103,4 @@ function request({ method = 'GET', url, headers = {}, body = null, useJar = fals
   });
 }
 
-module.exports = { request };
+module.exports = { request, _test: { cookieJars, sweepJars, JAR_TTL_MS } };

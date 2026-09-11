@@ -55,3 +55,30 @@
 .sel-count { font-size: 13px; color: var(--text-2); }
 /* 日志面板与上方内容的间距（bidding / bidding-cancel / video 共用） */
 .log-box { margin-top: 14px; }
+
+/* ---------- 批量操作页预览表格（bidding-cancel / hotlisting-cancel 共用，
+     原两页各自 scoped 复制一份，现统一在此定义） ---------- */
+.danger-card { border: 1px solid #ffd2cc; }
+.sel-count.warn { color: #d84315; font-weight: 600; }
+.danger-tip { font-size: 13px; color: #c62828; flex: 1; min-width: 220px; }
+.paused-tip { font-size: 13px; color: #b26a00; flex: 1; min-width: 220px; }
+.exec-actions { margin-top: 14px; }
+.card-header-row { display: flex; align-items: center; justify-content: space-between; }
+.preview-table { margin-top: 14px; }
+.expand-list { padding: 2px 10px 8px; }
+.expand-row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px dashed #eee;
+  font-size: 13px;
+}
+.e-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.e-model { color: #888; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.e-price { color: #555; white-space: nowrap; }
+.e-suggest { color: #d84315; white-space: nowrap; }
+.e-link { color: #1e88e5; text-decoration: none; white-space: nowrap; }
+.expand-empty { color: #999; padding: 8px; }
+.cnt-bad { color: #c62828; font-weight: 700; }
+.cnt-ok { color: #2e7d32; }

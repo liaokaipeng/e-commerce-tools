@@ -123,6 +123,30 @@ async function readJsonBodySoft(req, label = '') {
   }
 }
 
+/**
+ * 读取路由请求体（宽容）：解析失败只记一条 warn 并返回 {}，
+ * 供「空请求体也应正常处理」的批量操作接口使用（由各路由自行判定缺字段并回 400）。
+ *
+ * 传 ctx.res 时额外校验请求体 JSON 是否解析成功，失败回 400 —— 用于「把 body 当作必需
+ * 控制指令」的接口（暂停 / 继续 / 取消），避免静默返回 {} 让调用方误判成参数缺失。
+ * @param {object} req http.IncomingMessage
+ * @param {string} label 日志中标识来源的接口路径（如 '/api/export'）
+ * @param {object} [ctx] { res } 传入时解析失败自动回 400 并返回 null
+ * @returns {Promise<object|null>} 解析结果（回 400 后为 null，调用方应直接 return）
+ */
+async function readRouteBody(req, label = '', ctx) {
+  try {
+    return parseJsonText(await readBody(req));
+  } catch (e) {
+    if (ctx && ctx.res) {
+      sendJson(ctx.res, 400, { ok: false, msg: '请求体不是合法 JSON' });
+      return null;
+    }
+    console.warn(`解析 ${label} 请求体失败:`, e.message);
+    return {};
+  }
+}
+
 /** 静态文件服务（含目录->index 映射与路径穿越防护） */
 function serveStatic(res, urlPath, publicDir) {
   const fs = require('fs');
@@ -146,4 +170,4 @@ function serveStatic(res, urlPath, publicDir) {
   });
 }
 
-module.exports = { sendJson, createDispatcher, sse, readBody, parseJsonText, readJsonBody, readJsonBodySoft, serveStatic };
+module.exports = { sendJson, createDispatcher, sse, readBody, parseJsonText, readJsonBody, readJsonBodySoft, readRouteBody, serveStatic };

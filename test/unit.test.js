@@ -2,10 +2,18 @@
 // 单元测试：后端纯函数（无网络依赖、不启动服务）。
 // 覆盖：视频上传工具（哈希/etag/AES 解密/auth 解析/SigV4/item 收集/MP4 探测/行校验）、
 //       TikTok 链接处理与错误分类、竞价金额换算、开放平台签名/打码/redirect 校验。
+//
+// 重要：监控数据目录必须先隔离到临时目录再 require 监控模块。
+// 否则 store 会读取 server/data/monitor/rules.json 里用户真实保存的规则覆盖，
+// 金额/阈值类断言会随用户配置漂移（曾出现 ads.spend_today 被覆盖为 1000/3000/6000
+// 导致「500 泰铢触发 P2」断言失败）。与 test/api.test.js 的 MONITOR_DATA_DIR 隔离口径一致。
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const UNIT_MONITOR_TMP = path.join(os.tmpdir(), `kp_unit_monitor_${process.pid}_${Date.now()}`);
+process.env.MONITOR_DATA_DIR = UNIT_MONITOR_TMP;
+
 const { t } = require('./helpers');
 const {
   md5hex,
@@ -35,7 +43,13 @@ const {
   optionImageIdOf, tierTableOf, buildRows, rowToCells, headerCells,
 } = require('../server/product-export');
 const { nowSec, buildBaseString, hmacHex, maskToken } = require('../server/lib/openapi-utils');
-const { parseJsonText } = require('../server/lib/http-utils');
+const { parseJsonText, readRouteBody } = require('../server/lib/http-utils');
+const jobs = require('../server/lib/jobs');
+const httpLib = require('../server/lib/http');
+const {
+  retry, exponentialBackoff, fixedBackoff, jitteredLinearBackoff,
+} = require('../server/lib/retry');
+const { isAllowedOrigin } = require('../server/main');
 const {
   buildShopeeUrl, DEFAULT_REGION, HOST,
 } = require('../server/lib/shopee-session');
@@ -45,8 +59,7 @@ const { isAuthDead, isAuthRetryable, planRefresh } = require('../server/openapi/
 const { createDispatcher } = require('../server/lib/http-utils');
 
 // ---------- 监控模块：数据目录隔离到临时目录（不碰 server/data） ----------
-const MONITOR_TMP = path.join(os.tmpdir(), `kp_monitor_test_${process.pid}_${Date.now()}`);
-process.env.MONITOR_DATA_DIR = MONITOR_TMP;
+const MONITOR_TMP = UNIT_MONITOR_TMP;
 const {
   evaluateRule, isMoreSevere, mergeRules, levelOf,
 } = require('../server/monitor/rules');
@@ -479,6 +492,187 @@ async function run() {
     }
   }
 
+  // ===== 共享层：长任务注册中心（暂停 / 继续 / 取消 / SSE 断开即取消） =====
+  {
+    const { CancelledError } = jobs;
+
+    // 基本情况：创建后可查、finish 后消失
+    const j1 = jobs.create();
+    t('jobs：create 返回可查到的 jobId', typeof j1 === 'string' && j1.startsWith('job_') && jobs.has(j1));
+    jobs.finish(j1);
+    t('jobs：finish 后任务不可查', !jobs.has(j1) && jobs.get(j1) === undefined);
+
+    // 未暂停 / 未取消 → checkpoint 直接放行
+    const j2 = jobs.create();
+    t('jobs：正常任务 checkpoint 放行', (await jobs.checkpoint(j2)) === true);
+    jobs.finish(j2);
+
+    // 暂停 → checkpoint 挂起；继续 → 放行（用 Promise.race 判定「确实挂起」）
+    const j3 = jobs.create();
+    t('jobs：setPaused 对存在的任务返回 true', jobs.setPaused(j3, true) === true);
+    let resumed = false;
+    const pending = jobs.checkpoint(j3).then(() => { resumed = true; });
+    await new Promise((r) => setTimeout(r, 100));
+    t('jobs：暂停时 checkpoint 挂起不返回', resumed === false);
+    jobs.setPaused(j3, false);
+    await pending;
+    t('jobs：继续后 checkpoint 放行', resumed === true);
+    jobs.finish(j3);
+
+    // 取消 → checkpoint 抛 CancelledError 且带取消原因
+    const j4 = jobs.create();
+    jobs.cancel(j4, '用户取消');
+    let err4 = null;
+    try { await jobs.checkpoint(j4); } catch (e) { err4 = e; }
+    t('jobs：取消后 checkpoint 抛 CancelledError', err4 instanceof CancelledError && err4.name === 'CancelledError', String(err4));
+    t('jobs：取消原因可查询', jobs.cancelReason(j4) === '用户取消', jobs.cancelReason(j4));
+    jobs.finish(j4);
+
+    // SSE 客户端断开（isAborted）→ 视为取消，即使未显式 cancel
+    const j5 = jobs.create();
+    let err5 = null;
+    try { await jobs.checkpoint(j5, () => true); } catch (e) { err5 = e; }
+    t('jobs：SSE 断开时 checkpoint 抛 CancelledError', err5 instanceof CancelledError && err5.message.includes('SSE'), String(err5));
+    jobs.finish(j5);
+
+    // TTL 过期：巡检回收超时任务（执行体异常退出没走 finish 时的兜底）
+    const { sweepJobs } = jobs._test;
+    const j6 = jobs.create();
+    jobs.get(j6).createdAt = Date.now() - jobs._ttlMs - 1;
+    t('jobs：TTL 前任务可回收', sweepJobs() === 1 && !jobs.has(j6));
+    const j8 = jobs.create();
+    t('jobs：TTL 内任务不被误回收', sweepJobs() === 0 && jobs.has(j8));
+    jobs.finish(j8);
+
+    // 取消钩子：cancel 时调用一次
+    let hooked = null;
+    const j7 = jobs.create((reason) => { hooked = reason; });
+    jobs.cancel(j7, '任务取消');
+    t('jobs：cancel 触发 onCancel 钩子并传原因', hooked === '任务取消', String(hooked));
+    jobs.finish(j7);
+
+    // 对不存在的 jobId 的操作返回 false（路由据此回 404）
+    t('jobs：不存在的 jobId setPaused/cancel 返回 false', jobs.setPaused('nope', true) === false && jobs.cancel('nope') === false);
+  }
+
+  // ===== 共享层：重试退避 =====
+  {
+    // 退避策略纯函数
+    t('retry：指数退避 1s/2s/4s 且封顶', exponentialBackoff(1000, 8000)(1) === 1000 && exponentialBackoff(1000, 8000)(3) === 4000
+      && exponentialBackoff(1000, 8000)(4) === 8000 && exponentialBackoff(1000, 8000)(9) === 8000);
+    t('retry：固定退避恒为常量', fixedBackoff(1000)(1) === 1000 && fixedBackoff(1000)(7) === 1000);
+    t('retry：抖动线性退避在 [step*n, step*n+jitter) 区间且离散',
+      (() => {
+        const f = jitteredLinearBackoff(3000, 2000);
+        const seen = new Set();
+        for (let i = 0; i < 20; i++) {
+          const v = f(2);
+          if (v < 6000 || v >= 8000) return false;
+          seen.add(v);
+        }
+        return seen.size > 1; // 有抖动（非固定值）
+      })());
+
+    // 首次即成功：只调用一次
+    let c1 = 0;
+    const r1 = await retry(async () => { c1++; return 'ok'; }, { attempts: 3, waitOf: () => 0 });
+    t('retry：成功即返回且只执行一次', r1 === 'ok' && c1 === 1);
+
+    // 失败 attempts-1 次后成功
+    let c2 = 0;
+    const r2 = await retry(async () => {
+      c2++;
+      if (c2 < 3) throw new Error('boom');
+      return 'late';
+    }, { attempts: 3, waitOf: () => 0 });
+    t('retry：按 attempts 上限重试后成功', r2 === 'late' && c2 === 3);
+
+    // 次数耗尽 → 抛出最后一次错误
+    let c3 = 0;
+    let err3 = null;
+    try {
+      await retry(async () => { c3++; throw new Error('always-' + c3); }, { attempts: 3, waitOf: () => 0 });
+    } catch (e) { err3 = e; }
+    t('retry：次数耗尽抛最后一次错误', c3 === 3 && err3 && err3.message === 'always-3', String(err3));
+
+    // shouldRetry=false → 不重试
+    let c4 = 0;
+    let err4 = null;
+    try {
+      await retry(async () => { c4++; throw new Error('业务错误'); }, { attempts: 5, waitOf: () => 0, shouldRetry: () => false });
+    } catch (e) { err4 = e; }
+    t('retry：shouldRetry 为 false 时立即抛出', c4 === 1 && err4 && err4.message === '业务错误');
+
+    // isAborted → 不重试，原样抛出（取消不被误判为失败重试）
+    let c5 = 0;
+    let err5 = null;
+    try {
+      await retry(async () => { c5++; throw new Error('已取消'); }, { attempts: 5, waitOf: () => 0, isAborted: () => true });
+    } catch (e) { err5 = e; }
+    t('retry：isAborted 时不重试直接抛出', c5 === 1 && err5 && err5.message === '已取消');
+
+    // onRetry 回调：次数与等待时长按策略计算
+    const waits = [];
+    let c6 = 0;
+    try {
+      await retry(async () => { c6++; throw new Error('x'); }, {
+        attempts: 3, waitOf: fixedBackoff(5), onRetry: (e, attempt, waitMs) => waits.push([attempt, waitMs]),
+      });
+    } catch { /* 预期抛出 */ }
+    t('retry：onRetry 按次回调并传退避时长', c6 === 3
+      && JSON.stringify(waits) === JSON.stringify([[1, 5], [2, 5]]), JSON.stringify(waits));
+  }
+
+  // ===== 共享层：路由控制体解析（readRouteBody） =====
+  {
+    const { Readable } = require('stream');
+    const bodyReq = (text) => {
+      const r = new Readable({ read() {} });
+      r.push(text);
+      r.push(null);
+      return r;
+    };
+    const fakeRes = () => {
+      const r = { status: 0, body: '' };
+      r.writeHead = (s) => { r.status = s; };
+      r.end = (b) => { r.body = b || ''; };
+      return r;
+    };
+
+    t('readRouteBody：合法 JSON 原样解析', (await readRouteBody(bodyReq('{"jobId":"a"}'))).jobId === 'a');
+    const res400 = fakeRes();
+    const bad = await readRouteBody(bodyReq('not-json'), '/api/x/pause', { res: res400 });
+    t('readRouteBody：带 res 时非法 JSON 回 400 并返回 null', bad === null && res400.status === 400
+      && JSON.parse(res400.body).ok === false, JSON.stringify({ status: res400.status, body: res400.body }));
+    const soft = await readRouteBody(bodyReq('not-json'), '/api/x/pause');
+    t('readRouteBody：不带 res 时非法 JSON 宽容返回 {}', soft && typeof soft === 'object' && Object.keys(soft).length === 0);
+  }
+
+  // ===== 共享层：CORS 白名单（main.js isAllowedOrigin） =====
+  {
+    t('CORS：本机 http/https（含任意端口）放行',
+      isAllowedOrigin('http://127.0.0.1:8765') && isAllowedOrigin('http://localhost:5173')
+      && isAllowedOrigin('https://127.0.0.1') && isAllowedOrigin('http://localhost'));
+    t('CORS：浏览器扩展来源放行',
+      isAllowedOrigin('chrome-extension://abcdefghijklmnop') && isAllowedOrigin('moz-extension://abcd1234'));
+    t('CORS：外部网页来源拒绝（防 CSRF）',
+      !isAllowedOrigin('http://evil.com') && !isAllowedOrigin('https://example.com')
+      && !isAllowedOrigin('http://127.0.0.1.evil.com') && !isAllowedOrigin('http://localhost.evil.com'));
+    t('CORS：空值 / 非字符串拒绝', !isAllowedOrigin('') && !isAllowedOrigin(undefined));
+  }
+
+  // ===== 共享层：Cookie 罐空闲回收（lib/http.js） =====
+  {
+    const { cookieJars, sweepJars, JAR_TTL_MS } = httpLib._test;
+    // 直接构造罐内状态（避免发真实请求）
+    cookieJars['unit-test.host'] = { jar: { SPC_CDS: 'abc' }, at: Date.now() - JAR_TTL_MS - 1 };
+    cookieJars['unit-test.fresh'] = { jar: { a: '1' }, at: Date.now() };
+    sweepJars();
+    t('cookieJars：过期罐被回收、新鲜罐保留', !cookieJars['unit-test.host'] && !!cookieJars['unit-test.fresh']);
+    delete cookieJars['unit-test.fresh'];
+    t('cookieJars：可重复巡检不报错', (() => { sweepJars(); sweepJars(); return true; })());
+  }
+
   // ===== 监控：规则引擎（纯函数） =====
   {
     const upRule = { id: 'r1', metric: 'order.pending_24h', type: 'threshold', thresholds: { p2: 3, p1: 8, p0: 15 } };
@@ -692,10 +886,11 @@ async function run() {
 
   // ===== 监控：金额换算（人民币阈值口径 + 全局展示模式） =====
   {
+    // 金额场景必须钉死汇率（否则在线汇率会让「500 泰铢 ≈ 105 元」这类断言随真实汇率漂移）
+    currency._test.lockStaticRatesForTest();
     const { toRmb, fromRmb, regionCurrency, symbolOf, moneyText, roundMoney } = currency;
     t('toRmb 人民币不换算', toRmb(100, 'CNY') === 100);
-    t('toRmb 泰铢按内置汇率换算', toRmb(500, 'THB') === 500 * 0.21, String(toRmb(500, 'THB')));
-    t('toRmb 未知币种按 1:1 保守处理', toRmb(50, 'XXX') === 50);
+    t('toRmb 泰铢按内置汇率换算', toRmb(500, 'THB') === 500 * 0.21, String(toRmb(500, 'THB')));    t('toRmb 未知币种按 1:1 保守处理', toRmb(50, 'XXX') === 50);
     t('toRmb 非数值原样返回', toRmb(null, 'THB') === null && toRmb(undefined, 'THB') === undefined);
     t('fromRmb 与 toRmb 互逆', Math.abs(fromRmb(toRmb(123.45, 'THB'), 'THB') - 123.45) < 1e-9);
     t('regionCurrency 地区代码映射（大小写不敏感）', regionCurrency('TH') === 'THB' && regionCurrency('cn') === 'CNY' && regionCurrency('') === '' && regionCurrency(null) === '');

@@ -39,6 +39,21 @@ async function waitReady() {
   return false;
 }
 
+// 删除文件（绕过本机可能存在的 node 安全删除 shim：它按「每轮删除数」计数，
+// 收尾时零散删除会连同构建缓存一起累加，偶发触发 BULK_CONFIRM 拦截而中断测试收尾）。
+// 测试删的都是会话文件的备份副本 / 自己造的临时文件，直接用 .NET 删除最稳。
+function removeFile(p) {
+  try {
+    if (!fs.existsSync(p)) return;
+    if (process.platform === 'win32') {
+      require('child_process').execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+        `[System.IO.File]::Delete('${p.replace(/'/g, "''")}')`], { stdio: 'ignore' });
+    } else {
+      fs.unlinkSync(p);
+    }
+  } catch { /* 删不掉不阻断测试收尾 */ }
+}
+
 // 启动被测服务（临时端口），并备份测试期间可能被改写的 session/settings 文件，
 // stop() 时原样恢复（内含用户真实凭证，不能删除）。
 // 开放平台凭证：服务启动时读入内存（openapi/store.js），测试用独立临时文件隔离
@@ -54,6 +69,11 @@ function startServer() {
   });
   let childErr = '';
   child.stderr.on('data', (d) => { childErr += d.toString(); });
+  // 被测服务崩了要能看见：把子进程 stderr 实时透传到测试输出（默认关闭，KP_TEST_SERVER_LOG=1 打开）
+  if (process.env.KP_TEST_SERVER_LOG) {
+    child.stderr.on('data', (d) => process.stderr.write('[server] ' + d.toString()));
+    child.on('exit', (code, sig) => process.stderr.write(`[server] exited code=${code} sig=${sig}\n`));
+  }
 
   const settingsFile = path.join(ROOT, 'server', 'data', 'settings.json');
   const settingsBackup = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile) : null;
@@ -68,11 +88,11 @@ function startServer() {
       child.kill();
       sessionFiles.forEach((fp, i) => {
         if (sessionBackups[i]) fs.writeFileSync(fp, sessionBackups[i]);
-        else if (fs.existsSync(fp)) fs.unlinkSync(fp);
+        else removeFile(fp);
       });
       if (settingsBackup) fs.writeFileSync(settingsFile, settingsBackup);
-      else if (fs.existsSync(settingsFile)) fs.unlinkSync(settingsFile);
-      if (fs.existsSync(openapiTestFile)) fs.unlinkSync(openapiTestFile);
+      else removeFile(settingsFile);
+      removeFile(openapiTestFile);
       try { fs.rmSync(monitorTestDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
     },
   };

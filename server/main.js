@@ -132,6 +132,13 @@ get('/api/browse', (req, res, url) => {
 });
 
 // ============ HTTP 服务 ============
+// CORS 白名单：本工具只面向本机使用，除下列来源外一律拒绝跨源请求。
+//   - http(s)://127.0.0.1|localhost[:任意端口]  本地页面 / Vite 开发服务器（5173）
+//   - chrome-extension:// | moz-extension://    浏览器扩展（推送 Cookie / 凭证）
+function isAllowedOrigin(origin) {
+  return /^(https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?|(chrome|moz|ms-browser)-extension:\/\/[a-z0-9]+)$/i.test(origin);
+}
+
 // 路由分发统一经 createDispatcher 包裹：处理器内未捕获的同步/异步异常兜底为 500，
 // 不再让请求连接挂起（SSE 等已写响应头的连接不二次响应）。
 const dispatch = createDispatcher(routes, (e, method, pathname) => {
@@ -139,9 +146,25 @@ const dispatch = createDispatcher(routes, (e, method, pathname) => {
   console.error(`[路由错误] ${method} ${pathname}: ${e && e.message ? e.message : e}`);
 });
 
+// 只有直接运行 main.js（node server/main.js / 启动.bat）才监听端口；
+// 被 require（单元测试验 isAllowedOrigin）时不启动服务。
+const isMain = require.main === module;
+
 const server = http.createServer((req, res) => {
-  // CORS（扩展推送 / 跨源调试需要）
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // CORS：仅允许本机来源（浏览器扩展推送 + 本地页面跨端口调试）。
+  // 收紧到白名单后，外部网页无法再向 127.0.0.1:8765 的写接口发跨源请求（防伪造凭证 CSRF 面）。
+  // 扩展自身请求不带 Origin（或为 chrome-extension://）——无 Origin 时不写 CORS 头，
+  // 同源与扩展侧均不受影响；非白名单来源直接回 403。
+  const origin = req.headers.origin || '';
+  if (origin && !isAllowedOrigin(origin)) {
+    res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, message: '来源不被允许' }));
+    return;
+  }
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
@@ -160,6 +183,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.on('error', (e) => {
+  if (!isMain) return;
   if (e.code === 'EADDRINUSE') {
     console.error(`端口 ${PORT} 已被占用，可能已有服务在运行。请先关闭旧的黑色窗口后重试。`);
   } else {
@@ -168,15 +192,19 @@ server.on('error', (e) => {
   process.exit(1);
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log('==============================================');
-  console.log('  工具合集（Shopee：竞价导出 / 取消竞价 / 取消Hot Listing / 视频上传；TikTok：视频下载）');
-  console.log('  请打开浏览器访问: http://127.0.0.1:' + PORT);
-  console.log('==============================================');
-  console.log('  - TikTok 下载     此页面即可直接使用');
-  console.log('  - 竞价导出/取消竞价/商品导出/取消Hot Listing：需先装扩展并点「发送登录信息到本地工具」');
-  console.log('  - 视频上传：需先装扩展，在短视频页手动上传一次视频抓取凭证');
-  console.log('  - 开放平台：录入 App 后生成授权链接登录（回调 redirect 后台与本工具填一致，默认 https://example.com/，授权后粘贴回调链接完成）');
-  console.log('  - 监控大屏：开放平台授权店铺后自动巡检采集，/monitor/ 查看三级告警大屏');
-  console.log('  扩展安装：edge://extensions → 开发人员模式 → 加载解压缩的扩展');
-});
+if (isMain) {
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log('==============================================');
+    console.log('  工具合集（Shopee：竞价导出 / 取消竞价 / 取消Hot Listing / 视频上传；TikTok：视频下载）');
+    console.log('  请打开浏览器访问: http://127.0.0.1:' + PORT);
+    console.log('==============================================');
+    console.log('  - TikTok 下载     此页面即可直接使用');
+    console.log('  - 竞价导出/取消竞价/商品导出/取消Hot Listing：需先装扩展并点「发送登录信息到本地工具」');
+    console.log('  - 视频上传：需先装扩展，在短视频页手动上传一次视频抓取凭证');
+    console.log('  - 开放平台：录入 App 后生成授权链接登录（回调 redirect 后台与本工具填一致，默认 https://example.com/，授权后粘贴回调链接完成）');
+    console.log('  - 监控大屏：开放平台授权店铺后自动巡检采集，/monitor/ 查看三级告警大屏');
+    console.log('  扩展安装：edge://extensions → 开发人员模式 → 加载解压缩的扩展');
+  });
+}
+
+module.exports = { isAllowedOrigin };

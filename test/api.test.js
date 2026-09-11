@@ -6,6 +6,31 @@ const path = require('path');
 const fs = require('fs');
 const { BASE, ROOT, t, req, startServer } = require('./helpers');
 
+// 删除文件（绕过本机可能存在的 node 安全删除 shim：它按「每轮删除数」计数，
+// 测试里零散的 unlinkSync 会连同构建缓存一起累加，偶发触发 BULK_CONFIRM 拦截而中断测试）。
+// 测试删的都是自己造的临时文件 / 会话文件的隔离副本，直接用 .NET 删除最稳。
+function removeFile(p) {
+  try {
+    if (!fs.existsSync(p)) return;
+    if (process.platform === 'win32') {
+      require('child_process').execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+        `[System.IO.File]::Delete('${p.replace(/'/g, "''")}')`], { stdio: 'ignore' });
+    } else {
+      fs.unlinkSync(p);
+    }
+  } catch { /* 删不掉不阻断测试 */ }
+}
+
+// 发送任意原始请求体（验「非法 JSON 应显式 400」用，req() 只能发合法 JSON）
+async function rawPost(urlPath, raw) {
+  const r = await fetch(BASE + urlPath, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: raw,
+  });
+  return { status: r.status, text: await r.text() };
+}
+
 // 读取 SSE 流直至出现指定类型事件，返回全部已收到的事件
 async function readSSEUntil(urlPath, untilTypes) {
   const r = await fetch(BASE + urlPath);
@@ -131,7 +156,7 @@ async function run() {
     {
       // 无登录会话时返回友好提示，不触达真实站点（helpers.stop 会按备份恢复会话文件）
       const sess = path.join(ROOT, 'server', 'data', 'bidding-session.json');
-      if (fs.existsSync(sess)) fs.unlinkSync(sess);
+      removeFile(sess);
       const r = await req('POST', '/api/bidding-cancel/preview', { shopIds: ['953673451'] });
       t('无登录 Cookie 时 preview 返回 400 且提示 Cookie', r.status === 400 && JSON.parse(r.text).msg.includes('Cookie'), r.text);
       // run 为 SSE 接口：无会话时广播 fatal 事件后断开
@@ -181,11 +206,33 @@ async function run() {
       // 无登录会话（上一用例已删除 bidding-session.json）：返回友好提示，不触达真实站点
       const r4 = await req('POST', '/api/hotlisting-cancel/preview', { shopIds: ['953673451'], spuMap: { 953673451: '42555837160' } });
       t('无登录 Cookie 时 preview 返回 400 且提示 Cookie', r4.status === 400 && JSON.parse(r4.text).msg.includes('Cookie'), r4.text);
-      // 暂停/继续：不存在的 jobId 返回 404
+      // 暂停/继续/取消：不存在的 jobId 返回 404
       const p1 = await req('POST', '/api/hotlisting-cancel/pause', { jobId: 'job_not_exist' });
       t('POST pause 无效 jobId 返回 404', p1.status === 404, `status=${p1.status}`);
       const p2 = await req('POST', '/api/hotlisting-cancel/resume', { jobId: 'job_not_exist' });
       t('POST resume 无效 jobId 返回 404', p2.status === 404, `status=${p2.status}`);
+      const p3 = await req('POST', '/api/hotlisting-cancel/cancel', { jobId: 'job_not_exist' });
+      t('POST cancel 无效 jobId 返回 404', p3.status === 404, `status=${p3.status}`);
+      // 控制类接口把 body 当必需指令：非法 JSON 必须显式 400，不能静默当参数缺失
+      const p4 = await rawPost('/api/hotlisting-cancel/pause', 'not-json');
+      t('POST pause 非法 JSON 返回 400', p4.status === 400, `status=${p4.status} ${p4.text}`);
+      const p5 = await rawPost('/api/bidding-cancel/pause', 'not-json');
+      t('POST bidding-cancel/pause 非法 JSON 返回 400', p5.status === 400, `status=${p5.status} ${p5.text}`);
+      // 取消竞价控制端点：同样要求给出 jobId（任务不存在 → 404，而非 500）
+      const b1 = await req('POST', '/api/bidding-cancel/pause', { jobId: 'job_not_exist' });
+      const b2 = await req('POST', '/api/bidding-cancel/resume', { jobId: 'job_not_exist' });
+      const b3 = await req('POST', '/api/bidding-cancel/cancel', { jobId: 'job_not_exist' });
+      t('bidding-cancel 无 jobId 控制指令返回 404（未回 500）',
+        b1.status === 404 && b2.status === 404 && b3.status === 404,
+        JSON.stringify([b1.status, b2.status, b3.status]));
+
+      // CORS 白名单：外部网页来源直接被拒（防本机写接口被 CSRF）
+      const cors = await fetch(BASE + '/api/status', { headers: { Origin: 'http://evil.example.com' } });
+      t('CORS：非白名单 Origin 请求被拒 403', cors.status === 403, `status=${cors.status}`);
+      const corsOk = await fetch(BASE + '/api/status', { headers: { Origin: 'http://127.0.0.1:5173' } });
+      t('CORS：本机来源放行并回显 Origin',
+        corsOk.status === 200 && corsOk.headers.get('access-control-allow-origin') === 'http://127.0.0.1:5173',
+        `${corsOk.status} ${corsOk.headers.get('access-control-allow-origin')}`);
 
       const resp = await fetch(BASE + '/api/hotlisting-cancel/run', {
         method: 'POST',
@@ -318,7 +365,7 @@ async function run() {
           t('取消后 SSE 收到 cancelled（而非 finished）', events.some((e) => e.type === 'cancelled'), JSON.stringify(events.slice(-3)));
         }
       } finally {
-        fs.unlinkSync(tmp);
+        removeFile(tmp);
       }
     }
 

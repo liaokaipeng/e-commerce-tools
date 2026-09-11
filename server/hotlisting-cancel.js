@@ -17,7 +17,9 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
+const { sendJson, sse, readJsonBodySoft, readRouteBody } = require('./lib/http-utils');
+// 长任务注册中心（暂停 / 继续 / 取消 / SSE 断开即取消 / TTL 清理）：与取消竞价共用
+const jobs = require('./lib/jobs');
 // 会话 / Cookie / 店铺列表 / 延时 / 接口请求层：与竞价导出、取消竞价、商品导出共用同一实现
 const {
   HOST, DEFAULT_REGION, sleep, loadCookie, loadStores,
@@ -31,29 +33,6 @@ const PAGE_LIMIT = 20;            // 单页条数（抓包实测 8 可用；适�
 const MAX_PAGES = 200;            // 翻页上限（防死循环）
 // 逐条取消注册之间的间隔，避免请求过快触发风控
 const CANCEL_DELAY_MS = 300;
-
-// ============ 执行任务的暂停控制（jobId -> { paused }） ============
-const jobs = new Map();
-
-function newJob() {
-  const jobId = 'job_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
-  jobs.set(jobId, { paused: false });
-  return jobId;
-}
-
-function setPaused(jobId, paused) {
-  const job = jobs.get(jobId);
-  if (!job) return false;
-  job.paused = !!paused;
-  return true;
-}
-
-/** 暂停等待：任务被暂停时阻塞轮询，恢复后继续 */
-async function waitIfPaused(jobId) {
-  while (jobs.get(jobId) && jobs.get(jobId).paused) {
-    await sleep(200);
-  }
-}
 
 // ============ Shopee 接口链路（URL 拼接与请求层见 lib/shopee-session.js） ============
 
@@ -280,7 +259,10 @@ function handleRun(body, res) {
     return;
   }
   const emit = sse(res);
-  const jobId = newJob();
+  // SSE 客户端断开（用户关掉页面）即视为取消：任务在下个门控点退出，不再空跑。
+  let clientGone = false;
+  req_onClose(res, () => { clientGone = true; });
+  const jobId = jobs.create();
 
   (async () => {
     const stores = loadStores();
@@ -288,76 +270,84 @@ function handleRun(body, res) {
     try {
       cookie = loadCookie();
     } catch (e) {
-      jobs.delete(jobId);
+      jobs.finish(jobId);
       emit({ type: 'fatal', msg: e.message });
       res.end();
       return;
     }
-    // 先下发 jobId，前端据此发暂停/继续指令
+    // 先下发 jobId，前端据此发暂停 / 继续 / 取消指令
     emit({ type: 'start', jobId });
 
     const results = [];
-    for (const id of shopIds) {
-      await waitIfPaused(jobId);
-      const store = stores.find(s => s.id === String(id));
-      const name = store ? store.name : String(id);
-      const plan = perShop[String(id)] || { error: '未配置 SPU ID' };
-      emit({ type: 'shop-start', shopId: String(id), name });
-      if (plan.error) {
-        emit({ type: 'shop-done', shopId: String(id), name, ok: false, cancelled: 0, failed: 0, msg: plan.error });
-        results.push({ shopId: String(id), name, ok: false, cancelled: 0, failed: 0 });
-        continue;
-      }
-      let cancelled = 0;
-      let failed = 0;
-      try {
-        const region = await regionOf(cookie, String(id));
-        for (const spuId of plan.spus) {
-          await waitIfPaused(jobId);
-          // 实时拉取最新已注册列表（预览后状态可能已变化）
-          let rows;
-          try {
-            rows = await fetchEnrolledSkus(cookie, String(id), region, spuId);
-          } catch (e) {
-            failed += 1;
-            emit({ type: 'spu-done', shopId: String(id), spuId, ok: false, msg: e.message });
-            continue;
-          }
-          if (rows.length === 0) {
-            emit({ type: 'spu-done', shopId: String(id), spuId, ok: true, cancelled: 0, msg: '无已注册 SKU' });
-            continue;
-          }
-          for (const r of rows) {
-            await waitIfPaused(jobId);
-            emit({
-              type: 'sku-start',
-              shopId: String(id),
-              spuId,
-              itemName: r.itemName,
-              modelName: r.modelName,
-            });
+    let cancelledByUser = false;
+    try {
+      for (const id of shopIds) {
+        await jobs.checkpoint(jobId, () => clientGone);
+        const store = stores.find(s => s.id === String(id));
+        const name = store ? store.name : String(id);
+        const plan = perShop[String(id)] || { error: '未配置 SPU ID' };
+        emit({ type: 'shop-start', shopId: String(id), name });
+        if (plan.error) {
+          emit({ type: 'shop-done', shopId: String(id), name, ok: false, cancelled: 0, failed: 0, msg: plan.error });
+          results.push({ shopId: String(id), name, ok: false, cancelled: 0, failed: 0 });
+          continue;
+        }
+        let cancelled = 0;
+        let failed = 0;
+        try {
+          const region = await regionOf(cookie, String(id));
+          for (const spuId of plan.spus) {
+            await jobs.checkpoint(jobId, () => clientGone);
+            // 实时拉取最新已注册列表（预览后状态可能已变化）
+            let rows;
             try {
-              await unenrollSku(cookie, String(id), region, r.rskuId, r.vskuId);
-              cancelled += 1;
-              emit({ type: 'sku-done', shopId: String(id), spuId, itemName: r.itemName, ok: true });
+              rows = await fetchEnrolledSkus(cookie, String(id), region, spuId);
             } catch (e) {
               failed += 1;
-              emit({ type: 'sku-done', shopId: String(id), spuId, itemName: r.itemName, ok: false, msg: e.message });
+              emit({ type: 'spu-done', shopId: String(id), spuId, ok: false, msg: e.message });
+              continue;
             }
-            await sleep(CANCEL_DELAY_MS);
+            if (rows.length === 0) {
+              emit({ type: 'spu-done', shopId: String(id), spuId, ok: true, cancelled: 0, msg: '无已注册 SKU' });
+              continue;
+            }
+            for (const r of rows) {
+              await jobs.checkpoint(jobId, () => clientGone);
+              emit({
+                type: 'sku-start',
+                shopId: String(id),
+                spuId,
+                itemName: r.itemName,
+                modelName: r.modelName,
+              });
+              try {
+                await unenrollSku(cookie, String(id), region, r.rskuId, r.vskuId);
+                cancelled += 1;
+                emit({ type: 'sku-done', shopId: String(id), spuId, itemName: r.itemName, ok: true });
+              } catch (e) {
+                failed += 1;
+                emit({ type: 'sku-done', shopId: String(id), spuId, itemName: r.itemName, ok: false, msg: e.message });
+              }
+              await sleep(CANCEL_DELAY_MS);
+            }
+            emit({ type: 'spu-done', shopId: String(id), spuId, ok: true, cancelled: rows.length });
           }
-          emit({ type: 'spu-done', shopId: String(id), spuId, ok: true, cancelled: rows.length });
+          emit({ type: 'shop-done', shopId: String(id), name, ok: true, cancelled, failed, msg: '' });
+          results.push({ shopId: String(id), name, ok: true, cancelled, failed });
+        } catch (e) {
+          emit({ type: 'shop-done', shopId: String(id), name, ok: false, cancelled: 0, failed: 0, msg: e.message });
+          results.push({ shopId: String(id), name, ok: false, cancelled: 0, failed: 0, msg: e.message });
         }
-        emit({ type: 'shop-done', shopId: String(id), name, ok: true, cancelled, failed, msg: '' });
-        results.push({ shopId: String(id), name, ok: true, cancelled, failed });
-      } catch (e) {
-        emit({ type: 'shop-done', shopId: String(id), name, ok: false, cancelled: 0, failed: 0, msg: e.message });
-        results.push({ shopId: String(id), name, ok: false, cancelled: 0, failed: 0, msg: e.message });
       }
+    } catch (e) {
+      // 取消（用户点取消 / SSE 断开）走这里：已处理的部分照常汇总，不再继续后续店铺
+      if (!(e instanceof jobs.CancelledError)) throw e;
+      cancelledByUser = true;
     }
-    jobs.delete(jobId);
+
+    jobs.finish(jobId);
     emit({
-      type: 'summary',
+      type: cancelledByUser ? 'cancelled' : 'summary',
       cancelled: results.reduce((n, r) => n + (r.cancelled || 0), 0),
       failed: results.reduce((n, r) => n + (r.failed || 0), 0),
       success: results.filter(r => r.ok).length,
@@ -365,8 +355,15 @@ function handleRun(body, res) {
     });
     try { res.end(); } catch { /* ignore */ }
   })().catch((e) => {
+    jobs.finish(jobId);
     try { emit({ type: 'fatal', msg: `取消注册失败：${e.message}` }); res.end(); } catch { /* ignore */ }
   });
+}
+
+/** 监听响应连接关闭（SSE 客户端断开兜底；已结束时不重复触发） */
+function req_onClose(res, fn) {
+  if (typeof res.on !== 'function') return;
+  res.on('close', fn);
 }
 
 // ============ 路由注册 ============
@@ -397,16 +394,25 @@ function register({ get, post }) {
     handleRun(parsed, res);
   });
 
-  // 暂停 / 继续执行中的任务（body { jobId }，jobId 由 run 的 start 事件下发）
+  // 暂停 / 继续 / 取消执行中的任务（body { jobId }，jobId 由 run 的 start 事件下发）
   post('/api/hotlisting-cancel/pause', async (req, res) => {
-    const parsed = await readJsonBodySoft(req, '/api/hotlisting-cancel/pause');
-    const ok = setPaused(parsed.jobId, true);
+    const parsed = await readRouteBody(req, '/api/hotlisting-cancel/pause', { res });
+    if (!parsed) return;
+    const ok = jobs.setPaused(parsed.jobId, true);
     sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
   });
 
   post('/api/hotlisting-cancel/resume', async (req, res) => {
-    const parsed = await readJsonBodySoft(req, '/api/hotlisting-cancel/resume');
-    const ok = setPaused(parsed.jobId, false);
+    const parsed = await readRouteBody(req, '/api/hotlisting-cancel/resume', { res });
+    if (!parsed) return;
+    const ok = jobs.setPaused(parsed.jobId, false);
+    sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
+  });
+
+  post('/api/hotlisting-cancel/cancel', async (req, res) => {
+    const parsed = await readRouteBody(req, '/api/hotlisting-cancel/cancel', { res });
+    if (!parsed) return;
+    const ok = jobs.cancel(parsed.jobId, '用户取消');
     sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
   });
 }

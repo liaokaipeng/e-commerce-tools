@@ -8,12 +8,14 @@
  *   其中每个 model 都是一条待改进竞价（bid_status=40 / 价格缺乏竞争力），
  *   逐个点击「撤销」即 seller_withdraw { bid_id }。
  */
-const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
+const { sendJson, sse, readJsonBodySoft, readRouteBody } = require('./lib/http-utils');
 // 会话 / Cookie / 店铺列表 / 金额换算 / 延时 / 接口请求层：与竞价导出、取消Hot Listing、商品导出共用
 const {
   DEFAULT_REGION, toAmount, sleep, loadCookieHeader, loadStores,
   apiPost, buildShopeeUrl, fetchShopRegion,
 } = require('./lib/shopee-session');
+// 长任务注册中心：暂停 / 继续 / 取消 / SSE 断开即取消 / 僵尸清理
+const jobs = require('./lib/jobs');
 
 // 待改进 Tab 的 page_tab 值（page_tab=1 为「进行中的竞价」全部，2 为其中「待改进」）
 const PAGE_TAB_IMPROVE = 2;
@@ -124,6 +126,10 @@ function handleRun(body, res) {
     return;
   }
   const emit = sse(res);
+  // SSE 客户端断开（用户关掉页面）即视为取消，任务在下个门控点退出
+  let clientGone = false;
+  if (typeof res.on === 'function') res.on('close', () => { clientGone = true; });
+  const jobId = jobs.create();
 
   (async () => {
     const stores = loadStores();
@@ -131,49 +137,62 @@ function handleRun(body, res) {
     try {
       cookieHeader = loadCookieHeader();
     } catch (e) {
+      jobs.finish(jobId);
       emit({ type: 'fatal', msg: e.message });
       res.end();
       return;
     }
+    // 先下发 jobId，前端据此发暂停 / 继续 / 取消指令
+    emit({ type: 'start', jobId });
 
     const results = [];
-    for (const id of shopIds) {
-      const store = stores.find(s => s.id === String(id));
-      const name = store ? store.name : String(id);
-      emit({ type: 'shop-start', shopId: String(id), name });
-      try {
-        const region = (await fetchShopRegion(cookieHeader, String(id))) || DEFAULT_REGION;
-        // 实时拉取最新待改进列表（预览后状态可能已变化）
-        const rows = await fetchImprovementBids(cookieHeader, String(id), region);
-        let cancelled = 0;
-        let failed = 0;
-        for (const r of rows) {
-          emit({
-            type: 'bid-start',
-            shopId: String(id),
-            itemName: r.itemName,
-            modelName: r.modelName,
-            bidId: r.bidId,
-          });
-          try {
-            await withdrawBid(cookieHeader, String(id), region, r.bidId);
-            cancelled += 1;
-            emit({ type: 'bid-done', shopId: String(id), bidId: r.bidId, itemName: r.itemName, ok: true });
-          } catch (e) {
-            failed += 1;
-            emit({ type: 'bid-done', shopId: String(id), bidId: r.bidId, itemName: r.itemName, ok: false, msg: e.message });
+    let cancelledByUser = false;
+    try {
+      for (const id of shopIds) {
+        await jobs.checkpoint(jobId, () => clientGone);
+        const store = stores.find(s => s.id === String(id));
+        const name = store ? store.name : String(id);
+        emit({ type: 'shop-start', shopId: String(id), name });
+        try {
+          const region = (await fetchShopRegion(cookieHeader, String(id))) || DEFAULT_REGION;
+          // 实时拉取最新待改进列表（预览后状态可能已变化）
+          const rows = await fetchImprovementBids(cookieHeader, String(id), region);
+          let cancelled = 0;
+          let failed = 0;
+          for (const r of rows) {
+            await jobs.checkpoint(jobId, () => clientGone);
+            emit({
+              type: 'bid-start',
+              shopId: String(id),
+              itemName: r.itemName,
+              modelName: r.modelName,
+              bidId: r.bidId,
+            });
+            try {
+              await withdrawBid(cookieHeader, String(id), region, r.bidId);
+              cancelled += 1;
+              emit({ type: 'bid-done', shopId: String(id), bidId: r.bidId, itemName: r.itemName, ok: true });
+            } catch (e) {
+              failed += 1;
+              emit({ type: 'bid-done', shopId: String(id), bidId: r.bidId, itemName: r.itemName, ok: false, msg: e.message });
+            }
+            await sleep(WITHDRAW_DELAY_MS);
           }
-          await sleep(WITHDRAW_DELAY_MS);
+          emit({ type: 'shop-done', shopId: String(id), name, ok: true, cancelled, failed, msg: '' });
+          results.push({ shopId: String(id), name, ok: true, cancelled, failed });
+        } catch (e) {
+          emit({ type: 'shop-done', shopId: String(id), name, ok: false, cancelled: 0, failed: 0, msg: e.message });
+          results.push({ shopId: String(id), name, ok: false, cancelled: 0, failed: 0, msg: e.message });
         }
-        emit({ type: 'shop-done', shopId: String(id), name, ok: true, cancelled, failed, msg: '' });
-        results.push({ shopId: String(id), name, ok: true, cancelled, failed });
-      } catch (e) {
-        emit({ type: 'shop-done', shopId: String(id), name, ok: false, cancelled: 0, failed: 0, msg: e.message });
-        results.push({ shopId: String(id), name, ok: false, cancelled: 0, failed: 0, msg: e.message });
       }
+    } catch (e) {
+      if (!(e instanceof jobs.CancelledError)) throw e;
+      cancelledByUser = true;
     }
+
+    jobs.finish(jobId);
     emit({
-      type: 'summary',
+      type: cancelledByUser ? 'cancelled' : 'summary',
       cancelled: results.reduce((n, r) => n + (r.cancelled || 0), 0),
       failed: results.reduce((n, r) => n + (r.failed || 0), 0),
       success: results.filter(r => r.ok).length,
@@ -181,6 +200,7 @@ function handleRun(body, res) {
     });
     try { res.end(); } catch { /* ignore */ }
   })().catch((e) => {
+    jobs.finish(jobId);
     try { emit({ type: 'fatal', msg: `撤销失败：${e.message}` }); res.end(); } catch { /* ignore */ }
   });
 }
@@ -195,6 +215,28 @@ function register({ post }) {
   post('/api/bidding-cancel/run', async (req, res) => {
     const parsed = await readJsonBodySoft(req, '/api/bidding-cancel/run');
     handleRun(parsed, res);
+  });
+
+  // 暂停 / 继续 / 取消执行中的任务（body { jobId }，jobId 由 run 的 start 事件下发）
+  post('/api/bidding-cancel/pause', async (req, res) => {
+    const parsed = await readRouteBody(req, '/api/bidding-cancel/pause', { res });
+    if (!parsed) return;
+    const ok = jobs.setPaused(parsed.jobId, true);
+    sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
+  });
+
+  post('/api/bidding-cancel/resume', async (req, res) => {
+    const parsed = await readRouteBody(req, '/api/bidding-cancel/resume', { res });
+    if (!parsed) return;
+    const ok = jobs.setPaused(parsed.jobId, false);
+    sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
+  });
+
+  post('/api/bidding-cancel/cancel', async (req, res) => {
+    const parsed = await readRouteBody(req, '/api/bidding-cancel/cancel', { res });
+    if (!parsed) return;
+    const ok = jobs.cancel(parsed.jobId, '用户取消');
+    sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
   });
 }
 
