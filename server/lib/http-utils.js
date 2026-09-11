@@ -92,13 +92,18 @@ function readBody(req, maxBytes = 2 * 1024 * 1024) {
   });
 }
 
+/** 解析 JSON 文本：容忍 UTF-8 BOM（Windows 记事本/部分工具导出的文件带 BOM） */
+function parseJsonText(text) {
+  return JSON.parse(String(text || '').replace(/^\uFEFF/, ''));
+}
+
 /**
  * 读取并解析 JSON 请求体（严格）：请求体非法即抛错，由 createDispatcher 兜底为 500。
  * 供「请求体必须合法」的接口使用（monitor / openapi）。
  */
 async function readJsonBody(req) {
   try {
-    return JSON.parse(await readBody(req));
+    return parseJsonText(await readBody(req));
   } catch (e) {
     throw new Error('请求体不是合法 JSON：' + e.message);
   }
@@ -106,12 +111,12 @@ async function readJsonBody(req) {
 
 /**
  * 读取并解析 JSON 请求体（宽容）：解析失败只记一条 warn 并返回 {}，
- * 供「空请求体也应正常处理」的批量操作接口使用。
+ * 供「空请求体也应正常处理」的批量操作接口使用（由各路由自行判定缺字段并回 400）。
  * @param {string} label 日志中标识来源的接口路径（如 '/api/export'）
  */
 async function readJsonBodySoft(req, label = '') {
   try {
-    return JSON.parse(await readBody(req));
+    return parseJsonText(await readBody(req));
   } catch (e) {
     console.warn(`解析 ${label} 请求体失败:`, e.message);
     return {};
@@ -141,4 +146,4 @@ function serveStatic(res, urlPath, publicDir) {
   });
 }
 
-module.exports = { sendJson, createDispatcher, sse, readBody, readJsonBody, readJsonBodySoft, serveStatic };
+module.exports = { sendJson, createDispatcher, sse, readBody, parseJsonText, readJsonBody, readJsonBodySoft, serveStatic };

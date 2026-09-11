@@ -50,15 +50,6 @@ function validateRedirect(redirect) {
   return { url: u.toString(), mode: local ? 'auto' : 'manual' };
 }
 
-/** 统一读 body 并兜底解析 */
-async function parseBody(req) {
-  try {
-    return JSON.parse(await readBody(req));
-  } catch (e) {
-    throw new Error('请求体不是合法 JSON：' + e.message);
-  }
-}
-
 /** 授权状态变化后通知监控大屏调度器立即刷新店铺列表（重新授权后无需等巡检周期，大屏当场恢复） */
 function notifyMonitorAuthChanged() {
   try {

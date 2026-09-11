@@ -22,13 +22,11 @@
  * 规格值图片链接）与 SKU 图片链接等字段，写入 .xlsx。
  */
 const ExcelJS = require('exceljs');
-const fs = require('fs');
-const os = require('os');
 const path = require('path');
-const { request } = require('./lib/http');
 const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
-// 会话 / Cookie / 卖家中心域名：与竞价导出、取消竞价、取消 Hot Listing 共用同一实现
-const { HOST, UA, loadCookie, assertLoginOk } = require('./lib/shopee-session');
+// 会话 / Cookie / 卖家中心域名 / 接口请求层：与竞价导出、取消竞价、取消 Hot Listing 共用同一实现
+const { HOST, apiGet, buildShopeeUrl, fetchShopRegion } = require('./lib/shopee-session');
+const { ensureDir, timestampText, styleExcelHeader } = require('./lib/export-utils');
 
 const API_LIST = '/api/v3/opt/mpsku/list/v2/get_product_list';
 const API_INFO = '/api/v3/product/get_product_info';
@@ -37,38 +35,8 @@ const PAGE_SIZE = 45;       // 列表单页规格数（实测 page_size ≥50 �
 const CONCURRENCY = 3;      // 拉取商品详情的并发数（避免请求过快触发风控）
 const MAX_PAGES = 200;      // 翻页上限（防死循环）
 
-/** 拼 v3 接口 URL：公共参数 SPC_CDS_VER / SPC_CDS / cnsc_shop_id 统一附加 */
-function buildUrl(apiPath, business, { cookie, shopId }) {
-  const params = new URLSearchParams();
-  for (const [k, v] of Object.entries(business || {})) {
-    if (v === null || v === undefined || v === '') continue;
-    params.set(k, String(v));
-  }
-  params.set('SPC_CDS_VER', '2');
-  if (cookie.spcCds) params.set('SPC_CDS', cookie.spcCds);
-  params.set('cnsc_shop_id', String(shopId));
-  return `${HOST}${apiPath}?${params.toString()}`;
-}
-
-async function apiGet(cookie, url) {
-  const resp = await request({
-    url,
-    headers: {
-      'Cookie': cookie.header,
-      'User-Agent': UA,
-      'Accept': 'application/json, text/plain, */*',
-      'Origin': HOST,
-      'Referer': `${HOST}/portal/product/list/all`,
-    },
-  });
-  assertLoginOk(resp);
-  const j = resp.json;
-  if (!j || typeof j !== 'object') throw new Error('接口返回异常：' + (resp.text || '').slice(0, 120));
-  if (j.code !== 0 && j.code !== undefined) {
-    throw new Error(`接口错误 code=${j.code}：${j.msg || j.message || j.user_message || ''}`);
-  }
-  return j;
-}
+/** 列表/详情接口参考页（卖家中心商品列表），部分接口需要 Referer */
+const REFERER = `${HOST}/portal/product/list/all`;
 
 // ============ 纯函数（单测覆盖） ============
 
@@ -365,8 +333,8 @@ async function fetchProductList(cookie, shopId, emit) {
     products.push(p);
   };
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const url = buildUrl(API_LIST, { page_number: page, page_size: PAGE_SIZE }, { cookie, shopId });
-    const j = await apiGet(cookie, url);
+    const url = buildShopeeUrl(API_LIST, { shopId, spcCds: cookie.spcCds, business: { page_number: page, page_size: PAGE_SIZE } });
+    const j = await apiGet(url, cookie.header, { referer: REFERER, label: `拉取店铺 ${shopId} 商品列表` });
     const list = productsOf(j);
     list.forEach(addProduct);
     const total = totalOf(j);
@@ -382,8 +350,10 @@ async function fetchProductList(cookie, shopId, emit) {
 async function fetchProductInfo(cookie, shopId, productId) {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const url = buildUrl(API_INFO, { product_id: productId, is_draft: false }, { cookie, shopId });
-      const j = await apiGet(cookie, url);
+      const url = buildShopeeUrl(API_INFO, {
+        shopId, spcCds: cookie.spcCds, business: { product_id: productId, is_draft: false },
+      });
+      const j = await apiGet(url, cookie.header, { referer: REFERER, label: `拉取商品 ${productId} 详情` });
       return (j.data && j.data.product_info) || null;
     } catch (e) {
       if (attempt === 2) {
@@ -424,9 +394,6 @@ async function writeExcel(rows, outPath) {
     maxTiers = Math.max(maxTiers, n);
   }
   ws.addRow(headerCells(maxTiers));
-  const headerRow = ws.getRow(1);
-  headerRow.font = { bold: true };
-  headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
   for (const r of rows) ws.addRow(rowToCells(r, maxTiers));
   ws.columns.forEach(col => { col.width = 18; });
   ws.getColumn(3).width = 60;   // 商品名称
@@ -438,30 +405,23 @@ async function writeExcel(rows, outPath) {
   for (let i = 1; i <= maxTiers; i++) imgCols.push(15 + 3 * i); // 规格i图片链接列 = 15 + 3i
   imgCols.push(15 + 3 * maxTiers + 1); // SKU图片链接列
   for (const c of imgCols) ws.getColumn(c).width = 60;
-  ws.views = [{ state: 'frozen', ySplit: 1 }];
+  styleExcelHeader(ws);
   await wb.xlsx.writeFile(outPath);
   return outPath;
 }
 
 /** 获取店铺市场（shop_info 接口返回 shop_region，如 ph/my/vn），失败返回空串（图片链接走兜底域名） */
-async function fetchShopRegion(cookie, shopId) {
-  try {
-    const j = await apiGet(cookie, `${HOST}/api/framework/selleraccount/shop_info/?SPC_CDS_VER=2&cnsc_shop_id=${shopId}`);
-    const d = j && (j.data || j.result);
-    if (j && j.code === 0 && d && d.shop_region) return String(d.shop_region).toLowerCase();
-  } catch (e) {
-    console.warn(`获取店铺 ${shopId} 市场失败: ${e.message}`);
-  }
-  return '';
+async function regionOf(cookie, shopId) {
+  return fetchShopRegion(cookie.header, shopId);
 }
 
 /** 导出单个店铺：市场 → 列表 → 逐商品详情 → 规格行 → xlsx */
 async function exportShop(shopId, saveDir, emit) {
-  const cookie = loadCookie();
   emit({ type: 'start', shopId });
+  const cookie = loadCookie();
 
   // 店铺市场决定图片链接域名（down-{region}.img.susercontent.com）
-  const region = await fetchShopRegion(cookie, shopId);
+  const region = await regionOf(cookie, shopId);
   emit({ type: 'region', shopId, region });
 
   const products = await fetchProductList(cookie, shopId, emit);
@@ -487,13 +447,8 @@ async function exportShop(shopId, saveDir, emit) {
     rows.push(...buildRows(products[i], detail, shopId, region));
   }
 
-  const outDir = (saveDir || '').trim() || path.join(os.homedir(), 'Downloads');
-  try { fs.mkdirSync(outDir, { recursive: true }); }
-  catch (e) { throw new Error('无法创建保存目录：' + e.message); }
-  const d = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  const ts = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  const out = path.join(outDir, `商品规格_店铺${shopId}_${ts}.xlsx`);
+  const outDir = ensureDir(saveDir);
+  const out = path.join(outDir, `商品规格_店铺${shopId}_${timestampText()}.xlsx`);
   await writeExcel(rows, out);
   return { rows: rows.length, total: products.length, detailOk, file: path.basename(out) };
 }
@@ -511,7 +466,7 @@ function handleExport(body, res) {
   (async () => {
     const results = [];
     for (const id of shopIds) {
-      emit({ type: 'start', shopId: id });
+      // 每个店铺的 start / done 由 exportShop 与下方统一发出（避免重复 start 事件）
       try {
         const r = await exportShop(String(id), saveDir, emit);
         emit({ type: 'done', shopId: id, ok: true, rows: r.rows, total: r.total, file: r.file });

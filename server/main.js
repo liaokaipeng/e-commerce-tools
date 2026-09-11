@@ -14,7 +14,7 @@
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const { sendJson, serveStatic, readBody, createDispatcher } = require('./lib/http-utils');
+const { sendJson, serveStatic, readJsonBodySoft, createDispatcher } = require('./lib/http-utils');
 const settings = require('./lib/settings');
 const tiktok = require('./tiktok');
 const bidding = require('./bidding');
@@ -66,7 +66,7 @@ get('/api/settings', (req, res) => {
 
 post('/api/settings', async (req, res) => {
   try {
-    const { tool, dir } = JSON.parse(await readBody(req));
+    const { tool, dir } = await readJsonBodySoft(req, '/api/settings');
     if (tool !== 'tiktok' && tool !== 'bidding' && tool !== 'product-export') {
       sendJson(res, 400, { ok: false, message: '无效的工具' });
       return;

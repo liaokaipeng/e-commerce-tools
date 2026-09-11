@@ -17,10 +17,12 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { request } = require('./lib/http');
 const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
-// 会话 / Cookie / 店铺列表 / 延时 / 卖家中心域名：与竞价导出、取消竞价、商品导出共用同一实现
-const { HOST, UA, sleep, loadCookie, assertLoginOk, loadStores } = require('./lib/shopee-session');
+// 会话 / Cookie / 店铺列表 / 延时 / 接口请求层：与竞价导出、取消竞价、商品导出共用同一实现
+const {
+  HOST, DEFAULT_REGION, sleep, loadCookie, loadStores,
+  apiPost, buildShopeeUrl, fetchShopRegion,
+} = require('./lib/shopee-session');
 
 // 各店铺 SPU ID 配置（shopId -> SPU 文本，每行一个），持久化保存
 const SPU_CONFIG_FILE = path.join(__dirname, 'data', 'hotlisting-spu.json');
@@ -53,52 +55,11 @@ async function waitIfPaused(jobId) {
   }
 }
 
-/** 拼 buybox 接口 URL：公共参数 SPC_CDS_VER / SPC_CDS / cnsc_shop_id / cbsc_shop_region 统一附加 */
-function buildUrl(apiPath, { spcCds }, shopId, region) {
-  const params = new URLSearchParams();
-  params.set('SPC_CDS_VER', '2');
-  if (spcCds) params.set('SPC_CDS', spcCds);
-  params.set('cnsc_shop_id', String(shopId));
-  params.set('cbsc_shop_region', String(region));
-  return `${HOST}${apiPath}?${params.toString()}`;
-}
+// ============ Shopee 接口链路（URL 拼接与请求层见 lib/shopee-session.js） ============
 
-async function apiPost(cookie, url, body, referer) {
-  const resp = await request({
-    method: 'POST',
-    url,
-    headers: {
-      'Content-Type': 'application/json',
-      'Cookie': cookie.header,
-      'User-Agent': UA,
-      'Accept': 'application/json, text/plain, */*',
-      'Origin': HOST,
-      ...(referer ? { Referer: referer } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  assertLoginOk(resp);
-  const j = resp.json;
-  if (!j || typeof j !== 'object') throw new Error('接口返回异常：' + String(resp.text || '').slice(0, 120));
-  return j;
-}
-
-// ============ Shopee 接口链路 ============
-
-/** 获取店铺市场（cbsc_shop_region），失败默认 ph */
-async function fetchShopRegion(cookie, shopId) {
-  try {
-    const resp = await request({
-      url: `${HOST}/api/framework/selleraccount/shop_info/?SPC_CDS_VER=2&cnsc_shop_id=${shopId}`,
-      headers: { 'Cookie': cookie.header, 'User-Agent': UA, 'Accept': 'application/json' },
-    });
-    assertLoginOk(resp);
-    const j = resp.json;
-    if (j.code === 0 && j.data && j.data.shop_region) return String(j.data.shop_region).toLowerCase();
-  } catch (e) {
-    console.warn(`获取店铺 ${shopId} 市场失败，默认 ph: ${e.message}`);
-  }
-  return 'ph';
+/** 获取店铺市场（cbsc_shop_region），取不到时按 DEFAULT_REGION 继续（buybox 接口必须带该参数） */
+async function regionOf(cookie, shopId) {
+  return (await fetchShopRegion(cookie.header, shopId)) || DEFAULT_REGION;
 }
 
 /**
@@ -160,17 +121,16 @@ function extractEnrolledSkus(data) {
  * @returns {Array} extractEnrolledSkus 的行
  */
 async function fetchEnrolledSkus(cookie, shopId, region, spuId) {
-  const url = buildUrl('/api/mkt/buybox/get_rsku_vsku_list', cookie, shopId, region);
+  const url = buildShopeeUrl('/api/mkt/buybox/get_rsku_vsku_list', { shopId, region, spcCds: cookie.spcCds });
   const referer = `${HOST}/portal/marketing/cmt-buy-box?spuId=${spuId}&trackerSource=1&cnsc_shop_id=${shopId}`;
   const rows = [];
   let offset = 0;
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const j = await apiPost(cookie, url, {
+    const j = await apiPost(url, cookie.header, {
       from_condition: { spu_id: Number(spuId) },
       search_filter: { rsku_status: RSKU_STATUS_ENROLLED, item_name: '' },
       page_info: { offset, limit: PAGE_LIMIT },
-    }, referer);
-    if (j.code !== 0) throw new Error(`获取已注册列表失败: code=${j.code} msg=${j.msg || j.message || ''}`);
+    }, { referer, label: `获取 SPU ${spuId} 已注册列表` });
     const d = j.data || {};
     rows.push(...extractEnrolledSkus(d));
     const pageInfo = d.page_info || {};
@@ -183,13 +143,12 @@ async function fetchEnrolledSkus(cookie, shopId, region, spuId) {
 
 /** 取消注册一条 SKU（update_enroll，seller_decision 置 0） */
 async function unenrollSku(cookie, shopId, region, rskuId, vskuId) {
-  const j = await apiPost(cookie, buildUrl('/api/mkt/buybox/update_enroll', cookie, shopId, region), {
+  const url = buildShopeeUrl('/api/mkt/buybox/update_enroll', { shopId, region, spcCds: cookie.spcCds });
+  return apiPost(url, cookie.header, {
     rsku_id: Number(rskuId),
     vsku_id: Number(vskuId),
     seller_decision: 0,
-  });
-  if (j.code !== 0) throw new Error(`取消注册失败: code=${j.code} msg=${j.msg || j.message || ''}`);
-  return j;
+  }, { label: `取消注册 SKU ${rskuId}` });
 }
 
 // ============ 店铺 SPU 配置（持久化到 server/data/hotlisting-spu.json） ============
@@ -281,7 +240,7 @@ async function handlePreview(body, res) {
       continue;
     }
     try {
-      const region = await fetchShopRegion(cookie, String(id));
+      const region = await regionOf(cookie, String(id));
       const spuRows = [];
       for (const spuId of plan.spus) {
         try {
@@ -352,7 +311,7 @@ function handleRun(body, res) {
       let cancelled = 0;
       let failed = 0;
       try {
-        const region = await fetchShopRegion(cookie, String(id));
+        const region = await regionOf(cookie, String(id));
         for (const spuId of plan.spus) {
           await waitIfPaused(jobId);
           // 实时拉取最新已注册列表（预览后状态可能已变化）

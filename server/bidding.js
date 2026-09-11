@@ -6,44 +6,26 @@
 const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
-const { request } = require('./lib/http');
-const { sendJson, sse, readBody, readJsonBodySoft } = require('./lib/http-utils');
-// 会话 / Cookie / 店铺列表 / 金额换算：与取消竞价、取消Hot Listing、商品导出共用同一实现
-const { SESSION_FILE, UA, toAmount, assertLoginOk, loadCookieHeader, loadStores, readSession } = require('./lib/shopee-session');
+const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
+// 会话 / Cookie / 店铺列表 / 金额换算 / 接口请求层：与取消竞价、取消Hot Listing、商品导出共用同一实现
+const {
+  SESSION_FILE, DEFAULT_REGION, toAmount, loadCookieHeader, loadStores, readSession,
+  apiPost, buildShopeeUrl, fetchShopRegion,
+} = require('./lib/shopee-session');
+const { ensureDir, timestampText, styleExcelHeader } = require('./lib/export-utils');
 
-// ============ 数据抓取（纯 HTTP） ============
-async function apiGet(cookieHeader, url) {
-  const resp = await request({
-    url,
-    headers: { 'Cookie': cookieHeader, 'User-Agent': UA, 'Accept': 'application/json' },
-  });
-  assertLoginOk(resp);
-  return resp.json;
-}
-
-async function apiPost(cookieHeader, url, body) {
-  const resp = await request({
-    method: 'POST',
-    url,
-    headers: { 'Content-Type': 'application/json', 'Cookie': cookieHeader, 'User-Agent': UA, 'Accept': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  assertLoginOk(resp);
-  return resp.json;
-}
-
+// ============ 数据抓取（纯 HTTP，请求层见 lib/shopee-session.js） ============
 async function fetchWinningData(cookieHeader, shopId, region) {
-  const base = `https://seller.shopee.cn/api/mkt/bidding/get_item_ongoing_list?SPC_CDS_VER=2&cnsc_shop_id=${shopId}&cbsc_shop_region=${region}`;
+  const url = buildShopeeUrl('/api/mkt/bidding/get_item_ongoing_list', { shopId, region });
   const rows = [];
   let pageNum = 1;
   let total = 0;
   while (true) {
-    const j = await apiPost(cookieHeader, base, {
+    const j = await apiPost(url, cookieHeader, {
       filter: { page_tab: 3 },           // 3 = 获胜
       page_info: { page_num: pageNum, page_size: 100 },
       option: { with_performance: true },
-    });
-    if (j.code !== 0) throw new Error(`接口返回错误: code=${j.code} msg=${j.msg}`);
+    }, { label: '获取获胜竞价列表' });
     const d = j.data;
     total = d.total_model_count;
     for (const item of d.list) {
@@ -72,16 +54,13 @@ async function writeExcel(rows, outPath) {
   const ws = wb.addWorksheet('获胜竞价');
   const headers = ['商品编号（外层商品）', '编号', '系统竞价价格', '最终价格', '我的最佳价格', '我的活动价格'];
   ws.addRow(headers);
-  const headerRow = ws.getRow(1);
-  headerRow.font = { bold: true };
-  headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
   for (const r of rows) {
     ws.addRow([r['商品编号'], r['编号'], r['系统竞价价格'], r['最终价格'], r['我的最佳价格'], r['我的活动价格']]);
   }
   ws.columns.forEach(col => { col.width = 20; });
   ws.getColumn(1).width = 18;
   ws.getColumn(2).width = 18;
-  ws.views = [{ state: 'frozen', ySplit: 1 }];
+  styleExcelHeader(ws);
   await wb.xlsx.writeFile(outPath);
   return outPath;
 }
@@ -90,50 +69,40 @@ async function writeExcel(rows, outPath) {
 async function exportShop(shopId, saveDir) {
   const cookieHeader = loadCookieHeader();
 
-  // 1. 获取店铺市场（cbsc_shop_region）
-  let region = 'ph';
-  try {
-    const j = await apiGet(cookieHeader, `https://seller.shopee.cn/api/framework/selleraccount/shop_info/?SPC_CDS_VER=2&cnsc_shop_id=${shopId}`);
-    if (j.code === 0 && j.data?.shop_region) region = j.data.shop_region.toLowerCase();
-  } catch (e) {
-    // 获取市场失败时默认 ph，继续导出
-    console.warn(`获取店铺 ${shopId} 市场失败，默认 ph: ${e.message}`);
-  }
+  // 1. 获取店铺市场（cbsc_shop_region），取不到按 DEFAULT_REGION 继续导出
+  const region = (await fetchShopRegion(cookieHeader, shopId)) || DEFAULT_REGION;
 
   // 2. 拉取【获胜】数据
   const { rows, total } = await fetchWinningData(cookieHeader, shopId, region);
 
-  // 3. 导出 Excel（保存到用户指定目录，缺省为脚本目录；文件名带时分秒避免冲突）
-  const outDir = (saveDir || '').trim() || __dirname;
-  try { fs.mkdirSync(outDir, { recursive: true }); }
-  catch (e) { throw new Error('无法创建保存目录：' + e.message); }
-  const d = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  const ts = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  const out = path.join(outDir, `竞价获胜_店铺${shopId}_${ts}.xlsx`);
+  // 3. 导出 Excel（保存到用户指定目录，缺省为系统下载目录；文件名带时分秒避免冲突）
+  const outDir = ensureDir(saveDir);
+  const out = path.join(outDir, `竞价获胜_店铺${shopId}_${timestampText()}.xlsx`);
   await writeExcel(rows, out);
 
   return { rows: rows.length, total, file: path.basename(out) };
 }
 
 // ============ 接收扩展 Cookie ============
+// 注意：本接口是扩展（extension/popup.js）的对接协议，返回纯文本 'ok' / 错误说明，
+// 与其余接口的 JSON 风格不同，改动需同步扩展判断逻辑。
 async function handleCookie(req, res) {
+  const payload = await readJsonBodySoft(req, '/api/cookie');
+  const cookies = Array.isArray(payload.cookies) ? payload.cookies : [];
+  if (!cookies.length) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('no cookies');
+    return;
+  }
   try {
-    const payload = JSON.parse(await readBody(req));
-    const cookies = payload.cookies || [];
-    if (!cookies.length) {
-      res.writeHead(400, { 'Content-Type': 'text/plain' });
-      res.end('no cookies');
-      return;
-    }
     fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
     fs.writeFileSync(SESSION_FILE, JSON.stringify(payload, null, 2));
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
     console.log(`✅ 已收到 ${cookies.length} 个 Cookie，保存到 ${SESSION_FILE}`);
   } catch (e) {
-    res.writeHead(400, { 'Content-Type': 'text/plain' });
-    res.end('bad json: ' + e.message);
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('save failed: ' + e.message);
   }
 }
 

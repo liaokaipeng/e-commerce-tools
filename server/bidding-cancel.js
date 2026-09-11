@@ -8,49 +8,19 @@
  *   其中每个 model 都是一条待改进竞价（bid_status=40 / 价格缺乏竞争力），
  *   逐个点击「撤销」即 seller_withdraw { bid_id }。
  */
-const { request } = require('./lib/http');
 const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
-// 会话 / Cookie / 店铺列表 / 金额换算 / 延时：与竞价导出、取消Hot Listing、商品导出共用同一实现
-const { UA, toAmount, sleep, assertLoginOk, loadCookieHeader, loadStores } = require('./lib/shopee-session');
+// 会话 / Cookie / 店铺列表 / 金额换算 / 延时 / 接口请求层：与竞价导出、取消Hot Listing、商品导出共用
+const {
+  DEFAULT_REGION, toAmount, sleep, loadCookieHeader, loadStores,
+  apiPost, buildShopeeUrl, fetchShopRegion,
+} = require('./lib/shopee-session');
 
 // 待改进 Tab 的 page_tab 值（page_tab=1 为「进行中的竞价」全部，2 为其中「待改进」）
 const PAGE_TAB_IMPROVE = 2;
 // 逐条撤销之间的间隔，避免请求过快触发风控
 const WITHDRAW_DELAY_MS = 300;
 
-// ============ 数据抓取（纯 HTTP） ============
-async function apiGet(cookieHeader, url) {
-  const resp = await request({
-    url,
-    headers: { 'Cookie': cookieHeader, 'User-Agent': UA, 'Accept': 'application/json' },
-  });
-  assertLoginOk(resp);
-  return resp.json;
-}
-
-async function apiPost(cookieHeader, url, body) {
-  const resp = await request({
-    method: 'POST',
-    url,
-    headers: { 'Content-Type': 'application/json', 'Cookie': cookieHeader, 'User-Agent': UA, 'Accept': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  assertLoginOk(resp);
-  return resp.json;
-}
-
-// ============ Shopee 接口链路 ============
-
-/** 获取店铺市场（cbsc_shop_region），失败默认 ph */
-async function fetchShopRegion(cookieHeader, shopId) {
-  try {
-    const j = await apiGet(cookieHeader, `https://seller.shopee.cn/api/framework/selleraccount/shop_info/?SPC_CDS_VER=2&cnsc_shop_id=${shopId}`);
-    if (j.code === 0 && j.data && j.data.shop_region) return String(j.data.shop_region).toLowerCase();
-  } catch (e) {
-    console.warn(`获取店铺 ${shopId} 市场失败，默认 ph: ${e.message}`);
-  }
-  return 'ph';
-}
+// ============ Shopee 接口链路（请求层见 lib/shopee-session.js） ============
 
 /**
  * 从 get_item_ongoing_list 的响应 data 中提取「待改进」竞价行（纯函数，便于单测）。
@@ -82,16 +52,15 @@ function extractImprovementItems(data) {
  * @returns {Array<{itemId, itemName, modelId, modelName, bidId, price, suggestedPrice}>}
  */
 async function fetchImprovementBids(cookieHeader, shopId, region) {
-  const base = `https://seller.shopee.cn/api/mkt/bidding/get_item_ongoing_list?SPC_CDS_VER=2&cnsc_shop_id=${shopId}&cbsc_shop_region=${region}`;
+  const url = buildShopeeUrl('/api/mkt/bidding/get_item_ongoing_list', { shopId, region });
   const rows = [];
   let pageNum = 1;
   while (true) {
-    const j = await apiPost(cookieHeader, base, {
+    const j = await apiPost(url, cookieHeader, {
       filter: { page_tab: PAGE_TAB_IMPROVE },
       page_info: { page_num: pageNum, page_size: 100 },
       option: { with_performance: true },
-    });
-    if (j.code !== 0) throw new Error(`获取待改进列表失败: code=${j.code} msg=${j.msg}`);
+    }, { label: '获取待改进列表' });
     const d = j.data;
     rows.push(...extractImprovementItems(d));
     if (!d.has_more) break;
@@ -103,11 +72,8 @@ async function fetchImprovementBids(cookieHeader, shopId, region) {
 
 /** 撤销一条竞价（seller_withdraw） */
 async function withdrawBid(cookieHeader, shopId, region, bidId) {
-  const j = await apiPost(cookieHeader, `https://seller.shopee.cn/api/mkt/bidding/seller_withdraw?SPC_CDS_VER=2&cnsc_shop_id=${shopId}&cbsc_shop_region=${region}`, {
-    bid_id: String(bidId),
-  });
-  if (j.code !== 0) throw new Error(`撤销失败: code=${j.code} msg=${j.msg}`);
-  return j;
+  const url = buildShopeeUrl('/api/mkt/bidding/seller_withdraw', { shopId, region });
+  return apiPost(url, cookieHeader, { bid_id: String(bidId) }, { label: '撤销竞价' });
 }
 
 // ============ 预览接口（JSON，非 SSE） ============
@@ -131,7 +97,7 @@ async function handlePreview(body, res) {
     const store = stores.find(s => s.id === String(id));
     const name = store ? store.name : String(id);
     try {
-      const region = await fetchShopRegion(cookieHeader, String(id));
+      const region = (await fetchShopRegion(cookieHeader, String(id))) || DEFAULT_REGION;
       const rows = await fetchImprovementBids(cookieHeader, String(id), region);
       shops.push({
         shopId: String(id),
@@ -176,7 +142,7 @@ function handleRun(body, res) {
       const name = store ? store.name : String(id);
       emit({ type: 'shop-start', shopId: String(id), name });
       try {
-        const region = await fetchShopRegion(cookieHeader, String(id));
+        const region = (await fetchShopRegion(cookieHeader, String(id))) || DEFAULT_REGION;
         // 实时拉取最新待改进列表（预览后状态可能已变化）
         const rows = await fetchImprovementBids(cookieHeader, String(id), region);
         let cancelled = 0;

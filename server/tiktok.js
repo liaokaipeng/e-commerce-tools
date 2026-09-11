@@ -9,7 +9,7 @@
 'use strict';
 const fs = require('fs');
 const { execFile } = require('child_process');
-const { sendJson, sse, readBody } = require('./lib/http-utils');
+const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
 const { getDefault } = require('./lib/settings');
 const { detectProxy } = require('./tiktok/proxy');
 const { extractUrls } = require('./tiktok/parse');
@@ -30,8 +30,8 @@ function handleStatus(req, res) {
 /** POST /api/open-dir */
 async function handleOpenDir(req, res) {
   try {
-    const { dir } = JSON.parse(await readBody(req));
-    const d = (dir || '').trim();
+    const { dir } = await readJsonBodySoft(req, '/api/open-dir');
+    const d = String(dir || '').trim();
     if (!d) {
       sendJson(res, 400, { ok: false, message: '请先填写保存目录' });
       return;
@@ -46,16 +46,10 @@ async function handleOpenDir(req, res) {
 
 /** POST /api/download（SSE 流式进度） */
 async function handleDownload(req, res) {
-  let payload;
-  try {
-    const raw = (await readBody(req)).replace(/^\uFEFF/, '').trim();
-    payload = JSON.parse(raw);
-  } catch {
-    sendJson(res, 400, { ok: false, message: '无效的请求体' });
-    return;
-  }
+  // 宽容解析（含 BOM 容忍）：请求体非法时按空对象处理，由下方 urls 校验回 400
+  const payload = await readJsonBodySoft(req, '/api/download');
   const urls = extractUrls(payload.urls || '');
-  const saveDir = (payload.dir || '').trim();
+  const saveDir = String(payload.dir || '').trim();
 
   if (urls.length === 0) {
     sendJson(res, 400, { ok: false, message: '未识别到有效的 TikTok 链接，请检查输入（每行一个链接）' });

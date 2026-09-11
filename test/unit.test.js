@@ -35,6 +35,11 @@ const {
   optionImageIdOf, tierTableOf, buildRows, rowToCells, headerCells,
 } = require('../server/product-export');
 const { nowSec, buildBaseString, hmacHex, maskToken } = require('../server/lib/openapi-utils');
+const { parseJsonText } = require('../server/lib/http-utils');
+const {
+  buildShopeeUrl, DEFAULT_REGION, HOST,
+} = require('../server/lib/shopee-session');
+const { timestampText, ensureDir, defaultOutDir } = require('../server/lib/export-utils');
 const openapi = require('../server/openapi');
 const { isAuthDead, isAuthRetryable, planRefresh } = require('../server/openapi/client');
 const { createDispatcher } = require('../server/lib/http-utils');
@@ -437,6 +442,41 @@ async function run() {
     t('取消：中途取消收到 cancelled', evsB.some((e) => e.type === 'cancelled'), JSON.stringify(evsB));
     t('取消：row-done 与 cancelled 同时存在', evsB.some((e) => e.type === 'row-done') && evsB.some((e) => e.type === 'cancelled'));
     finishJob(jobB);
+  }
+
+  // ===== 共享层：请求体解析 / 卖家中心 URL 拼接 / 导出工具（四模块收敛后的公共契约） =====
+  {
+    t('parseJsonText 容忍 UTF-8 BOM', parseJsonText('\uFEFF{"a":1}').a === 1 && parseJsonText('{"b":2}').b === 2);
+    t('parseJsonText 非法 JSON 抛错', (() => {
+      try { parseJsonText('not-json'); return false; } catch { return true; }
+    })());
+
+    const u = buildShopeeUrl('/api/mkt/buybox/update_enroll', {
+      shopId: '557630453', region: 'ph', spcCds: 'abc123',
+      business: { page_number: 1, page_size: 45, empty: '', nil: null },
+    });
+    t('buildShopeeUrl 拼接 HOST + 路径 + 公共参数',
+      u.startsWith(`${HOST}/api/mkt/buybox/update_enroll?`) && u.includes('SPC_CDS_VER=2')
+      && u.includes('SPC_CDS=abc123') && u.includes('cnsc_shop_id=557630453') && u.includes('cbsc_shop_region=ph'), u);
+    t('buildShopeeUrl 带业务参数且跳过空值',
+      u.includes('page_number=1') && u.includes('page_size=45') && !u.includes('empty=') && !u.includes('nil='), u);
+    t('buildShopeeUrl 无 region 时不产出 cbsc_shop_region（商品导出用）',
+      !buildShopeeUrl('/api/v3/product/get_product_info', { shopId: '1', business: { product_id: 'x' } }).includes('cbsc_shop_region'));
+    t('buildShopeeUrl 无 SPC_CDS 时跳过该参数', !buildShopeeUrl('/x', { shopId: '1' }).includes('SPC_CDS='));
+    t('DEFAULT_REGION 与竞价系原兜底口径一致', DEFAULT_REGION === 'ph');
+
+    t('timestampText 形如 YYYY-MM-DD_HHmmss', /^\d{4}-\d{2}-\d{2}_\d{6}$/.test(timestampText(new Date(2026, 8, 11, 20, 5, 7))), timestampText());
+    t('timestampText 补零', timestampText(new Date(2026, 0, 3, 4, 5, 6)) === '2026-01-03_040506', timestampText(new Date(2026, 0, 3, 4, 5, 6)));
+    t('defaultOutDir 指向用户下载目录', defaultOutDir().endsWith('Downloads'), defaultOutDir());
+    {
+      const dir = path.join(os.tmpdir(), `kp_export_${Date.now()}`, 'a', 'b');
+      try {
+        t('ensureDir 递归创建目录', ensureDir(dir) === dir && fs.existsSync(dir));
+        t('ensureDir 空入参回落默认下载目录', ensureDir('') === defaultOutDir());
+      } finally {
+        try { fs.rmSync(path.dirname(dir), { recursive: true, force: true }); } catch { /* 忽略 */ }
+      }
+    }
   }
 
   // ===== 监控：规则引擎（纯函数） =====

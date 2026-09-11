@@ -97,7 +97,6 @@ async function loadCredsFromServer(quiet) {
         if (cur.auth) auth.value = cur.auth;
         if (cur.cookie) cookie.value = cur.cookie;
         setUseridIfNotFocused(cur.userid);
-        const t = cur.updatedAt ? new Date(cur.updatedAt).toLocaleString() : '';
         if (!quiet) saveCreds();
       } 
     } else {

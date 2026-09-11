@@ -14,7 +14,7 @@
  *   job.js        Job/SSE 事件、回放、取消与收尾
  */
 const crypto = require('crypto');
-const { sendJson, sse, readBody } = require('./lib/http-utils');
+const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
 const { SITES } = require('./video/constants');
 const {
   storedCreds,
@@ -70,44 +70,44 @@ function register({ get, post }) {
   });
 
   post('/api/creds', async (req, res) => {
-    try {
-      const p = JSON.parse(await readBody(req));
-      // 扩展单条推送：{ site, auth, cookie, shopId, userid }
-      if (p.site && SITES[p.site]) {
-        if (p.site === 'cn' && p.shopId) setCnShop(p.shopId, credsPatch(p, false));
-        else setCredsFor(p.site, credsPatch(p, true));
-      }
-      // 扩展批量推送：{ sites: { cn: { shops: {...} }, ph: {...} } }
-      if (p.sites && typeof p.sites === 'object') {
-        for (const [s, v] of Object.entries(p.sites)) {
-          if (!SITES[s] || !v || typeof v !== 'object') continue;
-          if (s === 'cn') {
-            if (v.shops && typeof v.shops === 'object') {
-              for (const [shopId, sv] of Object.entries(v.shops)) {
-                if (!sv || typeof sv !== 'object') continue;
-                setCnShop(shopId, credsPatch(sv, false));
-              }
-            } else if (v.shopId) {
-              // 兼容旧扁平批量格式：{ cn: { auth, cookie, shopId, userid } } → 归入该店铺
-              setCnShop(v.shopId, credsPatch(v, false));
+    const p = await readJsonBodySoft(req, '/api/creds');
+    let applied = 0;
+    // 扩展单条推送：{ site, auth, cookie, shopId, userid }
+    if (p.site && SITES[p.site]) {
+      if (p.site === 'cn' && p.shopId) setCnShop(p.shopId, credsPatch(p, false));
+      else setCredsFor(p.site, credsPatch(p, true));
+      applied += 1;
+    }
+    // 扩展批量推送：{ sites: { cn: { shops: {...} }, ph: {...} } }
+    if (p.sites && typeof p.sites === 'object') {
+      for (const [s, v] of Object.entries(p.sites)) {
+        if (!SITES[s] || !v || typeof v !== 'object') continue;
+        applied += 1;
+        if (s === 'cn') {
+          if (v.shops && typeof v.shops === 'object') {
+            for (const [shopId, sv] of Object.entries(v.shops)) {
+              if (!sv || typeof sv !== 'object') continue;
+              setCnShop(shopId, credsPatch(sv, false));
             }
-          } else {
-            setCredsFor(s, credsPatch(v, true));
+          } else if (v.shopId) {
+            // 兼容旧扁平批量格式：{ cn: { auth, cookie, shopId, userid } } → 归入该店铺
+            setCnShop(v.shopId, credsPatch(v, false));
           }
+        } else {
+          setCredsFor(s, credsPatch(v, true));
         }
       }
-    } catch (e) { /* ignore */ }
+    }
+    // 既无 site 也无 sites：没有写入任何凭证，明确回报失败（不再静默返回 ok）
+    if (!applied) {
+      sendJson(res, 400, { ok: false, message: '缺少 site 或 sites，未写入任何凭证' });
+      return;
+    }
     sendJson(res, 200, { ok: true, updatedAt: Date.now() });
   });
 
   post('/api/start', async (req, res) => {
-    let parsed;
-    try {
-      parsed = JSON.parse(await readBody(req));
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: 'Invalid JSON' });
-      return;
-    }
+    const parsed = await readJsonBodySoft(req, '/api/start');
     const { site = 'cn', rows, auth, cookie, shopId, userid } = parsed;
     const siteKey = SITES[site] ? site : 'cn';
     if (!Array.isArray(rows) || !rows.length) {
@@ -148,8 +148,8 @@ function register({ get, post }) {
 
   // 取消任务：标记取消并中断进行中的请求；processJob 见取消标志后广播 cancelled 并收尾
   post('/api/cancel', async (req, res) => {
-    let jobId = '';
-    try { jobId = String((JSON.parse(await readBody(req)) || {}).jobId || ''); } catch (e) { jobId = ''; }
+    const parsed = await readJsonBodySoft(req, '/api/cancel');
+    const jobId = String(parsed.jobId || '');
     if (!jobId) {
       sendJson(res, 400, { ok: false, message: '缺少 jobId' });
       return;
