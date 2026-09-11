@@ -23,5 +23,8 @@ research/
 # HAR 抓包文件（含登录 Cookie，不入库）
 *.har
 
+# AI 助手本地记忆目录（工作日志 / 会话上下文，不入库）
+.workbuddy/
+
 .DS_Store
 Thumbs.db
