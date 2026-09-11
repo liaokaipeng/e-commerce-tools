@@ -6,7 +6,7 @@
  * 后续功能模块统一经 openapi/client.js 的 callOpenApi 调用官方接口，无需重复实现签名与刷新。
  */
 'use strict';
-const { sendJson, readJsonBody } = require('./lib/http-utils');
+const { sendJson, jsonAction } = require('./lib/http-utils');
 const { CALLBACK_PORT } = require('./lib/config');
 const { DEFAULT_REDIRECT, LOCAL_REDIRECT_HOSTS } = require('./openapi/constants');
 const { nowSec, maskToken } = require('./lib/openapi-utils');
@@ -126,149 +126,119 @@ function register({ get, post }) {
   });
 
   // 保存 App 配置（partner_id / partner_key / 环境）
-  post('/api/openapi/app', async (req, res) => {
-    try {
-      const body = await readJsonBody(req);
-      const app = store.setApp({ partnerId: body.partnerId, partnerKey: body.partnerKey, env: body.env });
-      sendJson(res, 200, {
-        ok: true,
-        env: app.env,
-        partnerId: app.partnerId,
-        partnerKeyMasked: maskToken(app.partnerKey),
-        message: 'App 配置已保存（仅存于本机 server/data，不会上传）',
-      });
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: e.message });
-    }
-  });
+  post('/api/openapi/app', jsonAction('/api/openapi/app', (body, req, res) => {
+    const app = store.setApp({ partnerId: body.partnerId, partnerKey: body.partnerKey, env: body.env });
+    sendJson(res, 200, {
+      ok: true,
+      env: app.env,
+      partnerId: app.partnerId,
+      partnerKeyMasked: maskToken(app.partnerKey),
+      message: 'App 配置已保存（仅存于本机 server/data，不会上传）',
+    });
+  }));
 
   // 生成卖家授权链接
-  post('/api/openapi/auth-url', async (req, res) => {
-    try {
-      const body = await readJsonBody(req);
-      const redirectInput = String(body.redirect || '').trim() || DEFAULT_REDIRECT;
-      const { url: redirect, mode } = validateRedirect(redirectInput);
-      const app = store.getApp();
-      if (!app) throw new Error('尚未配置 App，请先保存 partner_id / partner_key');
-      const { authUrl, expire } = await client.getAuthUrl(app.env, redirect);
-      sendJson(res, 200, {
-        ok: true,
-        authUrl,
-        expire,
-        redirect,
-        mode,
-        message: mode === 'auto'
-          ? '请复制链接在浏览器打开并选择店铺授权（授权后自动跳回本工具）'
-          : '请复制链接在浏览器打开并选择店铺授权；授权后浏览器会跳到你的站点，把地址栏完整链接（含 code=…）复制回本工具「手动完成授权」粘贴',
-      });
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: e.message });
-    }
-  });
+  post('/api/openapi/auth-url', jsonAction('/api/openapi/auth-url', async (body, req, res) => {
+    const redirectInput = String(body.redirect || '').trim() || DEFAULT_REDIRECT;
+    const { url: redirect, mode } = validateRedirect(redirectInput);
+    const app = store.getApp();
+    if (!app) throw new Error('尚未配置 App，请先保存 partner_id / partner_key');
+    const { authUrl, expire } = await client.getAuthUrl(app.env, redirect);
+    sendJson(res, 200, {
+      ok: true,
+      authUrl,
+      expire,
+      redirect,
+      mode,
+      message: mode === 'auto'
+        ? '请复制链接在浏览器打开并选择店铺授权（授权后自动跳回本工具）'
+        : '请复制链接在浏览器打开并选择店铺授权；授权后浏览器会跳到你的站点，把地址栏完整链接（含 code=…）复制回本工具「手动完成授权」粘贴',
+    });
+  }));
 
   // 授权回调：授权码换 token 并持久化。
   // 主账号授权时回调只有 code + main_account_id（无 shop_id），token/get 会返回 shop_id_list，
   // 对该主账号下全部已授权店铺统一保存同一对 token（账号级通用）。
-  post('/api/openapi/auth-callback', async (req, res) => {
-    try {
-      const body = await readJsonBody(req);
-      const code = String(body.code || '').trim();
-      const shopId = String(body.shopId || '').trim();
-      const mainAccountId = String(body.mainAccountId || '').trim();
-      if (!code) throw new Error('缺少授权码 code');
-      if (!shopId && !mainAccountId) {
-        throw new Error('缺少 shop_id 或 main_account_id，请复制授权跳转后的完整地址栏链接');
-      }
-      const app = store.getApp();
-      if (!app) throw new Error('尚未配置 App，请先保存 partner_id / partner_key');
-      const t = await client.exchangeToken(app.env, { code, shopId, mainAccountId });
-      const shops = t.authorizedShopIds.length ? t.authorizedShopIds : [];
-      if (!shops.length) throw new Error('官方未返回店铺列表，请重新生成授权链接并授权');
-      const accessExpireAt = nowSec() + t.expireIn;
-      for (const id of shops) {
-        store.setShop(app.env, id, {
-          merchantId: t.merchantId,
-          accessToken: t.accessToken,
-          refreshToken: t.refreshToken,
-          accessExpireAt,
-          invalid: false, // 重新授权成功即恢复
-          invalidReason: '',
-          invalidAt: 0,
-        });
-      }
-      console.log(`✅ 开放平台授权成功：${shops.length} 个店铺（${shops.join(', ')}，token 到期 ${new Date(accessExpireAt * 1000).toLocaleString('zh-CN', { hour12: false })}）`);
-      notifyMonitorAuthChanged(); // 大屏立即恢复这些店铺的采集
-      sendJson(res, 200, {
-        ok: true,
-        shopIds: shops,
-        env: app.env,
-        authorizedShopIds: t.authorizedShopIds,
-        accessTokenMasked: maskToken(t.accessToken),
-        message: `授权成功，已保存 ${shops.length} 个店铺`,
-      });
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: e.message });
+  post('/api/openapi/auth-callback', jsonAction('/api/openapi/auth-callback', async (body, req, res) => {
+    const code = String(body.code || '').trim();
+    const shopId = String(body.shopId || '').trim();
+    const mainAccountId = String(body.mainAccountId || '').trim();
+    if (!code) throw new Error('缺少授权码 code');
+    if (!shopId && !mainAccountId) {
+      throw new Error('缺少 shop_id 或 main_account_id，请复制授权跳转后的完整地址栏链接');
     }
-  });
+    const app = store.getApp();
+    if (!app) throw new Error('尚未配置 App，请先保存 partner_id / partner_key');
+    const t = await client.exchangeToken(app.env, { code, shopId, mainAccountId });
+    const shops = t.authorizedShopIds.length ? t.authorizedShopIds : [];
+    if (!shops.length) throw new Error('官方未返回店铺列表，请重新生成授权链接并授权');
+    const accessExpireAt = nowSec() + t.expireIn;
+    for (const id of shops) {
+      store.setShop(app.env, id, {
+        merchantId: t.merchantId,
+        accessToken: t.accessToken,
+        refreshToken: t.refreshToken,
+        accessExpireAt,
+        invalid: false, // 重新授权成功即恢复
+        invalidReason: '',
+        invalidAt: 0,
+      });
+    }
+    console.log(`✅ 开放平台授权成功：${shops.length} 个店铺（${shops.join(', ')}，token 到期 ${new Date(accessExpireAt * 1000).toLocaleString('zh-CN', { hour12: false })}）`);
+    notifyMonitorAuthChanged(); // 大屏立即恢复这些店铺的采集
+    sendJson(res, 200, {
+      ok: true,
+      shopIds: shops,
+      env: app.env,
+      authorizedShopIds: t.authorizedShopIds,
+      accessTokenMasked: maskToken(t.accessToken),
+      message: `授权成功，已保存 ${shops.length} 个店铺`,
+    });
+  }));
 
   // 手动刷新某店铺 token（旧 refresh_token 刷新后立即失效；新 token 对绑定该店铺）
-  post('/api/openapi/refresh', async (req, res) => {
-    try {
-      const body = await readJsonBody(req);
-      const shopId = String(body.shopId || '').trim();
-      if (!shopId) throw new Error('缺少 shop_id');
-      const app = store.getApp();
-      if (!app) throw new Error('尚未配置 App，请先保存 partner_id / partner_key');
-      const shop = store.getShop(app.env, shopId);
-      if (!shop) throw new Error(`店铺 ${shopId} 尚未授权`);
-      if (shop.invalid) {
-        throw new Error(`店铺 ${shopId} 授权已失效：${shop.invalidReason || '凭证无效'}，重新授权后才能恢复`);
-      }
-      const oldRefresh = shop.refreshToken;
-      const fresh = await client.refreshToken(app.env, shopId, oldRefresh);
-      const synced = client.saveRefreshResult(app.env, shopId, oldRefresh, fresh);
-      notifyMonitorAuthChanged(); // 刷新成功即恢复该店铺采集
-      sendJson(res, 200, {
-        ok: true,
-        shopId,
-        syncedShops: synced,
-        accessTokenMasked: maskToken(fresh.accessToken),
-        accessExpireAt: nowSec() + fresh.expireIn,
-        message: 'Token 刷新成功（旧 refresh_token 已失效）',
-      });
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: e.message });
+  post('/api/openapi/refresh', jsonAction('/api/openapi/refresh', async (body, req, res) => {
+    const shopId = String(body.shopId || '').trim();
+    if (!shopId) throw new Error('缺少 shop_id');
+    const app = store.getApp();
+    if (!app) throw new Error('尚未配置 App，请先保存 partner_id / partner_key');
+    const shop = store.getShop(app.env, shopId);
+    if (!shop) throw new Error(`店铺 ${shopId} 尚未授权`);
+    if (shop.invalid) {
+      throw new Error(`店铺 ${shopId} 授权已失效：${shop.invalidReason || '凭证无效'}，重新授权后才能恢复`);
     }
-  });
+    const oldRefresh = shop.refreshToken;
+    const fresh = await client.refreshToken(app.env, shopId, oldRefresh);
+    const synced = client.saveRefreshResult(app.env, shopId, oldRefresh, fresh);
+    notifyMonitorAuthChanged(); // 刷新成功即恢复该店铺采集
+    sendJson(res, 200, {
+      ok: true,
+      shopId,
+      syncedShops: synced,
+      accessTokenMasked: maskToken(fresh.accessToken),
+      accessExpireAt: nowSec() + fresh.expireIn,
+      message: 'Token 刷新成功（旧 refresh_token 已失效）',
+    });
+  }));
 
   // 删除某店铺授权（幂等）
-  post('/api/openapi/remove-shop', async (req, res) => {
-    try {
-      const body = await readJsonBody(req);
-      const shopId = String(body.shopId || '').trim();
-      if (!shopId) throw new Error('缺少 shop_id');
-      const app = store.getApp();
-      const removed = app ? store.removeShop(app.env, shopId) : false;
-      if (removed) notifyMonitorAuthChanged();
-      sendJson(res, 200, { ok: true, removed, message: removed ? '已删除店铺授权' : '该店铺本就没有授权记录' });
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: e.message });
-    }
-  });
+  post('/api/openapi/remove-shop', jsonAction('/api/openapi/remove-shop', (body, req, res) => {
+    const shopId = String(body.shopId || '').trim();
+    if (!shopId) throw new Error('缺少 shop_id');
+    const app = store.getApp();
+    const removed = app ? store.removeShop(app.env, shopId) : false;
+    if (removed) notifyMonitorAuthChanged();
+    sendJson(res, 200, { ok: true, removed, message: removed ? '已删除店铺授权' : '该店铺本就没有授权记录' });
+  }));
 
   // 测试登录：用店铺 token 调 get_shop_info（GET 查询类接口）验证有效性并返回店铺名
-  post('/api/openapi/test', async (req, res) => {
-    try {
-      const body = await readJsonBody(req);
-      const shopId = String(body.shopId || '').trim();
-      if (!shopId) throw new Error('缺少 shop_id');
-      const info = await client.callOpenApi('/api/v2/shop/get_shop_info', {}, { shopId, method: 'GET' });
-      const shopName = String(info.shop_name || (info.data && info.data.shop_name) || '未知店铺名');
-      sendJson(res, 200, { ok: true, shopId, shopName, message: `登录有效，店铺名：${shopName}` });
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: e.message });
-    }
-  });
+  post('/api/openapi/test', jsonAction('/api/openapi/test', async (body, req, res) => {
+    const shopId = String(body.shopId || '').trim();
+    if (!shopId) throw new Error('缺少 shop_id');
+    const info = await client.callOpenApi('/api/v2/shop/get_shop_info', {}, { shopId, method: 'GET' });
+    const shopName = String(info.shop_name || (info.data && info.data.shop_name) || '未知店铺名');
+    sendJson(res, 200, { ok: true, shopId, shopName, message: `登录有效，店铺名：${shopName}` });
+  }));
 
   // 官方授权页跳回地址（内联 HTML，读取 query 后自动换取 token）
   get('/openapi/callback', (req, res) => {

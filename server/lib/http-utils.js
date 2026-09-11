@@ -1,5 +1,6 @@
 // 通用 HTTP 工具：JSON 响应 / 请求体读取 / 静态文件服务
 // 供 main.js 与各业务模块共用，避免重复实现。
+const fs = require('fs');
 const path = require('path');
 
 const MIME = {
@@ -110,20 +111,6 @@ async function readJsonBody(req) {
 }
 
 /**
- * 读取并解析 JSON 请求体（宽容）：解析失败只记一条 warn 并返回 {}，
- * 供「空请求体也应正常处理」的批量操作接口使用（由各路由自行判定缺字段并回 400）。
- * @param {string} label 日志中标识来源的接口路径（如 '/api/export'）
- */
-async function readJsonBodySoft(req, label = '') {
-  try {
-    return parseJsonText(await readBody(req));
-  } catch (e) {
-    console.warn(`解析 ${label} 请求体失败:`, e.message);
-    return {};
-  }
-}
-
-/**
  * 读取路由请求体（宽容）：解析失败只记一条 warn 并返回 {}，
  * 供「空请求体也应正常处理」的批量操作接口使用（由各路由自行判定缺字段并回 400）。
  *
@@ -147,9 +134,36 @@ async function readRouteBody(req, label = '', ctx) {
   }
 }
 
+/** readJsonBodySoft 与 readRouteBody 行为完全一致，保留为别名以免调用方大改 */
+const readJsonBodySoft = readRouteBody;
+
+/**
+ * 包装「请求体必须合法 JSON」的 POST 处理器：内部异常统一回 400 { ok:false, message }。
+ * 供 monitor / openapi 等以 body 为业务参数的接口使用，省去每个路由重复的
+ * `try { body = await readJsonBody(req) } catch (e) { sendJson(res, 400, ...) }` 样板。
+ * @param {string} label 日志与前端提示中标识来源的接口路径
+ * @param {(body: object, req: object, res: object, url: URL) => any} handler 业务处理器
+ * @returns {Function} 可直接传给 post(label, fn) 的处理器
+ */
+function jsonAction(label, handler) {
+  return async (req, res, url) => {
+    let body;
+    try {
+      body = JSON.parse(String(await readBody(req)).replace(/^\uFEFF/, ''));
+    } catch {
+      sendJson(res, 400, { ok: false, message: '请求体不是合法 JSON' });
+      return;
+    }
+    try {
+      await handler(body, req, res, url);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, message: e.message });
+    }
+  };
+}
+
 /** 静态文件服务（含目录->index 映射与路径穿越防护） */
 function serveStatic(res, urlPath, publicDir) {
-  const fs = require('fs');
   const rel = DIR_INDEX[urlPath] || urlPath;
   const filePath = path.join(publicDir, rel);
   // 用相对路径判断是否越出根目录，避免前缀近似（如 /dist-evil）绕过 startsWith 校验
@@ -170,4 +184,4 @@ function serveStatic(res, urlPath, publicDir) {
   });
 }
 
-module.exports = { sendJson, createDispatcher, sse, readBody, parseJsonText, readJsonBody, readJsonBodySoft, readRouteBody, serveStatic };
+module.exports = { sendJson, createDispatcher, sse, readBody, parseJsonText, readJsonBody, readJsonBodySoft, readRouteBody, jsonAction, serveStatic };

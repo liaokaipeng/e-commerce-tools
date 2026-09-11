@@ -17,7 +17,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { sendJson, sse, readJsonBodySoft, readRouteBody } = require('./lib/http-utils');
+const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
 // 长任务注册中心（暂停 / 继续 / 取消 / SSE 断开即取消 / TTL 清理）：与取消竞价共用
 const jobs = require('./lib/jobs');
 // 会话 / Cookie / 店铺列表 / 延时 / 接口请求层：与竞价导出、取消竞价、商品导出共用同一实现
@@ -395,26 +395,8 @@ function register({ get, post }) {
   });
 
   // 暂停 / 继续 / 取消执行中的任务（body { jobId }，jobId 由 run 的 start 事件下发）
-  post('/api/hotlisting-cancel/pause', async (req, res) => {
-    const parsed = await readRouteBody(req, '/api/hotlisting-cancel/pause', { res });
-    if (!parsed) return;
-    const ok = jobs.setPaused(parsed.jobId, true);
-    sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
-  });
-
-  post('/api/hotlisting-cancel/resume', async (req, res) => {
-    const parsed = await readRouteBody(req, '/api/hotlisting-cancel/resume', { res });
-    if (!parsed) return;
-    const ok = jobs.setPaused(parsed.jobId, false);
-    sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
-  });
-
-  post('/api/hotlisting-cancel/cancel', async (req, res) => {
-    const parsed = await readRouteBody(req, '/api/hotlisting-cancel/cancel', { res });
-    if (!parsed) return;
-    const ok = jobs.cancel(parsed.jobId, '用户取消');
-    sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
-  });
+  // 三个路由的样板与 404 语义统一由 lib/jobs.registerControlRoutes 提供
+  jobs.registerControlRoutes(post, '/api/hotlisting-cancel');
 }
 
 module.exports = { register, parseSpuList, extractEnrolledSkus, fetchEnrolledSkus, unenrollSku, normalizeSpuMap, resolvePerShopSpus };

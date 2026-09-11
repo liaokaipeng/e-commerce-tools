@@ -8,7 +8,7 @@
  *   其中每个 model 都是一条待改进竞价（bid_status=40 / 价格缺乏竞争力），
  *   逐个点击「撤销」即 seller_withdraw { bid_id }。
  */
-const { sendJson, sse, readJsonBodySoft, readRouteBody } = require('./lib/http-utils');
+const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
 // 会话 / Cookie / 店铺列表 / 金额换算 / 延时 / 接口请求层：与竞价导出、取消Hot Listing、商品导出共用
 const {
   DEFAULT_REGION, toAmount, sleep, loadCookieHeader, loadStores,
@@ -218,26 +218,8 @@ function register({ post }) {
   });
 
   // 暂停 / 继续 / 取消执行中的任务（body { jobId }，jobId 由 run 的 start 事件下发）
-  post('/api/bidding-cancel/pause', async (req, res) => {
-    const parsed = await readRouteBody(req, '/api/bidding-cancel/pause', { res });
-    if (!parsed) return;
-    const ok = jobs.setPaused(parsed.jobId, true);
-    sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
-  });
-
-  post('/api/bidding-cancel/resume', async (req, res) => {
-    const parsed = await readRouteBody(req, '/api/bidding-cancel/resume', { res });
-    if (!parsed) return;
-    const ok = jobs.setPaused(parsed.jobId, false);
-    sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
-  });
-
-  post('/api/bidding-cancel/cancel', async (req, res) => {
-    const parsed = await readRouteBody(req, '/api/bidding-cancel/cancel', { res });
-    if (!parsed) return;
-    const ok = jobs.cancel(parsed.jobId, '用户取消');
-    sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
-  });
+  // 三个路由的样板与 404 语义统一由 lib/jobs.registerControlRoutes 提供
+  jobs.registerControlRoutes(post, '/api/bidding-cancel');
 }
 
 module.exports = { register, fetchImprovementBids, withdrawBid, extractImprovementItems, toAmount };

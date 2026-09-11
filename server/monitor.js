@@ -13,7 +13,7 @@
  *   engine.js     告警生命周期（去重/升级/恢复/确认关闭）+ SSE 广播
  *   scheduler.js  巡检调度（每店串行、跨店并发限流、手动触发）
  */
-const { sendJson, sse, readJsonBody } = require('./lib/http-utils');
+const { sendJson, sse, jsonAction } = require('./lib/http-utils');
 const { MATRIX_METRICS, METRICS } = require('./monitor/constants');
 const { levelOf } = require('./monitor/rules');
 const { toRmb, fromRmb, roundMoney, symbolOf, ensureRates } = require('./monitor/currency');
@@ -101,19 +101,14 @@ function register({ get, post }) {
   });
 
   // 告警操作：确认 / 关闭
-  post('/api/monitor/alert-action', async (req, res) => {
-    try {
-      const body = await readJsonBody(req);
-      const id = String(body.id || '').trim();
-      const action = String(body.action || '').trim();
-      if (!id) throw new Error('缺少告警 id');
-      const a = action === 'ack' ? engine.ackAlert(id) : action === 'close' ? engine.closeAlert(id) : null;
-      if (!a) throw new Error(action ? '无效的操作：' + action : '告警不存在');
-      sendJson(res, 200, { ok: true, alert: a });
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: e.message });
-    }
-  });
+  post('/api/monitor/alert-action', jsonAction('/api/monitor/alert-action', (body, req, res) => {
+    const id = String(body.id || '').trim();
+    const action = String(body.action || '').trim();
+    if (!id) throw new Error('缺少告警 id');
+    const a = action === 'ack' ? engine.ackAlert(id) : action === 'close' ? engine.closeAlert(id) : null;
+    if (!a) throw new Error(action ? '无效的操作：' + action : '告警不存在');
+    sendJson(res, 200, { ok: true, alert: a });
+  }));
 
   // 指标趋势（?shopId=&metric=&days=7）：采样点 + 阈值（画参考线用）；金额指标按模式换算展示
   get('/api/monitor/trend', (req, res, url) => {
@@ -161,16 +156,11 @@ function register({ get, post }) {
     sendJson(res, 200, { ok: true, rules: store.getRules() });
   });
 
-  post('/api/monitor/rules', async (req, res) => {
-    try {
-      const body = await readJsonBody(req);
-      const rules = store.setRuleOverrides(body.overrides);
-      engine.broadcast('rules', { at: Date.now() });
-      sendJson(res, 200, { ok: true, rules });
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: e.message });
-    }
-  });
+  post('/api/monitor/rules', jsonAction('/api/monitor/rules', (body, req, res) => {
+    const rules = store.setRuleOverrides(body.overrides);
+    engine.broadcast('rules', { at: Date.now() });
+    sendJson(res, 200, { ok: true, rules });
+  }));
 
   // 监控店铺配置：GET 返回全部已授权店铺及其监控状态（含未监控的，供配置面板勾选）；
   // POST 保存排除名单 { excludedShopIds: [] }（未列出的已授权店铺默认监控）。
@@ -186,23 +176,18 @@ function register({ get, post }) {
     sendJson(res, 200, { ok: true, configured: openapiStatus.configured, shops });
   });
 
-  post('/api/monitor/shops-config', async (req, res) => {
-    try {
-      const body = await readJsonBody(req);
-      if (!body || !Array.isArray(body.excludedShopIds)) throw new Error('excludedShopIds 必须是数组');
-      const before = store.getExcludedShopIds();
-      const after = store.setExcludedShopIds(body.excludedShopIds);
-      // 新排除的店铺：关闭其未关闭告警（不再占用大屏统计）；重新勾选后采集触发会重新打开
-      for (const id of after) {
-        if (!before.has(id)) engine.closeShopAlerts(id);
-      }
-      scheduler.notifyConfigChanged();
-      engine.broadcast('config', { at: Date.now() });
-      sendJson(res, 200, { ok: true, excludedShopIds: [...after], message: '监控店铺配置已保存' });
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: e.message });
+  post('/api/monitor/shops-config', jsonAction('/api/monitor/shops-config', (body, req, res) => {
+    if (!body || !Array.isArray(body.excludedShopIds)) throw new Error('excludedShopIds 必须是数组');
+    const before = store.getExcludedShopIds();
+    const after = store.setExcludedShopIds(body.excludedShopIds);
+    // 新排除的店铺：关闭其未关闭告警（不再占用大屏统计）；重新勾选后采集触发会重新打开
+    for (const id of after) {
+      if (!before.has(id)) engine.closeShopAlerts(id);
     }
-  });
+    scheduler.notifyConfigChanged();
+    engine.broadcast('config', { at: Date.now() });
+    sendJson(res, 200, { ok: true, excludedShopIds: [...after], message: '监控店铺配置已保存' });
+  }));
 
   // 金额单位模式：GET 读取全局设置；POST 保存 { mode: 'local' | 'rmb' }（默认 local 当地货币）。
   // 规则面板的金额阈值始终按人民币配置与比较，模式只影响大屏金额展示（矩阵/趋势/告警消息）。
@@ -210,41 +195,26 @@ function register({ get, post }) {
     sendJson(res, 200, { ok: true, mode: store.getCurrencyMode() });
   });
 
-  post('/api/monitor/currency-config', async (req, res) => {
-    try {
-      const body = await readJsonBody(req);
-      const mode = store.setCurrencyMode(String(body && body.mode || ''));
-      if (openapiStore.status().shops.length) ensureRates(); // 有店铺时顺带刷新汇率（异步，不阻塞响应）
-      engine.broadcast('config', { at: Date.now() });
-      sendJson(res, 200, { ok: true, mode, message: mode === 'rmb' ? '金额展示已切换为人民币（阈值仍按人民币比较）' : '金额展示已切换为当地货币（阈值仍按人民币比较）' });
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: e.message });
-    }
-  });
+  post('/api/monitor/currency-config', jsonAction('/api/monitor/currency-config', (body, req, res) => {
+    const mode = store.setCurrencyMode(String(body && body.mode || ''));
+    if (openapiStore.status().shops.length) ensureRates(); // 有店铺时顺带刷新汇率（异步，不阻塞响应）
+    engine.broadcast('config', { at: Date.now() });
+    sendJson(res, 200, { ok: true, mode, message: mode === 'rmb' ? '金额展示已切换为人民币（阈值仍按人民币比较）' : '金额展示已切换为当地货币（阈值仍按人民币比较）' });
+  }));
 
   // 手动采集（body { shopId? }，缺省全部店铺；立即入队）
-  post('/api/monitor/collect', async (req, res) => {
-    try {
-      const body = await readJsonBody(req);
-      const started = scheduler.collectNow(body && body.shopId ? String(body.shopId) : '');
-      sendJson(res, 200, { ok: true, started, message: `已触发 ${started.length} 项采集任务` });
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: e.message });
-    }
-  });
+  post('/api/monitor/collect', jsonAction('/api/monitor/collect', (body, req, res) => {
+    const started = scheduler.collectNow(body && body.shopId ? String(body.shopId) : '');
+    sendJson(res, 200, { ok: true, started, message: `已触发 ${started.length} 项采集任务` });
+  }));
 
   // 大屏在场心跳（按需采集）：页面打开/可见期间前端每 30s 报一次 { active: true }，
   // 离开页面报 { active: false }；服务端租约 75s 超时自动视为离开（崩溃兜底）。
-  post('/api/monitor/presence', async (req, res) => {
-    try {
-      const body = await readJsonBody(req);
-      const active = body && body.active === true;
-      scheduler.setPresence(active);
-      sendJson(res, 200, { ok: true, active, message: active ? '监控大屏在场，已开始按需巡检' : '已离开监控大屏，暂停巡检' });
-    } catch (e) {
-      sendJson(res, 400, { ok: false, message: e.message });
-    }
-  });
+  post('/api/monitor/presence', jsonAction('/api/monitor/presence', (body, req, res) => {
+    const active = body && body.active === true;
+    scheduler.setPresence(active);
+    sendJson(res, 200, { ok: true, active, message: active ? '监控大屏在场，已开始按需巡检' : '已离开监控大屏，暂停巡检' });
+  }));
 
   // 调度器状态（底部状态条 + 兜底轮询）
   get('/api/monitor/status', (req, res) => {

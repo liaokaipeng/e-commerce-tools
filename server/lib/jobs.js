@@ -9,6 +9,8 @@
  * 被取消则抛 CancelledError）→ 执行体结束时 finish 收尾。
  * 除显式取消外，「SSE 客户端断开」也视为取消：本地单人工具里用户关掉页面即代表不想继续。
  */
+const { sendJson, readRouteBody } = require('./http-utils');
+
 const TTL_MS = 30 * 60 * 1000;   // 任务最长存活时间（防执行体异常后残留）
 const SWEEP_MS = 60 * 1000;      // 僵尸任务巡检间隔
 
@@ -128,8 +130,51 @@ function size() {
   return jobs.size;
 }
 
+/**
+ * 注册「暂停 / 继续 / 取消」三个控制路由（body { jobId }，jobId 由 run 的 start 事件下发）。
+ * 供各批量任务模块在 register({ post }) 内一行接入，避免复制同一段样板
+ * （取消竞价 / 取消 Hot Listing / 视频上传等）。
+ *
+ * 语义：请求体非法 → readRouteBody 回 400；任务不存在或已结束 → 404。
+ * @param {(p: string, fn: Function) => void} post 路由注册函数（main.js 注入）
+ * @param {string} basePath 接口前缀，如 '/api/bidding-cancel'（内部拼 /pause /resume /cancel）
+ * @param {object} [deps] { sendJson, readRouteBody } 依赖注入（默认取 lib/http-utils）
+ */
+function registerControlRoutes(post, basePath, deps) {
+  const { sendJson: sj, readRouteBody: rrb } = deps || { sendJson, readRouteBody };
+  const notFound = { ok: false, msg: '任务不存在或已结束' };
+  const reply = (res, ok) => sj(res, ok ? 200 : 404, ok ? { ok: true } : notFound);
+
+  post(`${basePath}/pause`, async (req, res) => {
+    const parsed = await rrb(req, `${basePath}/pause`, { res });
+    if (!parsed) return;
+    reply(res, setPaused(parsed.jobId, true));
+  });
+
+  post(`${basePath}/resume`, async (req, res) => {
+    const parsed = await rrb(req, `${basePath}/resume`, { res });
+    if (!parsed) return;
+    reply(res, setPaused(parsed.jobId, false));
+  });
+
+  post(`${basePath}/cancel`, async (req, res) => {
+    const parsed = await rrb(req, `${basePath}/cancel`, { res });
+    if (!parsed) return;
+    reply(res, cancel(parsed.jobId, '用户取消'));
+  });
+}
+
+/**
+ * SSE 响应安全收尾：客户端可能已断开，res.end() 会抛错，统一吞掉。
+ * 供各流式接口在任务结束时收尾（避免各处复制 try { res.end() } catch {}）。
+ */
+function safeEnd(res) {
+  try { if (!res.writableEnded) res.end(); } catch { /* 连接已断开，忽略 */ }
+}
+
 module.exports = {
   create, get, has, setPaused, cancel, cancelReason, checkpoint, finish, size, CancelledError,
+  registerControlRoutes, safeEnd,
   _ttlMs: TTL_MS,
   _test: { sweepJobs },
 };
