@@ -40,13 +40,14 @@ const {
 function register({ get, post }) {
   get('/api/events', (req, res, url) => {
     const jobId = url.searchParams.get('jobId');
-    sse(res, { 'Access-Control-Allow-Origin': '*' });
-    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+    // CORS 由 main.js 统一按白名单处理，这里不再单独写 Access-Control-Allow-Origin
+    const emit = sse(res, { 'X-Accel-Buffering': 'no' });
+    emit({ type: 'connected' });
     // 迟到连接：任务已产生过事件（可能已结束）则回放，若已 finished 直接关闭
     const past = jobEvents.get(jobId) || [];
     for (const ev of past) {
       if (res.writableEnded) break;
-      res.write(`data: ${JSON.stringify(ev)}\n\n`);
+      emit(ev);
     }
     if (past.length && past[past.length - 1].type === 'finished') {
       res.end();

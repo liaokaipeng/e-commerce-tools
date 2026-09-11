@@ -14,7 +14,11 @@ function save(data) {
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
-  } catch {}
+  } catch (e) {
+    // 写盘失败不能静默：默认目录设置会丢失，用户需要知道原因（通常是权限或磁盘问题）
+    console.warn(`保存默认目录设置失败(${FILE}):`, e && e.message ? e.message : e);
+    throw new Error('保存默认目录设置失败：' + (e && e.message ? e.message : e));
+  }
 }
 
 /** 读取某工具的默认目录（未设置返回 null） */

@@ -72,10 +72,8 @@ async function uploadOnePh(row, creds, site, log, signal) {
   if (!vid || !accessKey || !secretKey || !token || !uploaddomain) {
     throw new Error(`preupload 未返回完整凭证(vid/access_key/secret_key/token/uploaddomain)。响应: ${preResp.text.slice(0, 500)}`);
   }
-  // 调试：打印 preupload 返回的关键字段（凭证截断），便于核对
-  const pre0Debug = Object.assign({}, pre0, { token: token.slice(0, 20) + '...', access_key: accessKey.slice(0, 20) + '...' });
-  log('preupload', `vid=${vid} uploaddomain=${uploaddomain} urlformat=${urlformat || '(空)'} pre0=${JSON.stringify(pre0Debug)}`);
-
+  // 只打印非敏感的关键字段（vid / 域名 / 存储桶），凭证本身不入日志
+  log('preupload', `vid=${vid} uploaddomain=${uploaddomain} bucket=${pre0.bucket || '(空)'} urlformat=${urlformat || '(空)'}`);
   // 3. 单次 PUT 上传整个文件（S3/COS 风格，AWS SigV4 签名）
   // 对象键：urlformat 是下载 CDN 地址（含 api/v4/xxx/mms 路由前缀），不是存储键；
   // 需用 preupload 返回的 bucket + keyformat 拼出真实对象键（如 /mms/{vid}.mp4）。
