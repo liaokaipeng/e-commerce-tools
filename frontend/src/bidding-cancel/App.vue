@@ -5,7 +5,7 @@ import LoginCard from '../components/LoginCard.vue';
 import StorePicker from '../components/StorePicker.vue';
 import LogPanel from '../components/LogPanel.vue';
 import { useShopeeSession } from '../composables/useShopeeSession.js';
-import { useLog, readSSE } from '../composables/useToolPage.js';
+import { useLog, runSSE } from '../composables/useToolPage.js';
 
 // ---------- 登录状态 + 店铺列表（与竞价导出共用） ----------
 const {
@@ -88,17 +88,11 @@ async function doCancel() {
   clearLog();
   log('开始撤销，共 ' + selected.size + ' 个店铺…', 'info');
   try {
-    const resp = await fetch('/api/bidding-cancel/run', {
+    await runSSE('/api/bidding-cancel/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ shopIds: [...selected] }),
-    });
-    if (!resp.ok || !resp.body) {
-      const err = await resp.json().catch(() => ({}));
-      log(err.msg || err.message || '请求失败', 'err');
-      return;
-    }
-    await readSSE(resp, (ev) => {
+    }, (ev) => {
       if (ev.type === 'shop-start') {
         log(`▶ ${ev.name}（${ev.shopId}）开始撤销…`, 'info');
       } else if (ev.type === 'bid-start') {
@@ -121,7 +115,7 @@ async function doCancel() {
       } else if (ev.type === 'fatal') {
         log(ev.msg, 'err');
       }
-    });
+    }, log);
   } catch (e) {
     log('撤销请求失败：' + e.message, 'err');
   } finally {

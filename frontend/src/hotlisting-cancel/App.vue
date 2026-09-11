@@ -5,7 +5,7 @@ import LoginCard from '../components/LoginCard.vue';
 import StorePicker from '../components/StorePicker.vue';
 import LogPanel from '../components/LogPanel.vue';
 import { useShopeeSession } from '../composables/useShopeeSession.js';
-import { useLog, readSSE } from '../composables/useToolPage.js';
+import { useLog, runSSE } from '../composables/useToolPage.js';
 
 // ---------- 登录状态 + 店铺列表（与竞价导出/取消竞价共用） ----------
 const {
@@ -189,17 +189,11 @@ async function doCancel() {
   clearLog();
   log('开始取消注册，共 ' + selected.size + ' 个店铺…', 'info');
   try {
-    const resp = await fetch('/api/hotlisting-cancel/run', {
+    await runSSE('/api/hotlisting-cancel/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(buildPayload()),
-    });
-    if (!resp.ok || !resp.body) {
-      const err = await resp.json().catch(() => ({}));
-      log(err.msg || err.message || '请求失败', 'err');
-      return;
-    }
-    await readSSE(resp, (ev) => {
+    }, (ev) => {
       if (ev.type === 'start') {
         curJobId.value = ev.jobId;
       } else if (ev.type === 'shop-start') {
@@ -230,7 +224,7 @@ async function doCancel() {
       } else if (ev.type === 'fatal') {
         log(ev.msg, 'err');
       }
-    });
+    }, log);
   } catch (e) {
     log('取消注册请求失败：' + e.message, 'err');
   } finally {

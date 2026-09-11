@@ -6,7 +6,7 @@ import StorePicker from '../components/StorePicker.vue';
 import DirRow from '../components/DirRow.vue';
 import LogPanel from '../components/LogPanel.vue';
 import { useShopeeSession } from '../composables/useShopeeSession.js';
-import { useDirSettings, useLog, readSSE } from '../composables/useToolPage.js';
+import { useDirSettings, useLog, runSSE } from '../composables/useToolPage.js';
 
 // ---------- 登录状态 + 店铺列表（与取消竞价共用） ----------
 const {
@@ -46,17 +46,11 @@ async function doExport() {
   clearLog();
   log('开始导出，共 ' + selected.size + ' 个店铺…', 'info');
   try {
-    const resp = await fetch('/api/export', {
+    await runSSE('/api/export', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ shopIds: [...selected], dir: d }),
-    });
-    if (!resp.ok || !resp.body) {
-      const err = await resp.json().catch(() => ({}));
-      log(err.msg || err.message || '请求失败', 'err');
-      return;
-    }
-    await readSSE(resp, (ev) => {
+    }, (ev) => {
       if (ev.type === 'start') {
         log(`▶ ${ev.name}（${ev.shopId}）导出中…`, 'info');
       } else if (ev.type === 'done') {
@@ -70,7 +64,7 @@ async function doExport() {
       } else if (ev.type === 'fatal') {
         log(ev.msg, 'err');
       }
-    });
+    }, log);
   } catch (e) {
     log('导出请求失败：' + e.message, 'err');
   } finally {

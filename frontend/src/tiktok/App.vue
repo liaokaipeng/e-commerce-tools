@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import DirRow from '../components/DirRow.vue';
 import LogPanel from '../components/LogPanel.vue';
-import { useDirSettings, useLog, readSSE } from '../composables/useToolPage.js';
+import { useDirSettings, useLog, runSSE } from '../composables/useToolPage.js';
 
 // ---------- 状态 ----------
 const urls = ref('');
@@ -125,21 +125,15 @@ async function startDownload() {
   const controller = new AbortController();
   abortRef.value = controller;
   try {
-    const resp = await fetch('/api/download', {
+    await runSSE('/api/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ urls: list.join('\n'), dir: d }),
       signal: controller.signal,
-    });
-    if (!resp.ok || !resp.body) {
-      const err = await resp.json().catch(() => ({}));
-      log(err.message || '请求失败', 'err');
-      return;
-    }
-    await readSSE(resp, (ev) => {
+    }, (ev) => {
       handleEvent(ev);
       if (ev.network) networkIssue = true;
-    });
+    }, log);
   } catch (e) {
     if (e.name === 'AbortError') {
       log('已手动停止下载任务', 'warn', '提示');
