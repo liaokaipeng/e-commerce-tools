@@ -6,7 +6,7 @@
  * 后续功能模块统一经 openapi/client.js 的 callOpenApi 调用官方接口，无需重复实现签名与刷新。
  */
 'use strict';
-const { sendJson, readBody } = require('./lib/http-utils');
+const { sendJson, readJsonBody } = require('./lib/http-utils');
 const { CALLBACK_PORT } = require('./lib/config');
 const { DEFAULT_REDIRECT, LOCAL_REDIRECT_HOSTS } = require('./openapi/constants');
 const { nowSec, maskToken } = require('./lib/openapi-utils');
@@ -137,7 +137,7 @@ function register({ get, post }) {
   // 保存 App 配置（partner_id / partner_key / 环境）
   post('/api/openapi/app', async (req, res) => {
     try {
-      const body = await parseBody(req);
+      const body = await readJsonBody(req);
       const app = store.setApp({ partnerId: body.partnerId, partnerKey: body.partnerKey, env: body.env });
       sendJson(res, 200, {
         ok: true,
@@ -154,7 +154,7 @@ function register({ get, post }) {
   // 生成卖家授权链接
   post('/api/openapi/auth-url', async (req, res) => {
     try {
-      const body = await parseBody(req);
+      const body = await readJsonBody(req);
       const redirectInput = String(body.redirect || '').trim() || DEFAULT_REDIRECT;
       const { url: redirect, mode } = validateRedirect(redirectInput);
       const app = store.getApp();
@@ -180,7 +180,7 @@ function register({ get, post }) {
   // 对该主账号下全部已授权店铺统一保存同一对 token（账号级通用）。
   post('/api/openapi/auth-callback', async (req, res) => {
     try {
-      const body = await parseBody(req);
+      const body = await readJsonBody(req);
       const code = String(body.code || '').trim();
       const shopId = String(body.shopId || '').trim();
       const mainAccountId = String(body.mainAccountId || '').trim();
@@ -223,7 +223,7 @@ function register({ get, post }) {
   // 手动刷新某店铺 token（旧 refresh_token 刷新后立即失效；新 token 对绑定该店铺）
   post('/api/openapi/refresh', async (req, res) => {
     try {
-      const body = await parseBody(req);
+      const body = await readJsonBody(req);
       const shopId = String(body.shopId || '').trim();
       if (!shopId) throw new Error('缺少 shop_id');
       const app = store.getApp();
@@ -253,7 +253,7 @@ function register({ get, post }) {
   // 删除某店铺授权（幂等）
   post('/api/openapi/remove-shop', async (req, res) => {
     try {
-      const body = await parseBody(req);
+      const body = await readJsonBody(req);
       const shopId = String(body.shopId || '').trim();
       if (!shopId) throw new Error('缺少 shop_id');
       const app = store.getApp();
@@ -268,7 +268,7 @@ function register({ get, post }) {
   // 测试登录：用店铺 token 调 get_shop_info（GET 查询类接口）验证有效性并返回店铺名
   post('/api/openapi/test', async (req, res) => {
     try {
-      const body = await parseBody(req);
+      const body = await readJsonBody(req);
       const shopId = String(body.shopId || '').trim();
       if (!shopId) throw new Error('缺少 shop_id');
       const info = await client.callOpenApi('/api/v2/shop/get_shop_info', {}, { shopId, method: 'GET' });

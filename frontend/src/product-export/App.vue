@@ -28,7 +28,7 @@ watch(stores, (list) => {
 const { logLines, log, clear: clearLog } = useLog();
 
 // ---------- 保存位置（未设置时后端默认保存到系统「下载」文件夹） ----------
-const { dir, hasDefault, loadSettings: loadDirSettings, setDefaultDir, openDir } = useDirSettings('product-export', log);
+const { dir, loadSettings: loadDirSettings, setDefaultDir, openDir } = useDirSettings('product-export', log);
 
 // ---------- 导出 ----------
 const exporting = ref(false);
@@ -106,9 +106,8 @@ onMounted(() => {
       <el-card shadow="never" class="card">
         <template #header>③ 保存位置</template>
         <DirRow
-          v-model:dir="dir"
-          :has-default="hasDefault"
-          placeholder="留空则默认保存到系统「下载」文件夹"
+              v-model:dir="dir"
+              placeholder="留空则默认保存到系统「下载」文件夹"
           @set-default="setDefaultDir"
           @open="openDir"
         />

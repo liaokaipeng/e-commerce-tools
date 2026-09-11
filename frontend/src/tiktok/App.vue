@@ -195,9 +195,8 @@ onMounted(() => {
       <el-card shadow="never" class="card">
         <template #header>② 选择保存位置</template>
         <DirRow
-          v-model:dir="dir"
-          :has-default="hasDefault"
-          placeholder="例如 D:\videos\tiktok"
+              v-model:dir="dir"
+              placeholder="例如 D:\videos\tiktok"
           @set-default="setDefaultDir"
           @open="openDir"
         />

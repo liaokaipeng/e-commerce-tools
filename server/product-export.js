@@ -26,7 +26,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { request } = require('./lib/http');
-const { sendJson, sse, readBody } = require('./lib/http-utils');
+const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
 // 会话 / Cookie / 卖家中心域名：与竞价导出、取消竞价、取消 Hot Listing 共用同一实现
 const { HOST, UA, loadCookie, assertLoginOk } = require('./lib/shopee-session');
 
@@ -535,8 +535,7 @@ function handleExport(body, res) {
 
 function register({ post }) {
   post('/api/product-export/export', async (req, res) => {
-    let parsed = {};
-    try { parsed = JSON.parse(await readBody(req)); } catch (e) { console.warn('解析 /api/product-export/export 请求体失败:', e.message); }
+    const parsed = await readJsonBodySoft(req, '/api/product-export/export');
     handleExport(parsed, res);
   });
 }

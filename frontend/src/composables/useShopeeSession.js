@@ -1,5 +1,6 @@
-// Shopee 会话组合式函数：登录状态轮询 + 店铺列表/分组勾选。
-// bidding 与 bidding-cancel 两页共用（原两页逐字重复，现统一在此维护）。
+// Shopee 会话组合式函数：登录状态轮询 + 店铺列表与勾选集合。
+// bidding / bidding-cancel / hotlisting-cancel / product-export 四页共用。
+// 注意：店铺的分组与勾选渲染由 StorePicker 组件承担，这里只维护 selected 集合本身。
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 
@@ -43,35 +44,7 @@ export function useShopeeSession(readyTip = 'Cookie 已就绪，可直接选择�
   const stores = ref([]);
   const selected = reactive(new Set());
 
-  const groups = computed(() => {
-    const cats = [...new Set(stores.value.map((s) => s.category))];
-    return cats.map((cat) => ({
-      category: cat,
-      list: stores.value.filter((s) => s.category === cat),
-    }));
-  });
-
   const selCount = computed(() => selected.size);
-
-  function toggleStore(id, checked) {
-    if (checked) selected.add(id);
-    else selected.delete(id);
-  }
-
-  function toggleGroup(cat, checked) {
-    const list = stores.value.filter((s) => s.category === cat);
-    list.forEach((s) => {
-      if (checked) selected.add(s.id);
-      else selected.delete(s.id);
-    });
-  }
-
-  function groupState(cat) {
-    const list = stores.value.filter((s) => s.category === cat);
-    const allChecked = list.length > 0 && list.every((s) => selected.has(s.id));
-    const some = list.some((s) => selected.has(s.id));
-    return { allChecked, some };
-  }
 
   async function loadStores() {
     try {
@@ -99,7 +72,6 @@ export function useShopeeSession(readyTip = 'Cookie 已就绪，可直接选择�
 
   return {
     status, refreshing, flash, refreshStatus,
-    stores, selected, groups, selCount,
-    toggleStore, toggleGroup, groupState, loadStores, clearAll,
+    stores, selected, selCount, clearAll,
   };
 }

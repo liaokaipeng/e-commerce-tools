@@ -92,6 +92,32 @@ function readBody(req, maxBytes = 2 * 1024 * 1024) {
   });
 }
 
+/**
+ * 读取并解析 JSON 请求体（严格）：请求体非法即抛错，由 createDispatcher 兜底为 500。
+ * 供「请求体必须合法」的接口使用（monitor / openapi）。
+ */
+async function readJsonBody(req) {
+  try {
+    return JSON.parse(await readBody(req));
+  } catch (e) {
+    throw new Error('请求体不是合法 JSON：' + e.message);
+  }
+}
+
+/**
+ * 读取并解析 JSON 请求体（宽容）：解析失败只记一条 warn 并返回 {}，
+ * 供「空请求体也应正常处理」的批量操作接口使用。
+ * @param {string} label 日志中标识来源的接口路径（如 '/api/export'）
+ */
+async function readJsonBodySoft(req, label = '') {
+  try {
+    return JSON.parse(await readBody(req));
+  } catch (e) {
+    console.warn(`解析 ${label} 请求体失败:`, e.message);
+    return {};
+  }
+}
+
 /** 静态文件服务（含目录->index 映射与路径穿越防护） */
 function serveStatic(res, urlPath, publicDir) {
   const fs = require('fs');
@@ -115,4 +141,4 @@ function serveStatic(res, urlPath, publicDir) {
   });
 }
 
-module.exports = { sendJson, createDispatcher, sse, readBody, serveStatic };
+module.exports = { sendJson, createDispatcher, sse, readBody, readJsonBody, readJsonBodySoft, serveStatic };

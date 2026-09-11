@@ -9,7 +9,7 @@
  *   逐个点击「撤销」即 seller_withdraw { bid_id }。
  */
 const { request } = require('./lib/http');
-const { sendJson, sse, readBody } = require('./lib/http-utils');
+const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
 // 会话 / Cookie / 店铺列表 / 金额换算 / 延时：与竞价导出、取消Hot Listing、商品导出共用同一实现
 const { UA, toAmount, sleep, assertLoginOk, loadCookieHeader, loadStores } = require('./lib/shopee-session');
 
@@ -222,14 +222,12 @@ function handleRun(body, res) {
 // ============ 路由注册 ============
 function register({ post }) {
   post('/api/bidding-cancel/preview', async (req, res) => {
-    let parsed = {};
-    try { parsed = JSON.parse(await readBody(req)); } catch (e) { console.warn('解析 /api/bidding-cancel/preview 请求体失败:', e.message); }
+    const parsed = await readJsonBodySoft(req, '/api/bidding-cancel/preview');
     handlePreview(parsed, res);
   });
 
   post('/api/bidding-cancel/run', async (req, res) => {
-    let parsed = {};
-    try { parsed = JSON.parse(await readBody(req)); } catch (e) { console.warn('解析 /api/bidding-cancel/run 请求体失败:', e.message); }
+    const parsed = await readJsonBodySoft(req, '/api/bidding-cancel/run');
     handleRun(parsed, res);
   });
 }

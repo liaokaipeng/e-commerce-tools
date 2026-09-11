@@ -18,7 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const { request } = require('./lib/http');
-const { sendJson, sse, readBody } = require('./lib/http-utils');
+const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
 // 会话 / Cookie / 店铺列表 / 延时 / 卖家中心域名：与竞价导出、取消竞价、商品导出共用同一实现
 const { HOST, UA, sleep, loadCookie, assertLoginOk, loadStores } = require('./lib/shopee-session');
 
@@ -418,8 +418,7 @@ function register({ get, post }) {
   });
 
   post('/api/hotlisting-cancel/spu-config', async (req, res) => {
-    let parsed = {};
-    try { parsed = JSON.parse(await readBody(req)); } catch (e) { console.warn('解析 /api/hotlisting-cancel/spu-config 请求体失败:', e.message); }
+    const parsed = await readJsonBodySoft(req, '/api/hotlisting-cancel/spu-config');
     try {
       const map = normalizeSpuMap(parsed.map);
       saveSpuConfig(map);
@@ -430,28 +429,24 @@ function register({ get, post }) {
   });
 
   post('/api/hotlisting-cancel/preview', async (req, res) => {
-    let parsed = {};
-    try { parsed = JSON.parse(await readBody(req)); } catch (e) { console.warn('解析 /api/hotlisting-cancel/preview 请求体失败:', e.message); }
+    const parsed = await readJsonBodySoft(req, '/api/hotlisting-cancel/preview');
     handlePreview(parsed, res);
   });
 
   post('/api/hotlisting-cancel/run', async (req, res) => {
-    let parsed = {};
-    try { parsed = JSON.parse(await readBody(req)); } catch (e) { console.warn('解析 /api/hotlisting-cancel/run 请求体失败:', e.message); }
+    const parsed = await readJsonBodySoft(req, '/api/hotlisting-cancel/run');
     handleRun(parsed, res);
   });
 
   // 暂停 / 继续执行中的任务（body { jobId }，jobId 由 run 的 start 事件下发）
   post('/api/hotlisting-cancel/pause', async (req, res) => {
-    let parsed = {};
-    try { parsed = JSON.parse(await readBody(req)); } catch (e) { console.warn('解析 /api/hotlisting-cancel/pause 请求体失败:', e.message); }
+    const parsed = await readJsonBodySoft(req, '/api/hotlisting-cancel/pause');
     const ok = setPaused(parsed.jobId, true);
     sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
   });
 
   post('/api/hotlisting-cancel/resume', async (req, res) => {
-    let parsed = {};
-    try { parsed = JSON.parse(await readBody(req)); } catch (e) { console.warn('解析 /api/hotlisting-cancel/resume 请求体失败:', e.message); }
+    const parsed = await readJsonBodySoft(req, '/api/hotlisting-cancel/resume');
     const ok = setPaused(parsed.jobId, false);
     sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { ok: false, msg: '任务不存在或已结束' });
   });

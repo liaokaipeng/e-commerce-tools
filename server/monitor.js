@@ -13,7 +13,7 @@
  *   engine.js     告警生命周期（去重/升级/恢复/确认关闭）+ SSE 广播
  *   scheduler.js  巡检调度（每店串行、跨店并发限流、手动触发）
  */
-const { sendJson, sse, readBody } = require('./lib/http-utils');
+const { sendJson, sse, readJsonBody } = require('./lib/http-utils');
 const { MATRIX_METRICS, METRICS } = require('./monitor/constants');
 const { levelOf } = require('./monitor/rules');
 const { toRmb, fromRmb, roundMoney, symbolOf, ensureRates } = require('./monitor/currency');
@@ -21,15 +21,6 @@ const store = require('./monitor/store');
 const engine = require('./monitor/engine');
 const scheduler = require('./monitor/scheduler');
 const openapiStore = require('./openapi/store');
-
-/** 统一读 body 并兜底解析 */
-async function parseBody(req) {
-  try {
-    return JSON.parse(await readBody(req));
-  } catch (e) {
-    throw new Error('请求体不是合法 JSON：' + e.message);
-  }
-}
 
 /** 指标是否为金额类（单位「元」；阈值按人民币比较、展示按全局模式换算） */
 function isMoneyMetric(metricId) {
@@ -112,7 +103,7 @@ function register({ get, post }) {
   // 告警操作：确认 / 关闭
   post('/api/monitor/alert-action', async (req, res) => {
     try {
-      const body = await parseBody(req);
+      const body = await readJsonBody(req);
       const id = String(body.id || '').trim();
       const action = String(body.action || '').trim();
       if (!id) throw new Error('缺少告警 id');
@@ -172,7 +163,7 @@ function register({ get, post }) {
 
   post('/api/monitor/rules', async (req, res) => {
     try {
-      const body = await parseBody(req);
+      const body = await readJsonBody(req);
       const rules = store.setRuleOverrides(body.overrides);
       engine.broadcast('rules', { at: Date.now() });
       sendJson(res, 200, { ok: true, rules });
@@ -197,7 +188,7 @@ function register({ get, post }) {
 
   post('/api/monitor/shops-config', async (req, res) => {
     try {
-      const body = await parseBody(req);
+      const body = await readJsonBody(req);
       if (!body || !Array.isArray(body.excludedShopIds)) throw new Error('excludedShopIds 必须是数组');
       const before = store.getExcludedShopIds();
       const after = store.setExcludedShopIds(body.excludedShopIds);
@@ -221,7 +212,7 @@ function register({ get, post }) {
 
   post('/api/monitor/currency-config', async (req, res) => {
     try {
-      const body = await parseBody(req);
+      const body = await readJsonBody(req);
       const mode = store.setCurrencyMode(String(body && body.mode || ''));
       if (openapiStore.status().shops.length) ensureRates(); // 有店铺时顺带刷新汇率（异步，不阻塞响应）
       engine.broadcast('config', { at: Date.now() });
@@ -234,7 +225,7 @@ function register({ get, post }) {
   // 手动采集（body { shopId? }，缺省全部店铺；立即入队）
   post('/api/monitor/collect', async (req, res) => {
     try {
-      const body = await parseBody(req);
+      const body = await readJsonBody(req);
       const started = scheduler.collectNow(body && body.shopId ? String(body.shopId) : '');
       sendJson(res, 200, { ok: true, started, message: `已触发 ${started.length} 项采集任务` });
     } catch (e) {
@@ -246,7 +237,7 @@ function register({ get, post }) {
   // 离开页面报 { active: false }；服务端租约 75s 超时自动视为离开（崩溃兜底）。
   post('/api/monitor/presence', async (req, res) => {
     try {
-      const body = await parseBody(req);
+      const body = await readJsonBody(req);
       const active = body && body.active === true;
       scheduler.setPresence(active);
       sendJson(res, 200, { ok: true, active, message: active ? '监控大屏在场，已开始按需巡检' : '已离开监控大屏，暂停巡检' });

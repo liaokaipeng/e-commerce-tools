@@ -213,37 +213,8 @@ async function exchangeToken(env, { code, shopId, mainAccountId }) {
   };
 }
 
-/** 刷新 token：POST /api/v2/auth/access_token/get
- * 实测网关规则（2026-08 生产环境）：
- * - 签名 base 只拼 partner_id + api_path + timestamp（不拼 access_token/shop_id）
- * - 公共参数 partner_id/timestamp/sign 放 query
- * - body 为 { partner_id: 数字, shop_id: 数字, refresh_token }（partner_id/shop_id 必须数字类型，
- *   字符串会报 "the format of xxx parameter is wrong"）
- * - 旧 refresh_token 调用后立即失效 */
-async function refreshToken(env, shopId, refreshToken) {
-  const app = store.getApp();
-  if (!app) throw new Error('尚未配置开放平台 App');
-  const host = ENV_HOSTS[env];
-  if (!host) throw new Error('无效的环境：' + env);
-  const timestamp = nowSec();
-  const base = buildBaseString(app.partnerId, API_PATH.accessTokenGet, timestamp);
-  const sign = hmacHex(app.partnerKey, base);
-  const url = `${host}${API_PATH.accessTokenGet}?${new URLSearchParams({
-    partner_id: app.partnerId,
-    timestamp: String(timestamp),
-    sign,
-  }).toString()}`;
-  const resp = await request({
-    method: 'POST',
-    url,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      partner_id: Number(app.partnerId),
-      shop_id: Number(shopId),
-      refresh_token: refreshToken,
-    }),
-    timeout: 30000,
-  });
+/** 解析 access_token/get 响应：非对象 / 带 error 一律抛中文提示，成功返回统一结构 */
+function parseTokenResponse(resp) {
   const j = resp.json;
   if (!j || typeof j !== 'object') {
     throw new Error(`开放平台返回异常（HTTP ${resp.status}）: ${(resp.text || '').slice(0, 200)}`);
@@ -263,11 +234,18 @@ async function refreshToken(env, shopId, refreshToken) {
 }
 
 /**
- * 整组刷新：用 merchant_id 刷新主账号共享 token（官方 FAQ138 Q8：可用 merchant_id 或 shop_id 刷新）。
- * 仅用于「多店铺共享同一 refresh_token 且同属一个 merchant」的场景，成功后新 token 对传播给全组店铺。
- * 请求形态与 refreshToken 一致（签名 base 只拼 partner_id+api_path+timestamp；body 数字类型）。
+ * 刷新 token：POST /api/v2/auth/access_token/get。
+ * 按店铺刷新与按商户整组刷新的请求形态完全一致，仅 body 的标识字段不同，故用 idKey 区分。
+ *
+ * 实测网关规则（2026-08 生产环境）：
+ * - 签名 base 只拼 partner_id + api_path + timestamp（不拼 access_token/shop_id）
+ * - 公共参数 partner_id/timestamp/sign 放 query
+ * - body 为 { partner_id: 数字, <idKey>: 数字, refresh_token }（id 必须数字类型，
+ *   字符串会报 "the format of xxx parameter is wrong"）
+ * - 旧 refresh_token 调用后立即失效
+ * @param {'shop_id'|'merchant_id'} idKey 按店铺刷新用 shop_id；主账号共享 token 整组刷新用 merchant_id
  */
-async function refreshTokenWithMerchant(env, merchantId, refreshToken) {
+async function refreshVia(env, idKey, idValue, refreshToken) {
   const app = store.getApp();
   if (!app) throw new Error('尚未配置开放平台 App');
   const host = ENV_HOSTS[env];
@@ -286,27 +264,25 @@ async function refreshTokenWithMerchant(env, merchantId, refreshToken) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       partner_id: Number(app.partnerId),
-      merchant_id: Number(merchantId),
+      [idKey]: Number(idValue),
       refresh_token: refreshToken,
     }),
     timeout: 30000,
   });
-  const j = resp.json;
-  if (!j || typeof j !== 'object') {
-    throw new Error(`开放平台返回异常（HTTP ${resp.status}）: ${(resp.text || '').slice(0, 200)}`);
-  }
-  if (j.error) {
-    const hint = hintOf(j.error, j.message);
-    throw new Error(`开放平台错误 ${j.error}${j.message ? '：' + j.message : ''}${hint ? '（' + hint + '）' : ''}`);
-  }
-  if (!j.access_token || !j.refresh_token) {
-    throw new Error('刷新未返回新 token');
-  }
-  return {
-    accessToken: j.access_token,
-    refreshToken: j.refresh_token,
-    expireIn: j.expire_in || 0,
-  };
+  return parseTokenResponse(resp);
+}
+
+/** 按店铺刷新单个凭证的 token */
+async function refreshToken(env, shopId, refreshToken) {
+  return refreshVia(env, 'shop_id', shopId, refreshToken);
+}
+
+/**
+ * 整组刷新：用 merchant_id 刷新主账号共享 token（官方 FAQ138 Q8：可用 merchant_id 或 shop_id 刷新）。
+ * 仅用于「多店铺共享同一 refresh_token 且同属一个 merchant」的场景，成功后新 token 对传播给全组店铺。
+ */
+async function refreshTokenWithMerchant(env, merchantId, refreshToken) {
+  return refreshVia(env, 'merchant_id', merchantId, refreshToken);
 }
 
 /**

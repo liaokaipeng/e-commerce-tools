@@ -7,7 +7,7 @@ const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
 const { request } = require('./lib/http');
-const { sendJson, sse, readBody } = require('./lib/http-utils');
+const { sendJson, sse, readBody, readJsonBodySoft } = require('./lib/http-utils');
 // 会话 / Cookie / 店铺列表 / 金额换算：与取消竞价、取消Hot Listing、商品导出共用同一实现
 const { SESSION_FILE, UA, toAmount, assertLoginOk, loadCookieHeader, loadStores, readSession } = require('./lib/shopee-session');
 
@@ -191,8 +191,7 @@ function register({ get, post }) {
   });
 
   post('/api/export', async (req, res) => {
-    let parsed = {};
-    try { parsed = JSON.parse(await readBody(req)); } catch (e) { console.warn('解析 /api/export 请求体失败:', e.message); }
+    const parsed = await readJsonBodySoft(req, '/api/export');
     handleExport(parsed, res);
   });
 

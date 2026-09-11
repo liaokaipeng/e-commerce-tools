@@ -88,9 +88,8 @@ onMounted(() => {
       <el-card shadow="never" class="card">
         <template #header>③ 保存位置</template>
         <DirRow
-          v-model:dir="dir"
-          :has-default="hasDefault"
-          placeholder="例如 D:\data\竞价导出"
+              v-model:dir="dir"
+              placeholder="例如 D:\data\竞价导出"
           @set-default="setDefaultDir"
           @open="openDir"
         />
