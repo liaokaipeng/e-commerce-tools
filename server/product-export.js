@@ -27,49 +27,15 @@ const os = require('os');
 const path = require('path');
 const { request } = require('./lib/http');
 const { sendJson, sse, readBody } = require('./lib/http-utils');
+// 会话 / Cookie / 卖家中心域名：与竞价导出、取消竞价、取消 Hot Listing 共用同一实现
+const { HOST, UA, loadCookie, assertLoginOk } = require('./lib/shopee-session');
 
-const SESSION_FILE = path.join(__dirname, 'data', 'bidding-session.json');
-const HOST = 'https://seller.shopee.cn';
 const API_LIST = '/api/v3/opt/mpsku/list/v2/get_product_list';
 const API_INFO = '/api/v3/product/get_product_info';
 const IMAGE_CDN = 'https://cf.shopee.sg/file/';
 const PAGE_SIZE = 45;       // 列表单页规格数（实测 page_size ≥50 报 exceed limit，45 可用）
 const CONCURRENCY = 3;      // 拉取商品详情的并发数（避免请求过快触发风控）
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const MAX_PAGES = 200;      // 翻页上限（防死循环）
-
-// ============ 登录状态（与竞价导出共用 bidding-session.json） ============
-function readSession() {
-  if (!fs.existsSync(SESSION_FILE)) return null;
-  try { return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')); }
-  catch (e) { console.warn('读取会话文件失败:', e.message); return null; }
-}
-
-/** 组装 seller.shopee.cn 的 Cookie 请求头（逻辑与 bidding.js 保持一致），并附带 SPC_CDS 值 */
-function loadCookie(targetDomain = 'seller.shopee.cn') {
-  const session = readSession();
-  if (!session || !session.cookies || session.cookies.length === 0) {
-    throw new Error('未找到登录 Cookie，请先在浏览器点扩展「发送登录信息到本地工具」');
-  }
-  const matched = session.cookies.filter(c => {
-    const d = String(c.domain || '').toLowerCase();
-    if (!d) return false;
-    const base = d.startsWith('.') ? d.slice(1) : d;
-    return targetDomain === base || targetDomain.endsWith('.' + base);
-  });
-  if (matched.length === 0) {
-    throw new Error('没有匹配 seller.shopee.cn 的 Cookie，请重新点扩展推送');
-  }
-  const header = matched.map(c => `${c.name}=${c.value}`).join('; ');
-  const spcCds = (matched.find(c => c.name === 'SPC_CDS') || {}).value || '';
-  return { header, spcCds };
-}
-
-function assertLoginOk(resp) {
-  if (resp.status === 403 || (resp.text && resp.text.includes('token not found'))) {
-    throw new Error('登录已失效（403 token not found），请重新登录卖家中心并点扩展推送');
-  }
-}
 
 /** 拼 v3 接口 URL：公共参数 SPC_CDS_VER / SPC_CDS / cnsc_shop_id 统一附加 */
 function buildUrl(apiPath, business, { cookie, shopId }) {

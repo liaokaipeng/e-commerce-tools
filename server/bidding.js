@@ -8,53 +8,10 @@ const fs = require('fs');
 const path = require('path');
 const { request } = require('./lib/http');
 const { sendJson, sse, readBody } = require('./lib/http-utils');
-
-const SESSION_FILE = path.join(__dirname, 'data', 'bidding-session.json');
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-
-// ============ 店铺列表（分类 / 店铺简称 / 店铺 ID）============
-// 从 stores.json 读取，便于非技术用户直接增删店铺，无需改代码。
-// 每次请求实时读取（热载），改 stores.json 无需重启服务即可生效。
-function loadStores() {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(__dirname, 'config', 'stores.json'), 'utf8'));
-  } catch (e) {
-    console.warn('读取 stores.json 失败:', e.message);
-    return [];
-  }
-}
-
-// ============ 登录状态 ============
-function readSession() {
-  if (!fs.existsSync(SESSION_FILE)) return null;
-  try { return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')); }
-  catch (e) { console.warn('读取会话文件失败:', e.message); return null; }
-}
+// 会话 / Cookie / 店铺列表 / 金额换算：与取消竞价、取消Hot Listing、商品导出共用同一实现
+const { SESSION_FILE, UA, toAmount, assertLoginOk, loadCookieHeader, loadStores, readSession } = require('./lib/shopee-session');
 
 // ============ 数据抓取（纯 HTTP） ============
-function loadCookieHeader(targetDomain = 'seller.shopee.cn') {
-  const session = readSession();
-  if (!session || !session.cookies || session.cookies.length === 0) {
-    throw new Error('未找到登录 Cookie，请先在浏览器点扩展「发送登录信息到本地工具」');
-  }
-  const matched = session.cookies.filter(c => {
-    const d = String(c.domain || '').toLowerCase();
-    if (!d) return false;
-    const base = d.startsWith('.') ? d.slice(1) : d;
-    return targetDomain === base || targetDomain.endsWith('.' + base);
-  });
-  if (matched.length === 0) {
-    throw new Error('没有匹配 seller.shopee.cn 的 Cookie，请重新点扩展推送');
-  }
-  return matched.map(c => `${c.name}=${c.value}`).join('; ');
-}
-
-function assertLoginOk(resp) {
-  if (resp.status === 403 || (resp.text && resp.text.includes('token not found'))) {
-    throw new Error('登录已失效（403 token not found），请重新登录卖家中心并点扩展推送');
-  }
-}
-
 async function apiGet(cookieHeader, url) {
   const resp = await request({
     url,
@@ -73,13 +30,6 @@ async function apiPost(cookieHeader, url, body) {
   });
   assertLoginOk(resp);
   return resp.json;
-}
-
-/** 金额：接口返回单位为 1/100000 元（十万分之一元），除以 100000 得元并四舍五入到分 */
-function toAmount(v) {
-  if (v === null || v === undefined || v === '' || v === '0' || v === 0) return '';
-  const n = Number(v) / 100000;
-  return Math.round(n * 100) / 100;
 }
 
 async function fetchWinningData(cookieHeader, shopId, region) {

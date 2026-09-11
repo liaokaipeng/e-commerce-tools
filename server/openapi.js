@@ -7,6 +7,7 @@
  */
 'use strict';
 const { sendJson, readBody } = require('./lib/http-utils');
+const { CALLBACK_PORT } = require('./lib/config');
 const { DEFAULT_REDIRECT, LOCAL_REDIRECT_HOSTS } = require('./openapi/constants');
 const { nowSec, maskToken } = require('./lib/openapi-utils');
 const store = require('./openapi/store');
@@ -14,7 +15,7 @@ const client = require('./openapi/client');
 
 /**
  * 校验授权回调地址，返回 { url, mode }：
- * - auto：http + 本机可达域名（白名单，解析到 127.0.0.1）+ 8765 + /openapi/callback，授权后自动跳回本工具换 token。
+ * - auto：http + 本机可达域名（白名单，解析到 127.0.0.1）+ 回调端口（CALLBACK_PORT，默认 8765）+ /openapi/callback，授权后自动跳回本工具换 token。
  * - manual：任意 http/https 域名（官方后台强制要求域名时用）：授权后浏览器跳到该地址，
  *   用户把地址栏里的完整回调链接（含 code/shop_id）复制回本工具「手动完成授权」粘贴；
  *   也可以在该域名上放一个转发页自动跳回本机（见前端「有域名」折叠说明）。
@@ -30,7 +31,7 @@ function validateRedirect(redirect) {
   const host = u.hostname.toLowerCase();
   const local =
     u.protocol === 'http:' &&
-    u.port === '8765' &&
+    u.port === String(CALLBACK_PORT) &&
     u.pathname === '/openapi/callback' &&
     !u.search &&
     LOCAL_REDIRECT_HOSTS.includes(host);
@@ -41,7 +42,7 @@ function validateRedirect(redirect) {
     /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host);
   if (!local && !manual) {
     throw new Error(
-      'redirect 不合法：自动回调需为本机可达地址（http://<本机域名>:8765/openapi/callback，可用 ' +
+      `redirect 不合法：自动回调需为本机可达地址（http://<本机域名>:${CALLBACK_PORT}/openapi/callback，可用 ` +
         LOCAL_REDIRECT_HOSTS.join(' / ') +
         '）；或填你自己的 http/https 域名地址（不能带 ? 查询参数），授权后把跳转链接粘贴回本工具「手动完成授权」，或在你的域名放转发页实现全自动'
     );

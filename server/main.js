@@ -25,9 +25,15 @@ const openapi = require('./openapi');
 const monitor = require('./monitor');
 const productExport = require('./product-export');
 
-const PORT = process.env.PORT || 8765;
+const { LISTEN_PORT: PORT, CALLBACK_PORT } = require('./lib/config');
 // 前端为 Vite 构建产物（frontend/dist），由 main.js 托管
 const PUBLIC_DIR = path.join(__dirname, '..', 'frontend', 'dist');
+
+// 监听端口与 OAuth 回调端口不一致时，开放平台「自动回调」会失效：启动即显式提醒，避免静默失败。
+if (String(PORT) !== String(CALLBACK_PORT)) {
+  console.warn(`⚠️  当前监听端口为 ${PORT}，但开放平台 OAuth 回调固定为 ${CALLBACK_PORT}；`
+    + '授权后将无法自动跳回本工具。请移除 PORT 环境变量使用默认端口。');
+}
 
 // ============ 简易路由表 ============
 const routes = [];

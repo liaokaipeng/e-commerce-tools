@@ -19,13 +19,11 @@ const fs = require('fs');
 const path = require('path');
 const { request } = require('./lib/http');
 const { sendJson, sse, readBody } = require('./lib/http-utils');
+// 会话 / Cookie / 店铺列表 / 延时 / 卖家中心域名：与竞价导出、取消竞价、商品导出共用同一实现
+const { HOST, UA, sleep, loadCookie, assertLoginOk, loadStores } = require('./lib/shopee-session');
 
-const SESSION_FILE = path.join(__dirname, 'data', 'bidding-session.json');
-const STORES_FILE = path.join(__dirname, 'config', 'stores.json');
 // 各店铺 SPU ID 配置（shopId -> SPU 文本，每行一个），持久化保存
 const SPU_CONFIG_FILE = path.join(__dirname, 'data', 'hotlisting-spu.json');
-const HOST = 'https://seller.shopee.cn';
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const RSKU_STATUS_ENROLLED = 2;   // search_filter.rsku_status=2 即「已注册」
 const PAGE_LIMIT = 20;            // 单页条数（抓包实测 8 可用；适度放大减少请求次数）
 const MAX_PAGES = 200;            // 翻页上限（防死循环）
@@ -52,49 +50,6 @@ function setPaused(jobId, paused) {
 async function waitIfPaused(jobId) {
   while (jobs.get(jobId) && jobs.get(jobId).paused) {
     await sleep(200);
-  }
-}
-
-// ============ 店铺列表（与竞价导出共用 stores.json，热载） ============
-function loadStores() {
-  try {
-    return JSON.parse(fs.readFileSync(STORES_FILE, 'utf8'));
-  } catch (e) {
-    console.warn('读取 stores.json 失败:', e.message);
-    return [];
-  }
-}
-
-// ============ 登录状态（与竞价导出共用 bidding-session.json） ============
-function readSession() {
-  if (!fs.existsSync(SESSION_FILE)) return null;
-  try { return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')); }
-  catch (e) { console.warn('读取会话文件失败:', e.message); return null; }
-}
-
-/** 组装 seller.shopee.cn 的 Cookie（逻辑与 bidding.js 保持一致），并附带 SPC_CDS 值 */
-function loadCookie(targetDomain = 'seller.shopee.cn') {
-  const session = readSession();
-  if (!session || !session.cookies || session.cookies.length === 0) {
-    throw new Error('未找到登录 Cookie，请先在浏览器点扩展「发送登录信息到本地工具」');
-  }
-  const matched = session.cookies.filter(c => {
-    const d = String(c.domain || '').toLowerCase();
-    if (!d) return false;
-    const base = d.startsWith('.') ? d.slice(1) : d;
-    return targetDomain === base || targetDomain.endsWith('.' + base);
-  });
-  if (matched.length === 0) {
-    throw new Error('没有匹配 seller.shopee.cn 的 Cookie，请重新点扩展推送');
-  }
-  const header = matched.map(c => `${c.name}=${c.value}`).join('; ');
-  const spcCds = (matched.find(c => c.name === 'SPC_CDS') || {}).value || '';
-  return { header, spcCds };
-}
-
-function assertLoginOk(resp) {
-  if (resp.status === 403 || (resp.text && resp.text.includes('token not found'))) {
-    throw new Error('登录已失效（403 token not found），请重新登录卖家中心并点扩展推送');
   }
 }
 
@@ -126,10 +81,6 @@ async function apiPost(cookie, url, body, referer) {
   const j = resp.json;
   if (!j || typeof j !== 'object') throw new Error('接口返回异常：' + String(resp.text || '').slice(0, 120));
   return j;
-}
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 // ============ Shopee 接口链路 ============

@@ -33,6 +33,7 @@
 - 后端一律 **CommonJS**（`require`/`module.exports`）；前端用 **Vue3 SFC**。改代码时保持文件原有风格，不混用。
 - 后端依赖仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端依赖 `vue` / `element-plus` / `vite` / `echarts`（监控大屏折线图，按需引入）。
 - 前端共享代码优先复用：各页入口统一经 `frontend/src/bootstrap.js` 挂载；`composables/useToolPage.js`、`useShopeeSession.js`、`components/`（LogPanel/DirRow/LoginCard/StorePicker）、公共样式 `styles/base.css`（monitor 深色页不用）。
+- 后端共享代码优先复用：**竞价导出 / 取消竞价 / 取消 Hot Listing / 商品导出**四个模块的会话读取、Cookie 组装、登录态断言、店铺列表、金额换算统一走 `server/lib/shopee-session.js`，不要各自复制；端口等全局常量统一走 `server/lib/config.js`（`LISTEN_PORT` 可被 `PORT` 覆盖，`CALLBACK_PORT` 固定 8765）。
 - `tiktok.js` / `video.js` / `openapi.js` / `monitor.js` 只做路由注册，链路拆到 `server/tiktok/` / `server/video/` / `server/openapi/` / `server/monitor/` 子模块；新增逻辑放对应子模块，不要塞回入口文件。
 
 ## 关键注意点（细节见对应链路文档）

@@ -8,60 +8,17 @@
  *   其中每个 model 都是一条待改进竞价（bid_status=40 / 价格缺乏竞争力），
  *   逐个点击「撤销」即 seller_withdraw { bid_id }。
  */
-const fs = require('fs');
-const path = require('path');
 const { request } = require('./lib/http');
 const { sendJson, sse, readBody } = require('./lib/http-utils');
+// 会话 / Cookie / 店铺列表 / 金额换算 / 延时：与竞价导出、取消Hot Listing、商品导出共用同一实现
+const { UA, toAmount, sleep, assertLoginOk, loadCookieHeader, loadStores } = require('./lib/shopee-session');
 
-const SESSION_FILE = path.join(__dirname, 'data', 'bidding-session.json');
-const STORES_FILE = path.join(__dirname, 'config', 'stores.json');
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 // 待改进 Tab 的 page_tab 值（page_tab=1 为「进行中的竞价」全部，2 为其中「待改进」）
 const PAGE_TAB_IMPROVE = 2;
 // 逐条撤销之间的间隔，避免请求过快触发风控
 const WITHDRAW_DELAY_MS = 300;
 
-// ============ 店铺列表（与竞价导出共用 stores.json，热载） ============
-function loadStores() {
-  try {
-    return JSON.parse(fs.readFileSync(STORES_FILE, 'utf8'));
-  } catch (e) {
-    console.warn('读取 stores.json 失败:', e.message);
-    return [];
-  }
-}
-
-// ============ 登录状态（与竞价导出共用 bidding-session.json） ============
-function readSession() {
-  if (!fs.existsSync(SESSION_FILE)) return null;
-  try { return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')); }
-  catch (e) { console.warn('读取会话文件失败:', e.message); return null; }
-}
-
-/** 组装 seller.shopee.cn 的 Cookie 请求头（逻辑与 bidding.js 保持一致） */
-function loadCookieHeader(targetDomain = 'seller.shopee.cn') {
-  const session = readSession();
-  if (!session || !session.cookies || session.cookies.length === 0) {
-    throw new Error('未找到登录 Cookie，请先在浏览器点扩展「发送登录信息到本地工具」');
-  }
-  const matched = session.cookies.filter(c => {
-    const d = String(c.domain || '').toLowerCase();
-    if (!d) return false;
-    const base = d.startsWith('.') ? d.slice(1) : d;
-    return targetDomain === base || targetDomain.endsWith('.' + base);
-  });
-  if (matched.length === 0) {
-    throw new Error('没有匹配 seller.shopee.cn 的 Cookie，请重新点扩展推送');
-  }
-  return matched.map(c => `${c.name}=${c.value}`).join('; ');
-}
-
-function assertLoginOk(resp) {
-  if (resp.status === 403 || (resp.text && resp.text.includes('token not found'))) {
-    throw new Error('登录已失效（403 token not found），请重新登录卖家中心并点扩展推送');
-  }
-}
-
+// ============ 数据抓取（纯 HTTP） ============
 async function apiGet(cookieHeader, url) {
   const resp = await request({
     url,
@@ -80,17 +37,6 @@ async function apiPost(cookieHeader, url, body) {
   });
   assertLoginOk(resp);
   return resp.json;
-}
-
-/** 金额：接口返回单位为 1/100000 本币（与 bidding.js 的 toAmount 一致），除以 100000 并四舍五入到分 */
-function toAmount(v) {
-  if (v === null || v === undefined || v === '' || v === '0' || v === 0) return '';
-  const n = Number(v) / 100000;
-  return Math.round(n * 100) / 100;
-}
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 // ============ Shopee 接口链路 ============
