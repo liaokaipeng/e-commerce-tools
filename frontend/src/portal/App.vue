@@ -67,7 +67,7 @@ onMounted(() => {
 
 <template>
   <div class="portal">
-    <header class="topbar">
+    <aside class="sidebar">
       <div class="brand">
         <span class="brand-text">
           <b>工具合集</b>
@@ -87,7 +87,7 @@ onMounted(() => {
           </button>
         </template>
       </nav>
-    </header>
+    </aside>
     <div class="frame-wrap">
       <iframe
         v-for="t in tabs"
@@ -108,23 +108,28 @@ onMounted(() => {
   color: #23262f;
   height: 100vh;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
 }
-.topbar {
+.sidebar {
+  flex: none;
+  width: 208px;
   display: flex;
-  align-items: center;
-  gap: 18px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto; /* 菜单过多时侧栏纵向滚动 */
   background: #111527; /* 与监控大屏顶栏一致 */
-  border-bottom: 1px solid #1e2440;
+  border-right: 1px solid #1e2440;
   color: #fff;
-  padding: 10px 24px;
+  padding: 16px 14px;
+  scrollbar-width: thin;
 }
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: none;
+  padding: 0 4px 12px;
+  border-bottom: 1px solid #1e2440;
 }
 .logo {
   width: 34px;
@@ -148,28 +153,23 @@ onMounted(() => {
 }
 nav {
   display: flex;
-  gap: 14px;
-  flex: 1;
-  flex-wrap: nowrap;
-  align-items: center;
-  overflow-x: auto; /* 小屏横向滚动，避免挤压换行 */
-  padding-bottom: 2px;
-  scrollbar-width: thin;
+  flex-direction: column;
+  gap: 8px;
 }
 .g-label {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 1px;
   color: #8f95a8;
-  margin-right: 2px;
+  margin-top: 6px;
   white-space: nowrap;
-  flex: none;
 }
+.g-label:first-child { margin-top: 0; }
 nav button {
   border: none;
   background: rgba(255, 255, 255, 0.08);
   color: #cfd3e0;
-  padding: 8px 18px;
+  padding: 8px 12px;
   border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
@@ -177,14 +177,14 @@ nav button {
   transition: all 0.15s;
   font-family: inherit;
   white-space: nowrap;
-  flex: none;
+  text-align: left;
 }
 nav button:hover { background: rgba(255, 255, 255, 0.16); }
 nav button.active {
   background: #ee4d2d;
   color: #fff;
   box-shadow: 0 2px 10px rgba(238, 77, 45, 0.5);
-  transform: translateY(-1px);
+  transform: translateX(2px);
 }
 nav button small {
   display: block;
@@ -204,7 +204,9 @@ iframe {
 }
 iframe.active { visibility: visible; }
 @media (max-width: 640px) {
-  .brand-text small { display: none; }
-  .topbar { gap: 12px; padding: 10px 14px; }
+  .brand-text b { font-size: 12px; }
+  .sidebar { width: 64px; padding: 12px 8px; }
+  nav button { padding: 8px; font-size: 12px; }
+  nav button small, .g-label { display: none; }
 }
 </style>
