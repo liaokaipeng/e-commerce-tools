@@ -1,17 +1,71 @@
-/* 工具页公共基础样式与设计令牌（tiktok / bidding / bidding-cancel / video / openapi 共用）
-   monitor 大屏为深色主题，不使用本文件；门户页样式在 portal/App.vue 内维护。 */
+/* 工具页公共基础样式与设计令牌（tiktok / bidding / bidding-cancel / hotlisting-cancel / video / openapi 共用）
+   monitor 大屏为深色主题，不使用本文件；门户页样式在 portal/App.vue 内维护。
+
+   本文件同时是「浅色主题」的唯一令牌来源：字体 / 字号 / 间距 / 圆角 / 阴影 / 控件高度 / 文字层级。
+   深色主题（monitor 大屏）的对应令牌在 monitor/monitor.css 顶部以 --d-* 前缀定义，两套同构、便于对照。
+   仅调整视觉与布局，不改动任何组件结构或交互逻辑。 */
 /* body 默认 margin 会让 min-height:100vh 的 .page 总高超出视口，多出一条滚动条 */
 html, body { margin: 0; padding: 0; }
-:root {
-  --brand: #ee4d2d;          /* Shopee 品牌橙 */
-  --bg: #f4f6fb;             /* 页面背景 */
-  --text: #1f2330;           /* 主文字 */
-  --text-2: #666;            /* 次要文字 */
-  --text-3: #8a90a3;         /* 弱化文字 / 提示 */
-  --border: #e5e5e5;         /* 卡片 / 格子边线 */
-  --radius: 14px;            /* 卡片圆角 */
 
-  /* Element Plus 主色统一为品牌橙（按钮 / 开关 / 勾选 / 输入焦点） */
+:root {
+  /* ---------- 品牌色（保持现有主色调） ---------- */
+  --brand: #ee4d2d;          /* Shopee 品牌橙 */
+  --brand-soft: #fdedea;
+  --brand-dark: #be3e24;
+
+  /* ---------- 背景与表面 ---------- */
+  --bg: #f4f6fb;             /* 页面背景 */
+  --surface: #ffffff;        /* 卡片表面 */
+  --surface-2: #f7f8fc;      /* 次级表面（hover / 浅底块） */
+  --border: #e6e8f0;         /* 卡片 / 格子边线 */
+  --border-strong: #d8dbe6;
+
+  /* ---------- 文字层级（注释内数值为该色在 --bg 上的对比度，均满足 WCAG AA） ---------- */
+  --text-1: #1b1f2e;         /* 标题 / 强调 · 15.2:1 */
+  --text-2: #4b5266;         /* 正文 / 次要 · 7.2:1 */
+  --text-3: #656c80;         /* 提示 / 弱化 · 4.8:1 */
+  --text-4: #9aa0b4;         /* 占位 / 禁用（非信息性文本） */
+  --text: var(--text-1);     /* 兼容旧变量名 */
+
+  /* ---------- 语义色（正文用深色、实心图形用 bright，保证各自底色上都可读） ---------- */
+  --success: #2e7d32;
+  --success-bright: #25c16d;
+  --warning: #b26a00;
+  --warning-strong: #d84315;
+  --danger: #c62828;
+  --danger-bright: #e5484d;
+  --danger-border: #ffd2cc;
+  --info: #1e88e5;
+
+  /* ---------- 字体与字号 ---------- */
+  --font-sans: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: Consolas, Menlo, "Courier New", monospace;
+  --fs-title: 15px;          /* 卡片标题 */
+  --fs-body: 14px;           /* 正文 */
+  --fs-sm: 13px;             /* 次要正文 */
+  --fs-xs: 12px;             /* 提示 / 说明 */
+  --fs-2xs: 11px;            /* 角标 */
+  --fs-code: 12.5px;         /* 等宽代码 / 日志（等宽字体视觉偏大，单独一档） */
+
+  /* ---------- 间距（4 的倍数） ---------- */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 28px;
+
+  /* ---------- 圆角（容器越大圆角越大，同层一致） ---------- */
+  --radius-sm: 6px;          /* 输入框内块 / 列表行 / 小标签 */
+  --radius-md: 10px;         /* 面板 / 弹层 / 代码块 */
+  --radius-lg: 14px;         /* 卡片 */
+  --radius: var(--radius-lg);/* 兼容旧变量名 */
+
+  /* ---------- 阴影（浅色主题极轻，靠边线分层） ---------- */
+  --shadow-1: 0 1px 2px rgba(24, 32, 64, 0.05);
+  --shadow-2: 0 6px 20px rgba(24, 32, 64, 0.08);
+
+  /* ---------- 控件高度（与 Element Plus 三档尺寸一一对应） ---------- */
+  --control-h-sm: 26px;
+  --control-h: 32px;
+  --control-h-lg: 40px;
+
+  /* ---------- Element Plus 主色统一为品牌橙（按钮 / 开关 / 勾选 / 输入焦点） ---------- */
   --el-color-primary: #ee4d2d;
   --el-color-primary-light-3: #f3826c;
   --el-color-primary-light-5: #f7a696;
@@ -19,6 +73,23 @@ html, body { margin: 0; padding: 0; }
   --el-color-primary-light-8: #fcdbd5;
   --el-color-primary-light-9: #fdedea;
   --el-color-primary-dark-2: #be3e24;
+
+  /* ---------- Element Plus 文字 / 边框 / 圆角 / 字号跟随本套令牌 ---------- */
+  --el-text-color-primary: var(--text-1);
+  --el-text-color-regular: #3f4658;
+  --el-text-color-secondary: var(--text-3);
+  --el-text-color-placeholder: var(--text-4);
+  --el-text-color-disabled: var(--text-4);
+  --el-border-color: var(--border);
+  --el-border-color-light: var(--border);
+  --el-border-color-lighter: #eef0f6;
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: var(--radius-sm);
+  --el-font-size-base: var(--fs-body);
+  /* 浮层（下拉 / 气泡 / 弹窗）圆角与阴影与卡片同源 */
+  --el-popover-border-radius: var(--radius-sm);
+  --el-dialog-border-radius: var(--radius-md);
+  --el-box-shadow-light: var(--shadow-2);
 }
 
 /* Element Plus 按钮点击后会保留 focus 态（文字/边框/底色变主色）——主色是 Shopee
@@ -29,26 +100,84 @@ html, body { margin: 0; padding: 0; }
   border-color: var(--el-button-border-color);
   background-color: var(--el-button-bg-color);
 }
+
+/* ===== 卡片排版统一 ===== */
+/* 卡片头固定为「小标题」层级（15px / 600 / --text-1），与正文 14px 拉开层次 */
+.el-card {
+  border-color: var(--border);
+  border-radius: var(--radius-lg);
+}
+.el-card__header {
+  padding: var(--sp-3) var(--sp-5);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text-1);
+}
+.el-card__body { padding: var(--sp-4) var(--sp-5) var(--sp-5); }
+/* 表格表头与正文的字号/字重对齐正文层级 */
+.el-table th.el-table__cell { font-weight: 600; }
+
+/* ===== 操作行控件尺寸统一 =====
+   Element Plus 默认给相邻按钮加 12px 的 margin-left，与 flex 的 gap 叠加后，
+   「按钮 ↔ 按钮」的间距会明显大于「按钮 ↔ 下拉/文字」的间距；统一改由 flex gap 控制。 */
+.actions > .el-button + .el-button,
+.btn-row > .el-button + .el-button,
+.row > .el-button + .el-button,
+.dir-row > .el-button + .el-button,
+.picker-row > .el-button + .el-button,
+.shopcfg-ops > .el-button + .el-button { margin-left: 0; }
+
+/* 同一操作行内混用 size="default"(32px) 与 size="large"(40px) 会让一行出现两种高度，
+   这里把操作行内的按钮统一到 --control-h-lg，行内高度一致。 */
+.actions > .el-button,
+.btn-row > .el-button {
+  min-height: var(--control-h-lg);
+  padding-left: var(--sp-5);
+  padding-right: var(--sp-5);
+}
+
+/* ===== 原生滚动条（浅色主题，Firefox / Chromium 双份） ===== */
+/* 日志面板是深色代码块，自带一套滚动条样式（见 LogPanel.vue），不受此处影响 */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd1e0 transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #cbd1e0;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background: #aeb6c9; background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ===== 页面骨架 ===== */
 .page {
-  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: 1.6;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
-  padding: 28px 20px 0;
+  padding: var(--sp-6) var(--sp-5) 0;
   box-sizing: border-box;
 }
 .container {
   max-width: 900px;
   margin: 0 auto;
-  padding-bottom: 60px;
+  padding-bottom: 64px;
 }
 .card {
-  margin-bottom: 18px;
-  border-radius: var(--radius);
+  margin-bottom: var(--sp-4);
+  border-radius: var(--radius-lg);
 }
 .hint {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
+  line-height: 1.6;
 }
 .row {
   display: flex;
@@ -63,33 +192,35 @@ html, body { margin: 0; padding: 0; }
   flex-wrap: wrap;
 }
 /* 已选店铺计数（bidding / bidding-cancel 共用） */
-.sel-count { font-size: 13px; color: var(--text-2); }
+.sel-count { font-size: var(--fs-sm); color: var(--text-2); }
 /* 日志面板与上方内容的间距（bidding / bidding-cancel / video 共用） */
-.log-box { margin-top: 14px; }
+.log-box { margin-top: var(--sp-3); }
 
 /* ---------- 批量操作页预览表格（bidding-cancel / hotlisting-cancel 共用，
      原两页各自 scoped 复制一份，现统一在此定义） ---------- */
-.danger-card { border: 1px solid #ffd2cc; }
-.sel-count.warn { color: #d84315; font-weight: 600; }
-.danger-tip { font-size: 13px; color: #c62828; flex: 1; min-width: 220px; }
-.paused-tip { font-size: 13px; color: #b26a00; flex: 1; min-width: 220px; }
-.exec-actions { margin-top: 14px; }
-.card-header-row { display: flex; align-items: center; justify-content: space-between; }
-.preview-table { margin-top: 14px; }
+.danger-card { border: 1px solid var(--danger-border); }
+.sel-count.warn { color: var(--warning-strong); font-weight: 600; }
+.danger-tip { font-size: var(--fs-sm); color: var(--danger); flex: 1; min-width: 220px; }
+.paused-tip { font-size: var(--fs-sm); color: var(--warning); flex: 1; min-width: 220px; }
+.exec-actions { margin-top: var(--sp-3); }
+.card-header-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.preview-table { margin-top: var(--sp-3); }
 .expand-list { padding: 2px 10px 8px; }
 .expand-row {
   display: flex;
   gap: 14px;
   align-items: center;
   padding: 6px 8px;
-  border-bottom: 1px dashed #eee;
-  font-size: 13px;
+  border-bottom: 1px dashed var(--border);
+  font-size: var(--fs-sm);
 }
+.expand-row:last-child { border-bottom: none; }
 .e-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.e-model { color: #888; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.e-price { color: #555; white-space: nowrap; }
-.e-suggest { color: #d84315; white-space: nowrap; }
-.e-link { color: #1e88e5; text-decoration: none; white-space: nowrap; }
-.expand-empty { color: #999; padding: 8px; }
-.cnt-bad { color: #c62828; font-weight: 700; }
-.cnt-ok { color: #2e7d32; }
+.e-model { color: var(--text-3); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.e-price { color: var(--text-2); white-space: nowrap; }
+.e-suggest { color: var(--warning-strong); white-space: nowrap; }
+.e-link { color: var(--info); text-decoration: none; white-space: nowrap; }
+.e-link:hover { text-decoration: underline; }
+.expand-empty { color: var(--text-3); padding: 8px; font-size: var(--fs-sm); }
+.cnt-bad { color: var(--danger); font-weight: 700; }
+.cnt-ok { color: var(--success); }

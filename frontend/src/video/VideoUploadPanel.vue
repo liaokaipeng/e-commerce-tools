@@ -40,5 +40,5 @@ const emit = defineEmits(['start', 'cancel', 'clear-log', 'export-result', 'upda
 </template>
 
 <style scoped>
-.btn-row { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
+.btn-row { display: flex; gap: var(--sp-3); margin-top: 6px; flex-wrap: wrap; align-items: center; }
 </style>

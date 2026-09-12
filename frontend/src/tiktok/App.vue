@@ -228,33 +228,33 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.proxy-on { margin-bottom: 20px; }
-.proxy-off { margin-bottom: 20px; }
-.vpn-alert { margin-bottom: 20px; }
+.proxy-on { margin-bottom: var(--sp-5); }
+.proxy-off { margin-bottom: var(--sp-5); }
+.vpn-alert { margin-bottom: var(--sp-5); }
 .dot {
   display: inline-block;
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #25c16d;
-  margin-right: 8px;
+  background: var(--success-bright);
+  margin-right: var(--sp-2);
 }
-.dot.off { background: #f5a623; }
-.empty-hint { color: var(--text-3, #767b8a); font-size: 12.5px; margin-top: 8px; }
-.actions { margin-top: 18px; }
+.dot.off { background: var(--warning-bright); }
+.empty-hint { color: var(--text-3); font-size: var(--fs-xs); margin-top: var(--sp-2); }
+.actions { margin-top: var(--sp-4); }
 .progress-line {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 12px;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
 }
 .progress-bar { flex: 1; min-width: 160px; }
 .progress-text {
-  font-size: 13.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   white-space: nowrap;
 }
-.progress-text .ok { color: #25c16d; margin-left: 8px; }
-.progress-text .err { color: #e5484d; margin-left: 8px; }
-.summary-alert { margin-bottom: 12px; }
+.progress-text .ok { color: var(--success-bright); margin-left: var(--sp-2); }
+.progress-text .err { color: var(--danger-bright); margin-left: var(--sp-2); }
+.summary-alert { margin-bottom: var(--sp-3); }
 </style>

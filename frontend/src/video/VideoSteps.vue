@@ -158,26 +158,32 @@ const statusText = (t) => STATUS_TEXT[t] || '';
 </template>
 
 <style scoped>
-.pill { margin-left: 8px; }
-.file-upload { margin-top: 4px; }
-.field-label { font-size: 12px; color: #6b7280; margin-right: 8px; }
+.pill { margin-left: var(--sp-2); }
+.file-upload { margin-top: var(--sp-1); }
+.field-label { font-size: var(--fs-xs); color: var(--text-3); margin-right: var(--sp-2); }
 .shop-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .shop-region-select { width: 170px; flex: none; }
 .shop-select { flex: 1 1 320px; min-width: 280px; }
 .opt-region {
   display: inline-block;
   min-width: 82px;
-  margin-right: 8px;
-  font-size: 12px;
-  color: var(--text-3, #999);
+  margin-right: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
 }
-.opt-label { font-size: 13px; }
+.opt-label { font-size: var(--fs-sm); }
 /* 被国家/关键词筛掉的选项仍要渲染（保住已选标签的名称），只是在下拉里隐藏 */
 .opt-filtered-out { display: none; }
-.shop-empty-state { margin-top: 8px; padding: 10px 12px; border: 1px dashed var(--border, #dcdfe6); border-radius: 6px; }
-.shop-empty-tip { margin-bottom: 8px; font-size: 12px; color: var(--text-2, #606266); }
-.shop-empty-state a { font-size: 13px; color: var(--el-color-primary, #409eff); text-decoration: none; }
+.shop-empty-state {
+  margin-top: var(--sp-1);
+  padding: 10px var(--sp-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.shop-empty-tip { margin-bottom: var(--sp-2); font-size: var(--fs-xs); color: var(--text-2); }
+.shop-empty-state a { font-size: var(--fs-sm); color: var(--el-color-primary); text-decoration: none; }
 .shop-empty-state a:hover { text-decoration: underline; }
-.btn-row { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
-.preview { margin-top: 14px; }
+.btn-row { display: flex; gap: var(--sp-3); margin-top: 6px; flex-wrap: wrap; align-items: center; }
+.preview { margin-top: var(--sp-3); }
 </style>

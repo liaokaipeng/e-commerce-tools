@@ -92,35 +92,36 @@ watch(
 
 <style scoped>
 .dp-current {
-  font-size: 12px;
-  color: #888;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
   word-break: break-all;
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
 }
-.dp-error { margin-bottom: 8px; }
+.dp-error { margin-bottom: var(--sp-2); }
 .dp-list {
   min-height: 220px;
   max-height: 260px;
   overflow-y: auto;
-  border: 1px solid #f0f0f2;
-  border-radius: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
 }
 .dp-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--fs-sm);
+  color: var(--text-1);
 }
-.dp-row:hover { background: #f5f6fa; }
+.dp-row:hover { background: var(--surface-2); }
 .dp-ico { flex-shrink: 0; }
 .dp-empty {
-  color: #999;
-  font-size: 13px;
-  padding: 20px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  padding: var(--sp-5);
   text-align: center;
 }
 </style>

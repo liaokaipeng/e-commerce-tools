@@ -38,10 +38,10 @@ const boxStyle = computed(() => ({
 .log-panel {
   background: #10131c;
   color: #c8e1ff;
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-code);
   line-height: 1.8;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 14px 16px;
   overflow-y: auto;
   word-break: break-all;
@@ -58,12 +58,12 @@ const boxStyle = computed(() => ({
   word-break: break-all;
 }
 .log-line + .log-line { margin-top: 3px; }
-.log-time { color: #5c6370; flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.log-time { color: #7f8798; flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .log-info { color: #b8c0cc; }
 .log-warn { color: #ffc95c; }
 .log-ok { color: #5fd08a; }
 .log-err { color: #ff7b72; }
 .log-network { color: #ff9d5c; font-weight: 600; }
 .log-title { color: #7d8aff; font-weight: 600; }
-.log-empty { color: #8a8a8a; }
+.log-empty { color: #8b93a3; }
 </style>

@@ -108,7 +108,7 @@ export function buildTrendOption(trend) {
       trigger: 'axis',
       backgroundColor: '#171b2e',
       borderColor: '#232a4a',
-      textStyle: { color: '#e6e9f2', fontSize: 12 },
+      textStyle: { color: '#eef1f8', fontSize: 12 },
       axisPointer: { type: 'line', lineStyle: { color: '#4a5bd8' } },
       formatter: (params) => {
         const arr = Array.isArray(params) ? params : [params];
@@ -163,7 +163,7 @@ export function buildTrendOption(trend) {
           symbol: 'circle',
           symbolSize: 9,
           itemStyle: { color: lastColor },
-          label: { color: '#dfe3f2', fontSize: 10, fontWeight: 600, position: 'top', distance: 6 },
+          label: { color: '#eef1f8', fontSize: 10, fontWeight: 600, position: 'top', distance: 6 },
           data: [{ coord: [pts.length - 1, last.v], value: lastLabel }],
         },
       },

@@ -268,18 +268,18 @@ async function doCancel() {
 </template>
 
 <style scoped>
-.spu-tip { font-size: 13px; color: #666; margin-bottom: 10px; line-height: 1.7; }
-.spu-input { font-family: Consolas, Menlo, monospace; }
-.save-state { font-size: 12px; }
-.sv-saving { color: #888; }
-.sv-ok { color: #2e7d32; }
-.sv-err { color: #c62828; }
-.spu-empty { color: #999; font-size: 13px; padding: 6px 0; }
-.spu-row { margin-bottom: 12px; }
-.spu-row-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-.spu-name { font-weight: 600; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.spu-id { color: #999; font-size: 12px; }
-.spu-count { color: #b26a00; font-size: 12px; margin-left: auto; }
-.spu-count.ok { color: #2e7d32; }
+.spu-tip { font-size: var(--fs-sm); color: var(--text-2); margin-bottom: 10px; line-height: 1.7; }
+.spu-input { font-family: var(--font-mono); }
+.save-state { font-size: var(--fs-xs); }
+.sv-saving { color: var(--text-3); }
+.sv-ok { color: var(--success); }
+.sv-err { color: var(--danger); }
+.spu-empty { color: var(--text-3); font-size: var(--fs-sm); padding: 6px 0; }
+.spu-row { margin-bottom: var(--sp-3); }
+.spu-row-head { display: flex; align-items: center; gap: 10px; margin-bottom: var(--sp-1); }
+.spu-name { font-weight: 600; color: var(--text-1); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spu-id { color: var(--text-3); font-size: var(--fs-xs); }
+.spu-count { color: var(--warning); font-size: var(--fs-xs); margin-left: auto; }
+.spu-count.ok { color: var(--success); }
 /* 预览表格 / 展开行 / 状态色等共用样式在 styles/base.css */
 </style>

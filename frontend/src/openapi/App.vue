@@ -370,11 +370,11 @@ onUnmounted(() => {
 .container { max-width: 960px; }
 .auth-url { flex: 1; min-width: 320px; }
 .domain-help {
-  margin-top: 14px;
-  border: 1px dashed #c9cede;
-  border-radius: 8px;
-  background: #fafbfe;
+  margin-top: var(--sp-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
 }
-.domain-help .snippet { margin-top: 8px; }
-.domain-help .snippet :deep(textarea) { font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+.domain-help .snippet { margin-top: var(--sp-2); }
+.domain-help .snippet :deep(textarea) { font-family: var(--font-mono); font-size: var(--fs-xs); }
 </style>

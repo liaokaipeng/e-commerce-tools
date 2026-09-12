@@ -121,22 +121,28 @@ const selCount = computed(() => props.selected.size);
 .picker-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .region-select { width: 170px; flex: none; }
 .store-select { flex: 1 1 320px; min-width: 280px; }
-.sel-hint { color: var(--text-3, #999); font-size: 12px; white-space: nowrap; }
-.empty-tip { margin-top: 8px; color: var(--text-3, #999); font-size: 12px; }
-.empty-state { margin-top: 4px; padding: 10px 12px; border: 1px dashed var(--border, #dcdfe6); border-radius: 6px; }
-.empty-state .empty-tip { margin: 0 0 8px; color: var(--text-2, #606266); }
-.empty-actions { display: flex; align-items: center; gap: 12px; }
-.empty-actions a { font-size: 13px; color: var(--el-color-primary, #409eff); text-decoration: none; }
+.sel-hint { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
+.empty-tip { margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
+.empty-state {
+  margin-top: var(--sp-1);
+  padding: 10px var(--sp-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.empty-state .empty-tip { margin: 0 0 var(--sp-2); color: var(--text-2); }
+.empty-actions { display: flex; align-items: center; gap: var(--sp-3); }
+.empty-actions a { font-size: var(--fs-sm); color: var(--el-color-primary); text-decoration: none; }
 .empty-actions a:hover { text-decoration: underline; }
 .opt-region {
   display: inline-block;
   min-width: 82px;
-  margin-right: 8px;
-  font-size: 12px;
-  color: var(--text-3, #999);
+  margin-right: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
 }
-.opt-name { font-size: 13px; }
-.opt-id { margin-left: 8px; font-size: 12px; color: var(--text-3, #999); }
+.opt-name { font-size: var(--fs-sm); }
+.opt-id { margin-left: var(--sp-2); font-size: var(--fs-xs); color: var(--text-3); }
 /* 被国家/关键词筛掉的选项仍要渲染（保住已选标签的名称），只是在下拉里隐藏 */
 .opt-filtered-out { display: none; }
 </style>
