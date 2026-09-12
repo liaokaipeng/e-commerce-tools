@@ -3,6 +3,8 @@
    拆成子组件后共用类（.panel / .stat / .b-P0 / .dim2 …）只需在此定义一次，
    .proj（投影模式）的后代选择器也能跨组件生效。 */
 * { box-sizing: border-box; }
+/* body 默认 margin 会让 height:100vh 的 .dash 总高超出视口，多出一条滚动条 */
+html, body { margin: 0; padding: 0; }
 /* 只重置自定义元素的边距；不能写 `* { padding: 0 }`，会命中 Element Plus 组件
    根节点（如 .el-button），把按钮自带的左右内边距清零导致文字贴边 */
 .dash, h2, h3, p { margin: 0; padding: 0; }

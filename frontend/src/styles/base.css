@@ -1,5 +1,7 @@
 /* 工具页公共基础样式与设计令牌（tiktok / bidding / bidding-cancel / video / openapi 共用）
    monitor 大屏为深色主题，不使用本文件；门户页样式在 portal/App.vue 内维护。 */
+/* body 默认 margin 会让 min-height:100vh 的 .page 总高超出视口，多出一条滚动条 */
+html, body { margin: 0; padding: 0; }
 :root {
   --brand: #ee4d2d;          /* Shopee 品牌橙 */
   --bg: #f4f6fb;             /* 页面背景 */
