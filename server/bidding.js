@@ -7,7 +7,7 @@ const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
 const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
-// 会话 / Cookie / 店铺列表 / 金额换算 / 接口请求层：与取消竞价、取消Hot Listing、商品导出共用同一实现
+// 会话 / Cookie / 店铺列表 / 金额换算 / 接口请求层：与取消竞价、取消Hot Listing 共用同一实现
 const {
   SESSION_FILE, DEFAULT_REGION, toAmount, loadCookieHeader, loadStores, readSession,
   apiPost, buildShopeeUrl, fetchShopRegion,

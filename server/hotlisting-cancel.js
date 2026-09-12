@@ -20,7 +20,7 @@ const path = require('path');
 const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
 // 长任务注册中心（暂停 / 继续 / 取消 / SSE 断开即取消 / TTL 清理）：与取消竞价共用
 const jobs = require('./lib/jobs');
-// 会话 / Cookie / 店铺列表 / 延时 / 接口请求层：与竞价导出、取消竞价、商品导出共用同一实现
+// 会话 / Cookie / 店铺列表 / 延时 / 接口请求层：与竞价导出、取消竞价共用同一实现
 const {
   HOST, DEFAULT_REGION, sleep, loadCookie, loadStores,
   apiPost, buildShopeeUrl, fetchShopRegion,

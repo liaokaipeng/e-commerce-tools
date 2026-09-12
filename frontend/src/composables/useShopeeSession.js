@@ -1,5 +1,5 @@
 // Shopee 会话组合式函数：登录状态轮询 + 店铺列表与勾选集合。
-// bidding / bidding-cancel / hotlisting-cancel / product-export 四页共用。
+// bidding / bidding-cancel / hotlisting-cancel 三页共用。
 // 注意：店铺的分组与勾选渲染由 StorePicker 组件承担，这里只维护 selected 集合本身。
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';

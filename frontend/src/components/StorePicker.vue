@@ -1,4 +1,4 @@
-<!-- ② 选择店铺卡片：下拉多选（bidding / bidding-cancel / hotlisting-cancel / product-export 四页共用）
+<!-- ② 选择店铺卡片：下拉多选（bidding / bidding-cancel / hotlisting-cancel 三页共用）
      selected 为 reactive Set，沿用「直接操作传入集合」的既有模式。
      支持：按国家/地区筛选 + 店铺名/店铺ID 搜索（下拉内输入即搜）+ 全选筛选结果 / 取消全选。 -->
 <script setup>

@@ -1,5 +1,5 @@
 // 页面通用组合式函数：控制台日志 / 默认目录设置 / 日志自动滚动 / SSE 流读取
-// tiktok / bidding / bidding-cancel / hotlisting-cancel / product-export 等工具页共用，避免重复实现。
+// tiktok / bidding / bidding-cancel / hotlisting-cancel 等工具页共用，避免重复实现。
 import { ref, watch, nextTick } from 'vue';
 import { ElMessage } from 'element-plus';
 
@@ -125,7 +125,7 @@ export async function readSSE(resp, onEvent) {
 /**
  * 发起请求并读取 SSE 事件流：非 2xx 或响应体不可读时记日志并返回 false，
  * 否则逐事件交给 onEvent（内部复用 readSSE），读完后返回 true。
- * 供 bidding / bidding-cancel / hotlisting-cancel / product-export / tiktok 五页共用，
+ * 供 bidding / bidding-cancel / hotlisting-cancel / tiktok 四页共用，
  * 替代各页逐字重复的「fetch → resp.ok 校验 → readSSE」样板。
  * @param {string} url 接口路径
  * @param {RequestInit} options fetch 选项（method / headers / body / signal 等）

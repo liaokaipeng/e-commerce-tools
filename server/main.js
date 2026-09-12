@@ -23,7 +23,6 @@ const hotlistingCancel = require('./hotlisting-cancel');
 const video = require('./video');
 const openapi = require('./openapi');
 const monitor = require('./monitor');
-const productExport = require('./product-export');
 const cache = require('./cache');
 
 const { LISTEN_PORT: PORT, CALLBACK_PORT } = require('./lib/config');
@@ -49,7 +48,6 @@ hotlistingCancel.register({ get, post });
 video.register({ get, post });
 openapi.register({ get, post });
 monitor.register({ get, post });
-productExport.register({ get, post });
 cache.register({ get, post });
 
 // ============ 工具默认目录（settings.json 持久化） ============
@@ -61,7 +59,6 @@ get('/api/settings', (req, res) => {
     defaults: {
       tiktok: settings.getDefault('tiktok'),
       bidding: settings.getDefault('bidding'),
-      'product-export': settings.getDefault('product-export'),
     },
   });
 });
@@ -69,7 +66,7 @@ get('/api/settings', (req, res) => {
 post('/api/settings', async (req, res) => {
   try {
     const { tool, dir } = await readJsonBodySoft(req, '/api/settings');
-    if (tool !== 'tiktok' && tool !== 'bidding' && tool !== 'product-export') {
+    if (tool !== 'tiktok' && tool !== 'bidding') {
       sendJson(res, 400, { ok: false, message: '无效的工具' });
       return;
     }
@@ -201,7 +198,7 @@ if (isMain) {
     console.log('  请打开浏览器访问: http://127.0.0.1:' + PORT);
     console.log('==============================================');
     console.log('  - TikTok 下载     此页面即可直接使用');
-    console.log('  - 竞价导出/取消竞价/商品导出/取消Hot Listing：需先装扩展并点「发送登录信息到本地工具」');
+    console.log('  - 竞价导出/取消竞价/取消Hot Listing：需先装扩展并点「发送登录信息到本地工具」');
     console.log('  - 视频上传：需先装扩展，在短视频页手动上传一次视频抓取凭证');
     console.log('  - 开放平台：录入 App 后生成授权链接登录（回调 redirect 后台与本工具填一致，默认 https://example.com/，授权后粘贴回调链接完成）');
     console.log('  - 监控大屏：开放平台授权店铺后自动巡检采集，/monitor/ 查看三级告警大屏');

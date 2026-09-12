@@ -19,7 +19,6 @@ const DIR_INDEX = {
   '/bidding/': '/bidding/index.html',
   '/bidding-cancel/': '/bidding-cancel/index.html',
   '/hotlisting-cancel/': '/hotlisting-cancel/index.html',
-  '/product-export/': '/product-export/index.html',
   '/video/': '/video/index.html',
   '/openapi/': '/openapi/index.html',
   '/monitor/': '/monitor/index.html',

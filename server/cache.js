@@ -7,7 +7,7 @@
  * 类别与影响面（配置类文件一律不动：settings.json / config/stores.json /
  * hotlisting-spu.json / monitor 的 rules.json 与 config.json）：
  *   video    视频上传凭证        data/video-session.json（cn 多店铺 + ph）+ 内存副本
- *   bidding  竞价登录 Cookie     data/bidding-session.json（竞价导出/取消竞价/取消 Hot Listing/商品导出共用）
+ *   bidding  竞价登录 Cookie     data/bidding-session.json（竞价导出/取消竞价/取消 Hot Listing 共用）
  *   openapi  开放平台店铺 Token  data/openapi-session.json 的 shops（App 配置保留，清后各店铺需重新授权）
  *   monitor  监控大屏数据        alerts / meta / snapshots / 汇率缓存（阈值规则与店铺配置保留）
  *
@@ -41,7 +41,7 @@ const CATEGORIES = {
   },
   bidding: {
     name: '竞价登录 Cookie',
-    desc: '竞价导出 / 取消竞价 / 取消 Hot Listing / 商品导出共用。清后需在扩展重新「发送登录信息」。',
+    desc: '竞价导出 / 取消竞价 / 取消 Hot Listing 共用。清后需在扩展重新「发送登录信息」。',
     clear() {
       try { fs.rmSync(SESSION_FILE, { force: true }); } catch (e) {
         throw new Error('删除竞价会话文件失败：' + e.message);

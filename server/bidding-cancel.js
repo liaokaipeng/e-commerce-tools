@@ -9,7 +9,7 @@
  *   逐个点击「撤销」即 seller_withdraw { bid_id }。
  */
 const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
-// 会话 / Cookie / 店铺列表 / 金额换算 / 延时 / 接口请求层：与竞价导出、取消Hot Listing、商品导出共用
+// 会话 / Cookie / 店铺列表 / 金额换算 / 延时 / 接口请求层：与竞价导出、取消Hot Listing 共用
 const {
   DEFAULT_REGION, toAmount, sleep, loadCookieHeader, loadStores,
   apiPost, buildShopeeUrl, fetchShopRegion,

@@ -55,7 +55,7 @@ async function run() {
     }
 
     console.log('  -- 页面静态资源 --');
-    for (const p of ['/', '/tiktok/', '/bidding/', '/bidding-cancel/', '/hotlisting-cancel/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/openapi/', '/monitor/', '/product-export/', '/xlsx.full.min.js']) {
+    for (const p of ['/', '/tiktok/', '/bidding/', '/bidding-cancel/', '/hotlisting-cancel/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/openapi/', '/monitor/', '/xlsx.full.min.js']) {
       const r = await req('GET', p);
       t(`GET ${p} 返回 200`, r.status === 200, `status=${r.status}`);
     }
@@ -241,36 +241,6 @@ async function run() {
         }
       }
       t('无登录 Cookie 时 run 广播 fatal 事件', events.some((e) => e.type === 'fatal'), JSON.stringify(events));
-    }
-
-    console.log('  -- 商品数据导出 API --');
-    {
-      const r = await req('POST', '/api/product-export/export', { shopIds: [], dir: '' });
-      t('POST /api/product-export/export 未选店铺返回 400', r.status === 400, `status=${r.status}`);
-      // 无登录会话（上一用例已删除 bidding-session.json）：SSE 报出 Cookie 提示后结束，不触达真实站点
-      const resp = await fetch(BASE + '/api/product-export/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopIds: ['557630453'], dir: '' }),
-      });
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      const events = [];
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split('\n\n');
-        buf = parts.pop();
-        for (const part of parts) {
-          const line = part.split('\n').find((l) => l.startsWith('data: '));
-          if (!line) continue;
-          try { events.push(JSON.parse(line.slice(6))); } catch { /* 忽略无法解析的事件 */ }
-        }
-      }
-      t('无登录 Cookie 时 export SSE 报告 done 失败且提示 Cookie', events.some((e) => e.type === 'done' && e.ok === false && e.msg.includes('Cookie')), JSON.stringify(events));
-      t('无登录 Cookie 时 export SSE 正常收尾 summary', events.some((e) => e.type === 'summary'), JSON.stringify(events));
     }
 
     console.log('  -- 视频上传 API --');

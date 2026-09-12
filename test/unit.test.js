@@ -40,10 +40,6 @@ const { detectProxy, createAgent } = require('../server/tiktok/proxy');
 const { toAmount } = require('../server/bidding');
 const biddingCancel = require('../server/bidding-cancel');
 const hotlistingCancel = require('../server/hotlisting-cancel');
-const {
-  imageUrlOf, statusNameOf, firstStr, productsOf, totalOf: peTotalOf, tiersOf, optionsOf, optionTextOf,
-  optionImageIdOf, tierTableOf, buildRows, rowToCells, headerCells,
-} = require('../server/product-export');
 const { nowSec, buildBaseString, hmacHex, maskToken } = require('../server/lib/openapi-utils');
 const { parseJsonText, readRouteBody } = require('../server/lib/http-utils');
 const jobs = require('../server/lib/jobs');
@@ -595,7 +591,7 @@ async function run() {
     jobEvents.delete(liveId);
   }
 
-  // ===== 共享层：请求体解析 / 卖家中心 URL 拼接 / 导出工具（四模块收敛后的公共契约） =====
+  // ===== 共享层：请求体解析 / 卖家中心 URL 拼接 / 导出工具（三模块收敛后的公共契约） =====
   {
     t('parseJsonText 容忍 UTF-8 BOM', parseJsonText('\uFEFF{"a":1}').a === 1 && parseJsonText('{"b":2}').b === 2);
     t('parseJsonText 非法 JSON 抛错', (() => {
@@ -611,7 +607,7 @@ async function run() {
       && u.includes('SPC_CDS=abc123') && u.includes('cnsc_shop_id=557630453') && u.includes('cbsc_shop_region=ph'), u);
     t('buildShopeeUrl 带业务参数且跳过空值',
       u.includes('page_number=1') && u.includes('page_size=45') && !u.includes('empty=') && !u.includes('nil='), u);
-    t('buildShopeeUrl 无 region 时不产出 cbsc_shop_region（商品导出用）',
+    t('buildShopeeUrl 无 region 时不产出 cbsc_shop_region',
       !buildShopeeUrl('/api/v3/product/get_product_info', { shopId: '1', business: { product_id: 'x' } }).includes('cbsc_shop_region'));
     t('buildShopeeUrl 无 SPC_CDS 时跳过该参数', !buildShopeeUrl('/x', { shopId: '1' }).includes('SPC_CDS='));
     t('DEFAULT_REGION 与竞价系原兜底口径一致', DEFAULT_REGION === 'ph');
@@ -1273,96 +1269,6 @@ async function run() {
     monitorEngine.flushAlerts();
     monitorStore.flushMeta();
     try { fs.rmSync(MONITOR_TMP, { recursive: true, force: true }); } catch { /* 忽略 */ }
-  }
-
-  // ===== 商品数据导出：纯函数（列表/详情 → 规格行） =====
-  {
-    t('商品导出：imageUrlOf 按市场拼 down-{region} 直链 / 已是链接原样 / 空值返回空串',
-      imageUrlOf('cn-11134207-820l4-monpa1s8re31ea', 'ph') === 'https://down-ph.img.susercontent.com/cn-11134207-820l4-monpa1s8re31ea'
-      && imageUrlOf('sg-11134201-abc', 'MY') === 'https://down-my.img.susercontent.com/sg-11134201-abc'
-      && imageUrlOf('sg-11134201-abc') === 'https://cf.shopee.sg/file/sg-11134201-abc'
-      && imageUrlOf('https://x.com/a.png', 'ph') === 'https://x.com/a.png'
-      && imageUrlOf('') === '' && imageUrlOf(null) === '');
-    t('商品导出：statusNameOf 1→在售，其余原样', statusNameOf(1) === '在售' && statusNameOf('9') === '9' && statusNameOf(null) === '');
-    t('商品导出：firstStr 按候选顺序取第一个非空', firstStr({ a: '', b: 0, c: 'x' }, ['a', 'b', 'c']) === '0');
-    t('商品导出：productsOf/totalOf 容错取列表与总数', productsOf({ data: { products: [1, 2] } }).length === 2 && peTotalOf({ data: { page_info: { total: 12 } } }) === 12 && peTotalOf({}) === 0);
-    t('商品导出：tiersOf 兼容 tier_variation 单复数字段', tiersOf({ tier_variation: [{ name: '颜色' }] }).length === 1 && tiersOf({ tier_variations: [{ name: '尺码' }] }).length === 1);
-
-    // 与生产实测一致的 fixtures（2026-08 实测形态）
-    const product = {
-      id: 23927842651, name: '测试商品', status: 1,
-      parent_sku: 'P-001', cover_image: 'sg-11134201-cover',
-      modify_time: 1786678500,
-      model_list: [
-        { id: 111, name: 'M-A', sku: 'SKU-A', tier_index: [0, 1], image: 'cn-11134207-m1',
-          stock_detail: { total_available_stock: 58 },
-          price_detail: { origin_price: '1337.00', promotion_price: '429.00' },
-          statistics: { sold_count: 45 } },
-        { id: 222, name: 'M-B', sku: 'SKU-B', tier_index: [1, 0], image: 'cn-11134207-m2',
-          stock_detail: { total_available_stock: 726 },
-          price_detail: { origin_price: '1337.00', promotion_price: '449.00' },
-          statistics: { sold_count: 1175 } },
-      ],
-    };
-    const detail = {
-      tier_variation: [
-        { name: '颜色', options: ['红', '蓝'], images: ['sg-11134201-c1', 'sg-11134201-c2'] },
-        { name: '尺寸', options: ['S', 'M'], images: ['sg-11134201-s1', 'sg-11134201-s2'] },
-      ],
-      model_list: [
-        { id: 111, sku: 'SKU-A', tier_index: [0, 1], price_info: { input_normal_price: '1337.00', input_promotion_price: '429.00' }, stock_detail: { total_available_stock: 58 } },
-        { id: 222, sku: 'SKU-B', tier_index: [1, 0], price_info: { input_normal_price: '1337.00', input_promotion_price: '449.00' }, stock_detail: { total_available_stock: 726 } },
-      ],
-    };
-    const rows = buildRows(product, detail, '557630453', 'ph');
-    t('商品导出：每个规格一行（商品+规格字段齐）', rows.length === 2
-      && rows[0].itemId === '23927842651' && rows[0].modelId === '111' && rows[0].sku === 'SKU-A'
-      && rows[0].status === '在售' && rows[0].normalPrice === '1337.00' && rows[0].stock === '58'
-      && rows[0].sold === '45' && rows[0].detailUrl.includes('/portal/product/23927842651')
-      && rows[0].updateTime === '1786678500', JSON.stringify(rows[0]));
-    t('商品导出：规格名/值按 tier_index 解析', rows[0].tierName1 === '颜色' && rows[0].tierValue1 === '红'
-      && rows[0].tierName2 === '尺寸' && rows[0].tierValue2 === 'M'
-      && rows[1].tierValue1 === '蓝' && rows[1].tierValue2 === 'S', JSON.stringify(rows));
-    t('商品导出：规格值图片链接按市场输出直链', rows[0].tierImage1 === 'https://down-ph.img.susercontent.com/sg-11134201-c1'
-      && rows[0].tierImage2 === 'https://down-ph.img.susercontent.com/sg-11134201-s2', JSON.stringify(rows));
-    t('商品导出：SKU 图片优先列表 model.image（卖家中心权威值）', rows[0].skuImage === 'https://down-ph.img.susercontent.com/cn-11134207-m1'
-      && rows[1].skuImage === 'https://down-ph.img.susercontent.com/cn-11134207-m2', JSON.stringify(rows));
-
-    // 实测踩坑场景（item 18173017892）：详情 tier_variation.images 与列表 model.image 不一致时，
-    // SKU 图片必须取 model.image，不能取规格值图片
-    const staleDetail = {
-      tier_variation: [
-        { name: 'Color', options: ['Multicolor'], images: ['cn-11134207-7r98o-lzolfa67g04i02'] },
-      ],
-      model_list: [{ id: 49252964462, name: 'Multicolor,216LED(5M*0.7M) [Plug]', tier_index: [0], sku: 'A225E' }],
-    };
-    const listWithModelImage = {
-      id: 18173017892, name: '测试商品2', status: 1,
-      model_list: [{ id: 49252964462, name: 'Multicolor,216LED(5M*0.7M) [Plug]', tier_index: [0], image: 'cn-11134207-820l4-monpa1s8re31ea' }],
-    };
-    const rows3 = buildRows(listWithModelImage, staleDetail, '557630453', 'ph');
-    t('商品导出：tier 图片过期时 SKU 图片仍取 model.image', rows3.length === 1
-      && rows3[0].tierImage1 === 'https://down-ph.img.susercontent.com/cn-11134207-7r98o-lzolfa67g04i02'
-      && rows3[0].skuImage === 'https://down-ph.img.susercontent.com/cn-11134207-820l4-monpa1s8re31ea', JSON.stringify(rows3[0]));
-
-    // 无详情降级：规格名留空，SKU 图片兜底列表 model.image
-    const rows2 = buildRows(product, null, '557630453', 'ph');
-    t('商品导出：无详情时规格名留空、SKU 图片兜底列表 image', rows2.length === 2
-      && rows2[0].tierName1 === '' && rows2[0].tierValue1 === ''
-      && rows2[0].skuImage === 'https://down-ph.img.susercontent.com/cn-11134207-m1', JSON.stringify(rows2[0]));
-
-    // 表头与行单元格对齐
-    const maxTiers = 2;
-    t('商品导出：表头与行单元格列数一致', headerCells(maxTiers).length === rowToCells(rows[0], maxTiers).length
-      && headerCells(maxTiers).includes('SKU图片链接') && headerCells(maxTiers).includes('规格2图片链接'));
-    t('商品导出：optionTextOf/optionImageIdOf 兼容字符串与对象选项',
-      optionTextOf('红') === '红' && optionTextOf({ option: '蓝' }) === '蓝'
-      && optionImageIdOf({ image_id: 'x1' }, null, 0) === 'x1'
-      && optionImageIdOf('红', { images: ['i1'] }, 0) === 'i1');
-    t('商品导出：tierTableOf 汇总规格名/值/图', (() => {
-      const tb = tierTableOf(detail);
-      return tb.count === 2 && tb.name(1) === '尺寸' && tb.option(1, 0) === 'S' && tb.imageId(1, 1) === 'sg-11134201-s2';
-    })());
   }
 
   // ===== 全局：路由分发兜底（lib/http-utils.createDispatcher） =====

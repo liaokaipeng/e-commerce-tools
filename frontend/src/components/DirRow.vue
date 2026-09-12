@@ -1,4 +1,4 @@
-<!-- 保存目录行：目录输入 + 浏览 / 设为默认目录 / 打开目录（tiktok / bidding / product-export 共用） -->
+<!-- 保存目录行：目录输入 + 浏览 / 设为默认目录 / 打开目录（tiktok / bidding 共用） -->
 <script setup>
 import { ref } from 'vue';
 import DirPicker from './DirPicker.vue';

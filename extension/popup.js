@@ -70,7 +70,7 @@ document.getElementById('send').addEventListener('click', async () => {
 const CACHE_CATEGORIES = [
   { id: 'ext', name: '扩展凭证缓存', desc: '本扩展缓存待推送的凭证（清服务端凭证请用「视频上传凭证」）', confirm: '清空扩展缓存的凭证？下次抓取会自动重新保存。' },
   { id: 'video', name: '视频上传凭证', desc: '服务端凭证（跨境多店铺 + 本土），清后需重新抓取', confirm: '清空服务端的视频上传凭证？清后需重新在短视频页上传一次抓取。' },
-  { id: 'bidding', name: '竞价登录 Cookie', desc: '竞价导出 / 取消竞价 / 取消 Hot Listing / 商品导出共用', confirm: '清空竞价登录 Cookie？四个依赖它的工具都要重新点「发送登录信息」。' },
+  { id: 'bidding', name: '竞价登录 Cookie', desc: '竞价导出 / 取消竞价 / 取消 Hot Listing 共用', confirm: '清空竞价登录 Cookie？三个依赖它的工具都要重新点「发送登录信息」。' },
   { id: 'openapi', name: '开放平台店铺 Token', desc: '清后所有店铺需重新 OAuth 授权（App 配置保留）', confirm: '清空所有店铺的开放平台 Token？所有店铺都要重新授权，确定继续？' },
   { id: 'monitor', name: '监控大屏数据', desc: '告警记录 / 巡检快照 / 汇率缓存；阈值规则与店铺配置保留', confirm: '清空监控大屏数据？告警与历史快照不可恢复，确定继续？' },
 ];

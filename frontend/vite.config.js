@@ -24,7 +24,6 @@ export default defineConfig({
         video: 'video/index.html',
         openapi: 'openapi/index.html',
         monitor: 'monitor/index.html',
-        'product-export': 'product-export/index.html',
       },
     },
   },

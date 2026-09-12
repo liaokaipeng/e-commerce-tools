@@ -1,14 +1,14 @@
 /**
  * Shopee 卖家中心共享会话与请求工具（CommonJS）
  *
- * 竞价导出（bidding）/ 取消竞价（bidding-cancel）/ 取消注册 Hot Listing（hotlisting-cancel）/
- * 商品数据导出（product-export）四个模块共用同一份登录 Cookie
+ * 竞价导出（bidding）/ 取消竞价（bidding-cancel）/ 取消注册 Hot Listing（hotlisting-cancel）
+ * 三个模块共用同一份登录 Cookie
  * （server/data/bidding-session.json，由浏览器扩展推送保存）。
  *
  * 本文件收敛原先在各模块中逐字重复的「会话读取 / Cookie 组装 / 登录态断言 / 店铺列表 /
  * 金额换算」逻辑，避免各处靠注释「与 bidding.js 保持一致」人肉维持同步。
  * 另含卖家中心内部接口的统一请求层（buildShopeeUrl / apiGet / apiPost / fetchShopRegion）：
- * 竞价导出、取消竞价、取消 Hot Listing、商品导出四个模块一律经此调用接口，
+ * 竞价导出、取消竞价、取消 Hot Listing 三个模块一律经此调用接口，
  * 不再各自复制 URL 拼接与 apiGet/apiPost 样板（历史上已出现兜底值、code 校验不一致的漂移）。
  */
 const fs = require('fs');
@@ -53,7 +53,7 @@ function loadCookieHeader(targetDomain = 'seller.shopee.cn') {
   return matchCookies(targetDomain).map(c => `${c.name}=${c.value}`).join('; ');
 }
 
-/** 组装 Cookie 并附带 SPC_CDS 值：{ header, spcCds }（hotlisting-cancel / product-export 用） */
+/** 组装 Cookie 并附带 SPC_CDS 值：{ header, spcCds }（hotlisting-cancel 用） */
 function loadCookie(targetDomain = 'seller.shopee.cn') {
   const matched = matchCookies(targetDomain);
   const header = matched.map(c => `${c.name}=${c.value}`).join('; ');
@@ -68,8 +68,8 @@ function assertLoginOk(resp) {
   }
 }
 
-// ============ 卖家中心内部接口请求（竞价系四模块共用） ============
-// 原先 bidding / bidding-cancel / hotlisting-cancel / product-export 各自复制一份
+// ============ 卖家中心内部接口请求（竞价系三模块共用） ============
+// 原先 bidding / bidding-cancel / hotlisting-cancel 各自复制一份
 // buildUrl + apiGet/apiPost + fetchShopRegion，已出现「失败兜底 '' vs 'ph'」等行为漂移，
 // 现统一收敛到本文件，各模块只传业务参数。
 
