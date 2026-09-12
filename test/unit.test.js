@@ -49,7 +49,7 @@ const {
 } = require('../server/lib/retry');
 const { isAllowedOrigin } = require('../server/main');
 const {
-  buildShopeeUrl, DEFAULT_REGION, HOST,
+  buildShopeeUrl, DEFAULT_REGION, HOST, loadStoreNames, storeNameOf,
 } = require('../server/lib/shopee-session');
 const { timestampText, ensureDir, defaultOutDir } = require('../server/lib/export-utils');
 const openapi = require('../server/openapi');
@@ -611,6 +611,13 @@ async function run() {
       !buildShopeeUrl('/api/v3/product/get_product_info', { shopId: '1', business: { product_id: 'x' } }).includes('cbsc_shop_region'));
     t('buildShopeeUrl 无 SPC_CDS 时跳过该参数', !buildShopeeUrl('/x', { shopId: '1' }).includes('SPC_CDS='));
     t('DEFAULT_REGION 与竞价系原兜底口径一致', DEFAULT_REGION === 'ph');
+
+    // 店铺名映射（取代已删除的手工清单 config/stores.json）：
+    // 只断言结构与回落语义，不断言具体店铺名——本文件读的是真实 openapi-session.json，
+    // 用户新授权/改名不该让测试变红。
+    t('loadStoreNames 返回对象（shopId -> name）', typeof loadStoreNames() === 'object' && loadStoreNames() !== null);
+    t('storeNameOf 未知店铺回落为裸 shopId', storeNameOf('123456789', {}) === '123456789');
+    t('storeNameOf 命中时返回店铺名', storeNameOf('1', { 1: '测试店铺' }) === '测试店铺');
 
     t('timestampText 形如 YYYY-MM-DD_HHmmss', /^\d{4}-\d{2}-\d{2}_\d{6}$/.test(timestampText(new Date(2026, 8, 11, 20, 5, 7))), timestampText());
     t('timestampText 补零', timestampText(new Date(2026, 0, 3, 4, 5, 6)) === '2026-01-03_040506', timestampText(new Date(2026, 0, 3, 4, 5, 6)));

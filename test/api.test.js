@@ -112,9 +112,9 @@ async function run() {
       if (r.status === 200) t('/api/status 含 loggedIn 字段', 'loggedIn' in JSON.parse(r.text));
     }
     {
+      // 手工店铺清单 config/stores.json 已删除：列表统一由 /api/openapi/stores 提供，旧路由下线
       const r = await req('GET', '/api/stores');
-      const n = r.status === 200 ? JSON.parse(r.text).length : -1;
-      t('GET /api/stores 返回 12 个店铺', n === 12, `count=${n}`);
+      t('GET /api/stores（已下线）返回 404', r.status === 404, `status=${r.status}`);
     }
     {
       // 模拟竞价扩展推送 Cookie

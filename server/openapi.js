@@ -58,8 +58,8 @@ function notifyMonitorAuthChanged() {
 }
 
 // ============ 已授权店铺列表（各工具「选择店铺」数据源） ============
-// 输出当前环境全部已授权店铺的 { category, id, name, region }（与 /api/stores 同构 + region 国家筛选用）。
-// 店铺名/地区三级缓存：openapi-session.json(shopName/shopRegion) → 监控 meta.json(首次采集时补的名字) → stores.json；
+// 输出当前环境全部已授权店铺的 { category, id, name, region }（各工具「选择店铺」唯一数据源，含 region 国家筛选用）。
+// 店铺名/地区两级缓存：openapi-session.json(shopName/shopRegion) → 监控 meta.json(首次采集时补的名字)；
 // 两处都缺才调 get_shop_info 补拉（直接签名调用、不带自动刷新），失败只记失败时间戳、
 // 10 分钟内不重试——取名/取地区失败绝不把店铺标记为失效（不影响监控采集与授权状态）。
 const SHOP_NAME_RETRY_MS = 10 * 60 * 1000;
@@ -76,18 +76,6 @@ function monitorNameMap() {
     }
     return out;
   } catch { return {}; } // 监控模块不可用时忽略
-}
-
-/** stores.json（手工维护的店铺清单）里的店铺名 */
-function storesNameMap() {
-  try {
-    const list = require('./lib/shopee-session').loadStores();
-    const out = {};
-    for (const s of Array.isArray(list) ? list : []) {
-      if (s && s.id && s.name) out[String(s.id)] = String(s.name);
-    }
-    return out;
-  } catch { return {}; }
 }
 
 /** 直调 get_shop_info 补拉缺失的店铺名/地区（不走 callOpenApi：避免认证类失败触发刷新/标记失效） */
@@ -133,13 +121,12 @@ async function authorizedStores() {
   const app = store.getApp();
   if (!app) return [];
   const mNames = monitorNameMap();
-  const sNames = storesNameMap();
   const now = Date.now();
   const pending = store
     .getShopsRaw(app.env)
     .filter((s) => {
       if (s.invalid) return false;
-      const hasName = !!(s.shopName || mNames[s.shopId] || sNames[s.shopId]);
+      const hasName = !!(s.shopName || mNames[s.shopId]);
       const hasRegion = !!s.shopRegion;
       if (hasName && hasRegion) return false;
       const nameBlocked = s.shopNameFailedAt && now - s.shopNameFailedAt < SHOP_NAME_RETRY_MS;
@@ -164,7 +151,7 @@ async function authorizedStores() {
     .map((s) => ({
       category: '开放平台已授权',
       id: s.shopId,
-      name: s.shopName || mNames[s.shopId] || sNames[s.shopId] || `店铺 ${s.shopId}`,
+      name: s.shopName || mNames[s.shopId] || `店铺 ${s.shopId}`,
       region: s.shopRegion || '',
     }))
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));

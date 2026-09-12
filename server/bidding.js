@@ -7,9 +7,9 @@ const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
 const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
-// 会话 / Cookie / 店铺列表 / 金额换算 / 接口请求层：与取消竞价、取消Hot Listing 共用同一实现
+// 会话 / Cookie / 店铺名映射 / 金额换算 / 接口请求层：与取消竞价、取消Hot Listing 共用同一实现
 const {
-  SESSION_FILE, DEFAULT_REGION, toAmount, loadCookieHeader, loadStores, readSession,
+  SESSION_FILE, DEFAULT_REGION, toAmount, loadCookieHeader, loadStoreNames, storeNameOf, readSession,
   apiPost, buildShopeeUrl, fetchShopRegion,
 } = require('./lib/shopee-session');
 const { ensureDir, timestampText, styleExcelHeader } = require('./lib/export-utils');
@@ -118,10 +118,9 @@ function handleExport(body, res) {
 
   (async () => {
     const results = [];
-    const stores = loadStores();
+    const storeNames = loadStoreNames();
     for (const id of shopIds) {
-      const store = stores.find(s => s.id === String(id));
-      const name = store ? store.name : id;
+      const name = storeNameOf(id, storeNames);
       emit({ type: 'start', shopId: id, name });
       try {
         const r = await exportShop(String(id), saveDir);
@@ -153,10 +152,6 @@ function register({ get, post }) {
       cookieCount: session?.cookies?.length || 0,
       savedAt: session?.savedAt || null,
     });
-  });
-
-  get('/api/stores', (req, res) => {
-    sendJson(res, 200, loadStores());
   });
 
   post('/api/export', async (req, res) => {

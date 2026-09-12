@@ -5,7 +5,7 @@
  * 三个模块共用同一份登录 Cookie
  * （server/data/bidding-session.json，由浏览器扩展推送保存）。
  *
- * 本文件收敛原先在各模块中逐字重复的「会话读取 / Cookie 组装 / 登录态断言 / 店铺列表 /
+ * 本文件收敛原先在各模块中逐字重复的「会话读取 / Cookie 组装 / 登录态断言 / 店铺名映射 /
  * 金额换算」逻辑，避免各处靠注释「与 bidding.js 保持一致」人肉维持同步。
  * 另含卖家中心内部接口的统一请求层（buildShopeeUrl / apiGet / apiPost / fetchShopRegion）：
  * 竞价导出、取消竞价、取消 Hot Listing 三个模块一律经此调用接口，
@@ -16,7 +16,9 @@ const path = require('path');
 const { request } = require('./http');
 
 const SESSION_FILE = path.join(__dirname, '..', 'data', 'bidding-session.json');
-const STORES_FILE = path.join(__dirname, '..', 'config', 'stores.json');
+/** 店铺名数据源（与 /api/openapi/stores 同源，取代已删除的手工清单 config/stores.json） */
+const OPENAPI_SESSION_FILE = path.join(__dirname, '..', 'data', 'openapi-session.json');
+const MONITOR_META_FILE = path.join(__dirname, '..', 'data', 'monitor', 'meta.json');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const HOST = 'https://seller.shopee.cn';
 /** 店铺市场取不到时的兜底（与各接口原有口径一致：竞价系接口按 ph 拼 cbsc_shop_region） */
@@ -165,15 +167,35 @@ async function fetchShopRegion(cookieHeader, shopId) {
   return '';
 }
 
-// ============ 店铺列表（config/stores.json，热载）============
-// 便于非技术用户直接增删店铺，无需改代码；每次请求实时读取，改完无需重启服务。
-function loadStores() {
-  try {
-    return JSON.parse(fs.readFileSync(STORES_FILE, 'utf8'));
-  } catch (e) {
-    console.warn('读取 stores.json 失败:', e.message);
-    return [];
+// ============ 店铺名映射（shopId -> 店铺名，热载）============
+// 原 config/stores.json 手工清单已删除（与真实授权店铺漂移，且各页下拉早已改用 /api/openapi/stores）。
+// 现在与开放平台同一数据源：openapi-session.json 的 shopName 优先，缺失时退回监控 meta.json 的
+// name（首次采集时经 get_shop_info 补过）。每次实时读取，授权/改名后自动跟随，无需人工维护。
+function readJsonFile(file) {
+  if (!fs.existsSync(file)) return null;
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch { return null; }
+}
+
+/** 店铺名映射 `{ shopId: name }`，取不到名字的店铺不出现在结果里（调用方自行回落为裸 shopId） */
+function loadStoreNames() {
+  const out = {};
+  const meta = readJsonFile(MONITOR_META_FILE);
+  for (const [id, m] of Object.entries((meta && meta.shops) || {})) {
+    if (m && m.name) out[String(id)] = String(m.name);
   }
+  const session = readJsonFile(OPENAPI_SESSION_FILE);
+  const env = (session && session.app && session.app.env) || 'prod';
+  const shops = (session && session.shops && session.shops[env]) || {};
+  for (const [id, s] of Object.entries(shops)) {
+    if (s && s.shopName) out[String(id)] = String(s.shopName);
+  }
+  return out;
+}
+
+/** 取单个店铺名，取不到时回落为裸 shopId（日志/结果行展示用） */
+function storeNameOf(shopId, map) {
+  return (map && map[String(shopId)]) || String(shopId);
 }
 
 // ============ 金额 ============
@@ -191,7 +213,6 @@ function sleep(ms) {
 
 module.exports = {
   SESSION_FILE,
-  STORES_FILE,
   UA,
   HOST,
   DEFAULT_REGION,
@@ -204,7 +225,8 @@ module.exports = {
   apiGet,
   apiPost,
   fetchShopRegion,
-  loadStores,
+  loadStoreNames,
+  storeNameOf,
   toAmount,
   sleep,
 };

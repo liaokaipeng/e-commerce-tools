@@ -4,7 +4,7 @@
  *   GET  /api/cache          列出可清理的缓存类别与当前状态（供 popup 展示）
  *   POST /api/cache/clear    { category } 按类别清空
  *
- * 类别与影响面（配置类文件一律不动：settings.json / config/stores.json /
+ * 类别与影响面（配置类文件一律不动：settings.json /
  * hotlisting-spu.json / monitor 的 rules.json 与 config.json）：
  *   video    视频上传凭证        data/video-session.json（cn 多店铺 + ph）+ 内存副本
  *   bidding  竞价登录 Cookie     data/bidding-session.json（竞价导出/取消竞价/取消 Hot Listing 共用）

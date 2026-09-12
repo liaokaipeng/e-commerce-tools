@@ -20,9 +20,9 @@ const path = require('path');
 const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
 // 长任务注册中心（暂停 / 继续 / 取消 / SSE 断开即取消 / TTL 清理）：与取消竞价共用
 const jobs = require('./lib/jobs');
-// 会话 / Cookie / 店铺列表 / 延时 / 接口请求层：与竞价导出、取消竞价共用同一实现
+// 会话 / Cookie / 店铺名映射 / 延时 / 接口请求层：与竞价导出、取消竞价共用同一实现
 const {
-  HOST, DEFAULT_REGION, sleep, loadCookie, loadStores,
+  HOST, DEFAULT_REGION, sleep, loadCookie, loadStoreNames, storeNameOf,
   apiPost, buildShopeeUrl, fetchShopRegion,
 } = require('./lib/shopee-session');
 
@@ -200,7 +200,7 @@ async function handlePreview(body, res) {
     sendJson(res, 400, { ok: false, msg: '所选店铺均未配置有效的 SPU ID' });
     return;
   }
-  const stores = loadStores();
+  const storeNames = loadStoreNames();
   let cookie;
   try {
     cookie = loadCookie();
@@ -211,8 +211,7 @@ async function handlePreview(body, res) {
 
   const shops = [];
   for (const id of shopIds) {
-    const store = stores.find(s => s.id === String(id));
-    const name = store ? store.name : String(id);
+    const name = storeNameOf(id, storeNames);
     const plan = perShop[String(id)] || { error: '未配置 SPU ID' };
     if (plan.error) {
       shops.push({ shopId: String(id), name, ok: false, msg: plan.error, region: '', spuCount: 0, skuCount: 0, spus: [] });
@@ -265,7 +264,7 @@ function handleRun(body, res) {
   const jobId = jobs.create();
 
   (async () => {
-    const stores = loadStores();
+    const storeNames = loadStoreNames();
     let cookie;
     try {
       cookie = loadCookie();
@@ -283,8 +282,7 @@ function handleRun(body, res) {
     try {
       for (const id of shopIds) {
         await jobs.checkpoint(jobId, () => clientGone);
-        const store = stores.find(s => s.id === String(id));
-        const name = store ? store.name : String(id);
+        const name = storeNameOf(id, storeNames);
         const plan = perShop[String(id)] || { error: '未配置 SPU ID' };
         emit({ type: 'shop-start', shopId: String(id), name });
         if (plan.error) {

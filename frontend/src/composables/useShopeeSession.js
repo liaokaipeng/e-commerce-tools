@@ -42,8 +42,8 @@ export function useShopeeSession(readyTip = 'Cookie 已就绪，可直接选择�
   }
 
   // ---------- 店铺列表 ----------
-  // 数据源：开放平台已授权店铺（/api/openapi/stores，店铺ID + 店铺名），
-  // 不再用 stores.json（该文件只保留给后端运行时兜底取名）。
+  // 数据源：开放平台已授权店铺（/api/openapi/stores，店铺ID + 店铺名），唯一来源；
+  // 原手工清单 config/stores.json 已删除（与真实授权店铺漂移，不再维护）。
   const stores = ref([]);
   const storesLoading = ref(false);
   const storesEmptyTip = ref(''); // 缓存里没有店铺时的去授权提示（区分「未配置 App」/「未授权店铺」）

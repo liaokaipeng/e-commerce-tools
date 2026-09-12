@@ -268,21 +268,13 @@ export function useVideoCreds() {
   }
 
   // 店铺列表与竞价导出等页面同源：开放平台已授权店铺（/api/openapi/stores，
-  // 真实店名 + 全量授权店铺，取名缺失时后端自动调 get_shop_info 补拉）。
-  // 开放平台未配置或请求异常时回落 stores.json 手工清单（仅兜底，保持页面可用）。
+  // 真实店名 + 全量授权店铺，取名缺失时后端自动调 get_shop_info 补拉），唯一来源。
+  // 未配置开放平台或请求异常时列表保持为空（页面仍可用，仅需手工填 Shop ID）。
   async function loadStoreList() {
     try {
       const r = await fetch('/api/openapi/stores');
       const d = await r.json();
-      if (Array.isArray(d)) {
-        stores.value = d;
-        return;
-      }
-    } catch { /* 回落到手工清单 */ }
-    try {
-      const r2 = await fetch('/api/stores');
-      const d2 = await r2.json();
-      stores.value = Array.isArray(d2) ? d2 : [];
+      stores.value = Array.isArray(d) ? d : [];
     } catch { /* 服务未启动忽略 */ }
   }
 

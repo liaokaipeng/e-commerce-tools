@@ -9,9 +9,9 @@
  *   逐个点击「撤销」即 seller_withdraw { bid_id }。
  */
 const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
-// 会话 / Cookie / 店铺列表 / 金额换算 / 延时 / 接口请求层：与竞价导出、取消Hot Listing 共用
+// 会话 / Cookie / 店铺名映射 / 金额换算 / 延时 / 接口请求层：与竞价导出、取消Hot Listing 共用
 const {
-  DEFAULT_REGION, toAmount, sleep, loadCookieHeader, loadStores,
+  DEFAULT_REGION, toAmount, sleep, loadCookieHeader, loadStoreNames, storeNameOf,
   apiPost, buildShopeeUrl, fetchShopRegion,
 } = require('./lib/shopee-session');
 // 长任务注册中心：暂停 / 继续 / 取消 / SSE 断开即取消 / 僵尸清理
@@ -85,7 +85,7 @@ async function handlePreview(body, res) {
     sendJson(res, 400, { ok: false, msg: '请先选择至少一个店铺' });
     return;
   }
-  const stores = loadStores();
+  const storeNames = loadStoreNames();
   let cookieHeader;
   try {
     cookieHeader = loadCookieHeader();
@@ -96,8 +96,7 @@ async function handlePreview(body, res) {
 
   const shops = [];
   for (const id of shopIds) {
-    const store = stores.find(s => s.id === String(id));
-    const name = store ? store.name : String(id);
+    const name = storeNameOf(id, storeNames);
     try {
       const region = (await fetchShopRegion(cookieHeader, String(id))) || DEFAULT_REGION;
       const rows = await fetchImprovementBids(cookieHeader, String(id), region);
@@ -132,7 +131,7 @@ function handleRun(body, res) {
   const jobId = jobs.create();
 
   (async () => {
-    const stores = loadStores();
+    const storeNames = loadStoreNames();
     let cookieHeader;
     try {
       cookieHeader = loadCookieHeader();
@@ -150,8 +149,7 @@ function handleRun(body, res) {
     try {
       for (const id of shopIds) {
         await jobs.checkpoint(jobId, () => clientGone);
-        const store = stores.find(s => s.id === String(id));
-        const name = store ? store.name : String(id);
+        const name = storeNameOf(id, storeNames);
         emit({ type: 'shop-start', shopId: String(id), name });
         try {
           const region = (await fetchShopRegion(cookieHeader, String(id))) || DEFAULT_REGION;
