@@ -59,7 +59,7 @@ function getRulesById() {
   return rulesById;
 }
 
-/** 保存用户覆盖（校验：仅允许已注册规则 id；thresholds 仅收数值；enabled 布尔） */
+/** 保存用户覆盖（校验：仅允许已注册规则 id；thresholds 收数值或 null（null=留空不触发）；enabled 布尔） */
 function setRuleOverrides(overrides) {
   if (!overrides || typeof overrides !== 'object') throw new Error('覆盖配置格式错误');
   const clean = {};
@@ -71,7 +71,9 @@ function setRuleOverrides(overrides) {
     if (o.thresholds && typeof o.thresholds === 'object') {
       const th = {};
       for (const [k, v] of Object.entries(o.thresholds)) {
-        if (typeof v === 'number' && isFinite(v)) th[k] = v;
+        // null = 显式留空（该级别不触发），需原样保留给 mergeRules 删除默认阈值
+        if (v === null) th[k] = null;
+        else if (typeof v === 'number' && isFinite(v)) th[k] = v;
       }
       if (Object.keys(th).length) entry.thresholds = th;
     }

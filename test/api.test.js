@@ -470,6 +470,9 @@ async function run() {
       const rw = await req('POST', '/api/monitor/rules', { overrides: { 'order.pending_24h': { thresholds: { p2: 5 } } } });
       const rwj = JSON.parse(rw.text);
       t('POST /api/monitor/rules 覆盖阈值生效', rw.status === 200 && rwj.ok === true && rwj.rules.find((r) => r.id === 'order.pending_24h').thresholds.p2 === 5, rw.text);
+      const rwBlank = await req('POST', '/api/monitor/rules', { overrides: { 'order.pending_24h': { thresholds: { p2: null } } } });
+      const rwBlankJ = JSON.parse(rwBlank.text);
+      t('POST /api/monitor/rules 阈值送 null 删除该级别（面板留空 = 不触发）', rwBlank.status === 200 && rwBlankJ.ok === true && rwBlankJ.rules.find((r) => r.id === 'order.pending_24h').thresholds.p2 === undefined, rwBlank.text);
       const rwReset = await req('POST', '/api/monitor/rules', { overrides: {} });
       const rwResetJ = JSON.parse(rwReset.text);
       t('POST /api/monitor/rules 清空覆盖还原默认', rwReset.status === 200 && rwResetJ.rules.find((r) => r.id === 'order.pending_24h').thresholds.p2 === 3, rwReset.text);

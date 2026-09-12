@@ -2,7 +2,7 @@
 // 右侧抽屉：告警规则编辑（阈值按人民币）/ 监控店铺配置（勾选需巡检的店铺）/ 告警详情（结构化明细清单）。
 import { ref, computed, watch } from 'vue';
 import { ElMessage } from 'element-plus';
-import { LEVEL_COLOR, LEVEL_NAME, shopName, fmtTime } from './constants.js';
+import { LEVEL_COLOR, LEVEL_NAME, fmtTime } from './constants.js';
 
 const rulesDrawer = defineModel('rulesDrawer', { type: Boolean });
 const shopsDrawer = defineModel('shopsDrawer', { type: Boolean });
@@ -17,6 +17,8 @@ const props = defineProps({
   shownShopConfig: { type: Array, default: () => [] },
   monitoredCount: { type: Number, default: 0 },
   detailAlert: { type: Object, default: null },
+  // 大屏总览的店铺列表（含真实店铺名）：告警详情抽屉用，未打开过「监控店铺」抽屉时也能显示店名
+  shops: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['save-rules', 'save-shops', 'set-all']);
@@ -29,10 +31,14 @@ watch(() => props.detailAlert, () => { detailSearch.value = ''; });
 const STATUS_TEXT = { open: '触发中', ack: '已确认', recovered: '已恢复', closed: '已关闭' };
 
 function shopNameOf(shopId) {
-  return shopName((props.shopConfig || []).find((s) => s.shopId === shopId))
-    || shopNameOfCache(shopId);
+  if (!shopId) return '';
+  // 优先用大屏总览的店铺列表（始终有数据），其次监控店铺配置，最后兜底 ID 后四位
+  const found = (props.shops || []).find((s) => s.shopId === shopId)
+    || (props.shopConfig || []).find((s) => s.shopId === shopId);
+  if (found && found.name) return found.name;
+  return shopNameOfCache(shopId);
 }
-// shopConfig 只含全部已授权店铺（含未监控），兜底直接给 ID 后四位
+// 店铺名缺失时兜底给 ID 后四位
 function shopNameOfCache(shopId) {
   return shopId ? '店铺…' + String(shopId).slice(-4) : '';
 }

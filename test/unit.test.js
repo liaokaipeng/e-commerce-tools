@@ -910,6 +910,10 @@ async function run() {
       t('mergeRules 覆盖开关', r.enabled === false);
       t('mergeRules 未覆盖规则保持默认', merged.find((x) => x.id === 'order.cancel_pending').thresholds.p2 === 3);
       t('mergeRules 空覆盖返回默认全集', mergeRules(null).length === mergeRules({}).length);
+      // 留空的级别（null）必须真正删除默认阈值，否则规则面板「留空 = 该级别不触发」不生效
+      const rb = mergeRules({ 'order.pending_24h': { thresholds: { p2: null } } }).find((x) => x.id === 'order.pending_24h');
+      t('mergeRules 阈值留空删除该级别（默认值不复活）', rb.thresholds.p2 === undefined && rb.thresholds.p1 === 8 && rb.thresholds.p0 === 15, JSON.stringify(rb.thresholds));
+      t('mergeRules 阈值留空后该级别不再触发', evaluateRule(rb, 4) === null && evaluateRule(rb, 9) === 'P1', String(evaluateRule(rb, 4)) + '/' + String(evaluateRule(rb, 9)));
     }
     {
       const r = levelOf('product.violations', 5);
@@ -1226,6 +1230,17 @@ async function run() {
     // 停用监控：关闭该店全部未关闭告警
     const closedCount = engine.closeShopAlerts('T1');
     t('引擎：closeShopAlerts 关闭该店全部未关闭告警', closedCount === 1 && engine.getAlerts({ shopId: 'T1', status: 'open' }).length === 0 && engine.getAlerts({ shopId: 'T3', status: 'open' }).length === 1, JSON.stringify({ closedCount, t3: engine.getAlerts({ shopId: 'T3' }) }));
+    // 系统自检告警同样尊重规则开关（面板关掉「采集连续失败」后不再告警，既有告警自动收尾）
+    engine.systemFail('T8', 'product', '超时', now);
+    t('系统告警：规则开启时正常触发', engine.getAlerts({ shopId: 'T8', status: 'open' }).length === 1);
+    monitorStore.setRuleOverrides({ 'system.collect_fail': { enabled: false } });
+    engine.systemFail('T8', 'product', '超时', now + 1000);
+    t('系统告警：规则关闭后既有告警收尾为已恢复且不重开', engine.getAlerts({ shopId: 'T8', status: 'open' }).length === 0 && engine.getAlerts({ shopId: 'T8', status: 'recovered' }).length === 1, JSON.stringify(engine.getAlerts({ shopId: 'T8' })));
+    engine.systemFail('T9', 'order', '网络错误', now);
+    t('系统告警：规则关闭时不产生新告警', engine.getAlerts({ shopId: 'T9' }).length === 0, JSON.stringify(engine.getAlerts({ shopId: 'T9' })));
+    monitorStore.setRuleOverrides({});
+    engine.systemFail('T9', 'order', '网络错误', now + 2000);
+    t('系统告警：规则重新开启后恢复告警', engine.getAlerts({ shopId: 'T9', status: 'open' }).length === 1);
   }
 
   // ===== 监控：快照存储与规则覆盖持久化 =====
@@ -1241,6 +1256,8 @@ async function run() {
     t('规则覆盖：未知规则 id 报错', threw);
     const rules = monitorStore.setRuleOverrides({ 'order.pending_24h': { thresholds: { p2: 6 } } });
     t('规则覆盖：保存并生效', rules.find((r) => r.id === 'order.pending_24h').thresholds.p2 === 6);
+    const rulesBlank = monitorStore.setRuleOverrides({ 'order.pending_24h': { thresholds: { p2: null } } });
+    t('规则覆盖：留空阈值删除该级别（前端送 null 的链路）', rulesBlank.find((r) => r.id === 'order.pending_24h').thresholds.p2 === undefined, JSON.stringify(rulesBlank.find((r) => r.id === 'order.pending_24h').thresholds));
     monitorStore.setRuleOverrides({});
     t('规则覆盖：清空后还原默认', monitorStore.getRules().find((r) => r.id === 'order.pending_24h').thresholds.p2 === 3);
     // 监控店铺配置（排除名单）：默认全部监控

@@ -117,6 +117,7 @@ const {
       :shown-shop-config="shownShopConfig"
       :monitored-count="monitoredCount"
       :detail-alert="detailAlert"
+      :shops="overview.shops"
       @save-rules="saveRules"
       @save-shops="saveShopsConfig"
       @set-all="setAllMonitored"

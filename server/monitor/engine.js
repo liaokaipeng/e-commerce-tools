@@ -242,6 +242,18 @@ function systemFail(shopId, domain, message, at) {
   const now = at || Date.now();
   const rule = store.getRulesById()['system.collect_fail'];
   const existing = findAlert(shopId, 'system.collect_fail');
+  // 规则被用户关闭：不再产生系统自检告警；已开着的自动以「已恢复」收尾（否则会永远挂在告警流里，
+  // 因为 maintain 的恢复检测只对业务域生效，system 域没有别的恢复信号）。
+  if (!rule || rule.enabled === false) {
+    if (existing && (existing.status === 'open' || existing.status === 'ack')) {
+      existing.status = 'recovered';
+      existing.recoveredAt = now;
+      existing.updatedAt = now;
+      broadcast('alert', Object.assign({}, existing, { change: 'recover' }));
+    }
+    alertsDirty = true;
+    return null;
+  }
   const count = (existing && existing.status !== 'closed' && existing.status !== 'recovered' ? existing.count : 0) + 1;
   const level = count >= 5 ? 'P0' : count >= 2 ? 'P1' : 'P2';
   const text = `店铺最近一次采集失败（${domain}）：${message || '未知错误'}（连续 ${count} 次）`;

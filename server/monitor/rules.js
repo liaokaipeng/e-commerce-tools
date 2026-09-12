@@ -34,6 +34,11 @@ function isMoreSevere(a, b) {
 /**
  * 合并用户覆盖到默认规则：rules.json 存 { [ruleId]: { enabled, thresholds } }，
  * 未覆盖的规则保持默认。返回合并后的规则数组（含全部字段）。
+ *
+ * thresholds 的合并语义（与规则面板「留空 = 该级别不触发」一致）：
+ *   - 不传该级别 → 保留默认阈值；
+ *   - 传数值     → 覆盖为数值；
+ *   - 传 null    → 显式留空，删除该级别（否则默认阈值会「复活」，用户清空输入框等于没改）。
  */
 function mergeRules(overrides) {
   const ov = overrides && typeof overrides === 'object' ? overrides : {};
@@ -41,7 +46,12 @@ function mergeRules(overrides) {
     const o = ov[r.id] || {};
     const merged = Object.assign({}, r, { enabled: o.enabled !== false });
     if (o.thresholds && typeof o.thresholds === 'object') {
-      merged.thresholds = Object.assign({}, r.thresholds, o.thresholds);
+      const th = Object.assign({}, r.thresholds);
+      for (const [k, v] of Object.entries(o.thresholds)) {
+        if (v === null) delete th[k];
+        else if (typeof v === 'number' && isFinite(v)) th[k] = v;
+      }
+      merged.thresholds = th;
     }
     return merged;
   });

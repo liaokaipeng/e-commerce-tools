@@ -297,11 +297,12 @@ export function useMonitor() {
       const overrides = {};
       for (const e of ruleEdits.value) {
         const th = {};
+        // 留空的级别统一送 null（= 显式禁用该级别）：不送 / 送 undefined 时后端会保留默认阈值，
+        // 表现为「清空输入框保存后阈值又自己回来了」。
         for (const k of ['p2', 'p1', 'p0']) {
-          if (e[k] !== '' && e[k] !== null) {
-            const n = Number(e[k]);
-            if (isFinite(n)) th[k] = n;
-          }
+          const raw = e[k];
+          const n = raw === '' || raw === null || raw === undefined ? NaN : Number(raw);
+          th[k] = isFinite(n) ? n : null;
         }
         overrides[e.id] = { enabled: e.enabled, thresholds: th };
       }
@@ -316,6 +317,7 @@ export function useMonitor() {
         rulesDrawer.value = false;
         await loadRules();
         loadOverview();
+        loadTrend(selectedShop.value, selectedMetric.value); // 阈值参考线同步刷新（矩阵定级走 loadOverview）
       } else showToast(j.message || '保存失败', 'error');
     } catch (e) {
       showToast('本地服务异常：' + e.message, 'error');
