@@ -61,20 +61,23 @@ export function useVideoCreds() {
   // ---------- 缓存里没有店铺时的去授权提示（跨境 cn 下拉为空时显示） ----------
   const shopEmptyTip = ref('');
   let shopEmptyWarned = false; // 同一段空档期只弹一次 warning
-  watch(shopOptions, async (opts) => {
+  let initialLoaded = false; // 首次凭证+店铺列表加载完成前不判空：挂载瞬间下拉必然为空（数据还没回来），是竞态不是真没店铺
+  async function checkShopEmpty() {
     if (isPh.value) return; // 本土页没有店铺下拉
+    const opts = shopOptions.value;
     if (opts.length) {
       shopEmptyTip.value = '';
       shopEmptyWarned = false;
       return;
     }
-    if (shopEmptyTip.value) return; // 已经解析过原因，避免重复请求
+    if (!initialLoaded || shopEmptyTip.value) return; // 首次加载未完成 / 已解析过原因，不重复处理
     shopEmptyTip.value = await resolveOpenapiEmptyTip();
     if (!shopEmptyWarned) {
       ElMessage.warning(shopEmptyTip.value);
       shopEmptyWarned = true;
     }
-  }, { immediate: true });
+  }
+  watch(shopOptions, () => { checkShopEmpty(); });
 
   function applyShop(id) {
     const sid = String(id);
@@ -285,8 +288,10 @@ export function useVideoCreds() {
 
   function startStoreSync() {
     loadLocalCreds();
-    loadCredsFromServer(true);
-    loadStoreList();
+    // 首次加载完成后才允许判空提示（挂载瞬间下拉必然为空，不能当成「没店铺」弹告警）
+    Promise.all([loadCredsFromServer(true), loadStoreList()])
+      .then(() => { initialLoaded = true; checkShopEmpty(); })
+      .catch(() => { initialLoaded = true; checkShopEmpty(); });
     // 凭证由扩展推送到服务端，定时静默同步（用户在本页编辑的输入不受影响）
     return setInterval(() => loadCredsFromServer(true), 5000);
   }
