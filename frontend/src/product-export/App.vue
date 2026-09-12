@@ -10,7 +10,7 @@ import { useDirSettings, useLog, runSSE } from '../composables/useToolPage.js';
 // ---------- 登录状态 + 店铺列表（与竞价导出共用 Cookie/店铺） ----------
 const {
   status, refreshing, flash, refreshStatus,
-  stores, selected, selCount, clearAll,
+  stores, storesLoading, storesEmptyTip, selected, selCount, clearAll, loadStores,
 } = useShopeeSession('Cookie 已就绪，进入本页将自动开始导出商品数据。');
 
 // 默认勾选跨境店铺 557630453（商品数据导出目标店铺）
@@ -101,7 +101,7 @@ onMounted(() => {
 
       <LoginCard :status="status" :refreshing="refreshing" :flash="flash" @refresh="refreshStatus(true)" />
 
-      <StorePicker :stores="stores" :selected="selected" />
+      <StorePicker :stores="stores" :selected="selected" :loading="storesLoading" :empty-tip="storesEmptyTip" :reload="loadStores" />
 
       <el-card shadow="never" class="card">
         <template #header>③ 保存位置</template>

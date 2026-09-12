@@ -3,6 +3,7 @@
 // 注意：店铺的分组与勾选渲染由 StorePicker 组件承担，这里只维护 selected 集合本身。
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
+import { resolveOpenapiEmptyTip } from './openapiEmptyTip.js';
 
 export function useShopeeSession(readyTip = 'Cookie 已就绪，可直接选择店铺操作。') {
   // ---------- 登录状态 ----------
@@ -44,17 +45,29 @@ export function useShopeeSession(readyTip = 'Cookie 已就绪，可直接选择�
   // 数据源：开放平台已授权店铺（/api/openapi/stores，店铺ID + 店铺名），
   // 不再用 stores.json（该文件只保留给后端运行时兜底取名）。
   const stores = ref([]);
+  const storesLoading = ref(false);
+  const storesEmptyTip = ref(''); // 缓存里没有店铺时的去授权提示（区分「未配置 App」/「未授权店铺」）
   const selected = reactive(new Set());
 
   const selCount = computed(() => selected.size);
 
+  // 缓存里没有店铺时，查开放平台状态区分原因，引导用户去授权（共享实现见 openapiEmptyTip.js）
   async function loadStores() {
+    storesLoading.value = true;
     try {
       const r = await fetch('/api/openapi/stores');
       const d = await r.json();
       stores.value = Array.isArray(d) ? d : [];
+      if (stores.value.length) {
+        storesEmptyTip.value = '';
+      } else {
+        storesEmptyTip.value = await resolveOpenapiEmptyTip();
+        ElMessage.warning(storesEmptyTip.value);
+      }
     } catch {
       ElMessage.error('加载店铺失败，请确认服务已启动。');
+    } finally {
+      storesLoading.value = false;
     }
   }
 
@@ -75,6 +88,6 @@ export function useShopeeSession(readyTip = 'Cookie 已就绪，可直接选择�
 
   return {
     status, refreshing, flash, refreshStatus,
-    stores, selected, selCount, clearAll,
+    stores, storesLoading, storesEmptyTip, selected, selCount, clearAll, loadStores,
   };
 }

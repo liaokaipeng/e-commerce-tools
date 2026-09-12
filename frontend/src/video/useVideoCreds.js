@@ -1,7 +1,8 @@
 // 视频上传页 · 凭证管理：站点解析、本地缓存、服务端凭证同步、跨境多店铺选择。
 // 从 video/App.vue 抽出（原 596 行单文件混了凭证 / 表格解析 / 上传三块职责）。
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
+import { resolveOpenapiEmptyTip } from '../composables/openapiEmptyTip.js';
 
 /** 站点配置（门户已按站点拆成「跨境」「本土」两个入口，本页由 ?mode=cn|ph 固定） */
 export const SITES = {
@@ -56,6 +57,24 @@ export function useVideoCreds() {
     for (const st of stores.value) add(String(st.id), st.name || '', false);
     return out;
   });
+
+  // ---------- 缓存里没有店铺时的去授权提示（跨境 cn 下拉为空时显示） ----------
+  const shopEmptyTip = ref('');
+  let shopEmptyWarned = false; // 同一段空档期只弹一次 warning
+  watch(shopOptions, async (opts) => {
+    if (isPh.value) return; // 本土页没有店铺下拉
+    if (opts.length) {
+      shopEmptyTip.value = '';
+      shopEmptyWarned = false;
+      return;
+    }
+    if (shopEmptyTip.value) return; // 已经解析过原因，避免重复请求
+    shopEmptyTip.value = await resolveOpenapiEmptyTip();
+    if (!shopEmptyWarned) {
+      ElMessage.warning(shopEmptyTip.value);
+      shopEmptyWarned = true;
+    }
+  }, { immediate: true });
 
   function applyShop(id) {
     const sid = String(id);
@@ -204,7 +223,7 @@ export function useVideoCreds() {
 
   async function refreshCreds() {
     refreshingCreds.value = true;
-    await loadCredsFromServer(false);
+    await Promise.all([loadCredsFromServer(false), loadStoreList()]); // 店铺列表一并重载：刚完成开放平台授权后点此即可看到新店铺
     refreshingCreds.value = false;
     // 手动刷新后给出明确反馈：按钮变主色只是焦点态，别让用户误以为报错
     if (isPh.value) {
@@ -275,7 +294,7 @@ export function useVideoCreds() {
   return {
     site, isPh, siteLabel,
     auth, cookie, shopId, userid, refreshingCreds,
-    cnShops, selectedShopId, stores, shopOptions, shopNameOf, shopRegionOf,
+    cnShops, selectedShopId, stores, shopOptions, shopNameOf, shopRegionOf, shopEmptyTip,
     applyShop, saveCreds, refreshCreds, assertReady, startStoreSync,
   };
 }

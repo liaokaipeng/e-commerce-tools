@@ -8,6 +8,9 @@ import { regionLabel } from '../region-utils.js';
 const props = defineProps({
   stores: { type: Array, default: () => [] },
   selected: { type: Object, required: true }, // reactive Set<shopId>
+  loading: { type: Boolean, default: false }, // 店铺列表加载中
+  emptyTip: { type: String, default: '' }, // 缓存里没有店铺时的提示（引导去授权）
+  reload: { type: Function, default: null }, // 重新加载店铺列表（授权完成后用）
 });
 
 // ---------- 国家/地区筛选 ----------
@@ -61,7 +64,7 @@ const selCount = computed(() => props.selected.size);
 <template>
   <el-card shadow="never" class="card">
     <template #header>② 选择店铺</template>
-    <div v-loading="stores.length === 0" class="picker-box">
+    <div v-loading="loading" class="picker-box">
       <div class="picker-row">
         <el-select
           v-model="regionFilter"
@@ -101,6 +104,14 @@ const selCount = computed(() => props.selected.size);
       <div v-if="visibleStores.length === 0 && stores.length > 0" class="empty-tip">
         没有匹配的店铺：换个国家/地区或搜索关键词试试。
       </div>
+      <!-- 缓存里没有任何店铺：给出去授权引导，而不是无限转圈 -->
+      <div v-if="stores.length === 0 && !loading" class="empty-state">
+        <div class="empty-tip">{{ emptyTip || '暂无已授权店铺：请先到「开放平台」Tab 完成 App 配置与店铺授权。' }}</div>
+        <div class="empty-actions">
+          <a href="/openapi/" target="_blank" rel="noopener">前往「开放平台」配置 / 授权 →</a>
+          <el-button v-if="reload" size="small" @click="reload">重新加载</el-button>
+        </div>
+      </div>
     </div>
   </el-card>
 </template>
@@ -112,6 +123,11 @@ const selCount = computed(() => props.selected.size);
 .store-select { flex: 1 1 320px; min-width: 280px; }
 .sel-hint { color: var(--text-3, #999); font-size: 12px; white-space: nowrap; }
 .empty-tip { margin-top: 8px; color: var(--text-3, #999); font-size: 12px; }
+.empty-state { margin-top: 4px; padding: 10px 12px; border: 1px dashed var(--border, #dcdfe6); border-radius: 6px; }
+.empty-state .empty-tip { margin: 0 0 8px; color: var(--text-2, #606266); }
+.empty-actions { display: flex; align-items: center; gap: 12px; }
+.empty-actions a { font-size: 13px; color: var(--el-color-primary, #409eff); text-decoration: none; }
+.empty-actions a:hover { text-decoration: underline; }
 .opt-region {
   display: inline-block;
   min-width: 82px;

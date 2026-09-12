@@ -12,7 +12,7 @@ import { useBatchJob, usePreviewScan } from '../composables/useBatchJob.js';
 
 const {
   status, refreshing, flash, refreshStatus,
-  stores, selected, selCount, clearAll,
+  stores, storesLoading, storesEmptyTip, selected, selCount, clearAll, loadStores,
 } = useShopeeSession('Cookie 已就绪，可直接选择店铺操作。');
 
 const { logLines, log, clear: clearLog } = useLog();
@@ -167,7 +167,7 @@ async function doCancel() {
 
       <LoginCard :status="status" :refreshing="refreshing" :flash="flash" @refresh="refreshStatus(true)" />
 
-      <StorePicker :stores="stores" :selected="selected" />
+      <StorePicker :stores="stores" :selected="selected" :loading="storesLoading" :empty-tip="storesEmptyTip" :reload="loadStores" />
 
       <el-card shadow="never" class="card">
         <template #header>

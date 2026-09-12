@@ -11,6 +11,8 @@ const props = defineProps({
   refreshingCreds: { type: Boolean, default: false },
   /** 跨境多店铺下拉：[{ value, label, region }] */
   shopOptions: { type: Array, default: () => [] },
+  /** 下拉没有任何店铺时的去授权提示（缓存里没有店铺） */
+  shopEmptyTip: { type: String, default: '' },
   selectedShopId: { type: String, default: '' },
   userid: { type: String, default: '' },
   /** 表格 */
@@ -87,6 +89,11 @@ const statusText = (t) => STATUS_TEXT[t] || '';
           <span class="opt-label">{{ o.label }}</span>
         </el-option>
       </el-select>
+    </div>
+    <!-- 缓存里没有任何店铺：给出去授权引导，而不是空下拉 -->
+    <div v-if="!isPh && shopOptions.length === 0 && shopEmptyTip" class="shop-empty-state">
+      <div class="shop-empty-tip">{{ shopEmptyTip }}</div>
+      <a href="/openapi/" target="_blank" rel="noopener">前往「开放平台」配置 / 授权 →</a>
     </div>
     <div v-if="isPh" class="row">
       <span class="field-label">User ID（本土上传需要，扩展会自动抓取，若为空请手动填写）</span>
@@ -167,6 +174,10 @@ const statusText = (t) => STATUS_TEXT[t] || '';
 .opt-label { font-size: 13px; }
 /* 被国家/关键词筛掉的选项仍要渲染（保住已选标签的名称），只是在下拉里隐藏 */
 .opt-filtered-out { display: none; }
+.shop-empty-state { margin-top: 8px; padding: 10px 12px; border: 1px dashed var(--border, #dcdfe6); border-radius: 6px; }
+.shop-empty-tip { margin-bottom: 8px; font-size: 12px; color: var(--text-2, #606266); }
+.shop-empty-state a { font-size: 13px; color: var(--el-color-primary, #409eff); text-decoration: none; }
+.shop-empty-state a:hover { text-decoration: underline; }
 .btn-row { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
 .preview { margin-top: 14px; }
 </style>

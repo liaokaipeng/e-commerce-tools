@@ -58,6 +58,7 @@ function onStart() {
         :is-ph="creds.isPh.value"
         :refreshing-creds="creds.refreshingCreds.value"
         :shop-options="creds.shopOptions.value"
+        :shop-empty-tip="creds.shopEmptyTip.value"
         :selected-shop-id="creds.selectedShopId.value"
         :userid="creds.userid.value"
         :rows="table.rows.value"
