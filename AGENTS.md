@@ -4,7 +4,7 @@
 
 ## 仓库概览
 
-本仓库为**工具合集（shopee-tools-all-in-one）**：单服务、单端口（8765）、单网页，提供多个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 取消竞价 / Shopee 取消注册 Hot Listing / Shopee 视频批量上传）的本地 Node HTTP 服务 + 一个前端门户页，按 Tab 切换使用。视频上传在门户页按站点拆「跨境」「本土」两个 Tab（共用 `/video/` 页面，`?mode=cn|ph` 固定站点）；「取消Hot Listing」Tab（`/hotlisting-cancel/`）按 SPU 批量取消注册已注册 SKU（复用竞价 Cookie）；「开放平台」Tab（`/openapi/`）负责 App 配置与店铺 OAuth 授权，为官方 Open API 功能统一提供登录与调用入口；「监控大屏」Tab（`/monitor/`）对已授权店铺定时巡检（订单/商品/健康/广告/资金/售后评价六域），P0/P1/P2 三级告警（仅在大屏展示，不接 IM）。
+本仓库为**工具合集（shopee-tools-all-in-one）**：单服务、单端口（8765），前端为多页构建（8 个 HTML 入口 = 门户页 + 7 个功能页），门户页以常驻 iframe 按 Tab 切换，提供多个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 取消竞价 / Shopee 取消注册 Hot Listing / Shopee 视频批量上传）的本地 Node HTTP 服务。视频上传在门户页按站点拆「跨境」「本土」两个 Tab（共用 `/video/` 页面，`?mode=cn|ph` 固定站点）；「取消Hot Listing」Tab（`/hotlisting-cancel/`）按 SPU 批量取消注册已注册 SKU（复用竞价 Cookie）；「开放平台」Tab（`/openapi/`）负责 App 配置与店铺 OAuth 授权，为官方 Open API 功能统一提供登录与调用入口；「监控大屏」Tab（`/monitor/`）对已授权店铺定时巡检（订单/商品/健康/广告/资金/售后评价六域），P0/P1/P2 三级告警（仅在大屏展示，不接 IM）。
 
 ## 文档地图（先查再动手）
 
@@ -32,9 +32,9 @@
 
 - 后端一律 **CommonJS**（`require`/`module.exports`）；前端用 **Vue3 SFC**。改代码时保持文件原有风格，不混用。
 - 后端依赖仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`；前端依赖 `vue` / `element-plus` / `vite` / `echarts`（监控大屏折线图，按需引入）。
-- 前端共享代码优先复用：各页入口统一经 `frontend/src/bootstrap.js` 挂载；`composables/useToolPage.js`（含统一 SSE 请求样板 `runSSE`）、`useShopeeSession.js`、`useBatchJob.js`（长任务：进度/暂停继续取消/行状态回填，取消竞价与取消 Hot Listing 共用）、`components/`（LogPanel/DirRow/LoginCard/StorePicker/PreviewTableCard）、公共样式 `styles/base.css`（monitor 深色页不用）。
+- 前端共享代码优先复用：各页入口统一经 `frontend/src/bootstrap.js` 挂载；`composables/useToolPage.js`（含统一 SSE 请求样板 `runSSE`）、`useShopeeSession.js`、`useBatchJob.js`（长任务：进度/暂停继续取消/行状态回填，取消竞价与取消 Hot Listing 共用）、`components/`（LogPanel/DirRow/DirPicker/LoginCard/StorePicker/PreviewTableCard）、公共样式 `styles/base.css`（monitor 深色页不用）。
 - 监控大屏页（`frontend/src/monitor/`）内部分层：`App.vue` 只做编排，状态/接口/SSE/在场心跳在 `useMonitor.js`，展示拆 `MonitorHeader` / `ShopWall` / `CenterPanels` / `AlertStream` / `MonitorFooter` / `MonitorDrawers` 六个组件，常量纯函数在 `constants.js`、ECharts option 在 `trend-chart.js`；样式 `monitor.css` 是**页面级（非 scoped）**（独立 HTML 文档不外泄，共用类只定义一次），改样式别改回 scoped。
-- 后端共享代码优先复用：**竞价导出 / 取消竞价 / 取消 Hot Listing**三个模块的会话读取、Cookie 组装、登录态断言、店铺列表、金额换算、**接口请求层（`buildShopeeUrl` / `apiGet` / `apiPost` / `fetchShopRegion`）**统一走 `server/lib/shopee-session.js`，不要各自复制、也不要硬编码 `https://seller.shopee.cn`（用导出的 `HOST`）；**导出落盘**（默认「下载」目录、文件名时间戳、Excel 表头样式）统一走 `server/lib/export-utils.js`；**路由 JSON 请求体统一用 `lib/http-utils` 的 `readJsonBody`（严格，非法即抛）/ `readJsonBodySoft`（宽容，记 warn 后返回 `{}`）**，不要再各写 `JSON.parse(await readBody(req))` 样板（唯一例外：`/api/cookie` 为扩展对接协议，返回纯文本）；端口等全局常量统一走 `server/lib/config.js`（`LISTEN_PORT` 可被 `PORT` 覆盖，`CALLBACK_PORT` 固定 8765）。
+- 后端共享代码优先复用：**竞价导出 / 取消竞价 / 取消 Hot Listing**三个模块的会话读取、Cookie 组装、登录态断言、店铺列表、金额换算、**接口请求层（`buildShopeeUrl` / `apiGet` / `apiPost` / `fetchShopRegion`）**统一走 `server/lib/shopee-session.js`，不要各自复制、也不要硬编码 `https://seller.shopee.cn`（用导出的 `HOST`）；**导出落盘**（默认「下载」目录、文件名时间戳、Excel 表头样式）统一走 `server/lib/export-utils.js`；**路由 JSON 请求体统一用 `lib/http-utils` 的 `readJsonBody`（严格，非法即抛）/ `readRouteBody`（宽容，记 warn 后返回 `{}`；传 `{ res }` 时非法 body 回 400，控制类接口用；`readJsonBodySoft` 是它的别名）/ `jsonAction`（body 当业务参数、内部异常统一回 400）**，不要再各写 `JSON.parse(await readBody(req))` 样板（唯一例外：`/api/cookie` 为扩展对接协议，返回纯文本）；端口等全局常量统一走 `server/lib/config.js`（`LISTEN_PORT` 可被 `PORT` 覆盖，`CALLBACK_PORT` 固定 8765）。
 - `tiktok.js` / `video.js` / `openapi.js` / `monitor.js` 只做路由注册，链路拆到 `server/tiktok/` / `server/video/` / `server/openapi/` / `server/monitor/` 子模块；新增逻辑放对应子模块，不要塞回入口文件。
 - **长任务（批量操作类）统一走 `server/lib/jobs.js`**：暂停 / 继续 / 取消 / SSE 客户端断开即取消 / TTL 僵尸清理都在这里，执行体只在关键步骤间 `await jobs.checkpoint(jobId, isAborted)`（被取消抛 `CancelledError`、被暂停则挂起）；**不要再各写一份 jobs Map + waitIfPaused 循环**。前端配套 `composables/useBatchJob.js`。
 - **重试 / 退避统一走 `server/lib/retry.js`**：`retry(fn, { attempts, waitOf, shouldRetry, onRetry, isAborted })` + 三种策略（`exponentialBackoff` 网络/5xx、`fixedBackoff` 上游限流、`jitteredLinearBackoff` 防风控）；新增链路不要再手写重试循环。
