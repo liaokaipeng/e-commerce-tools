@@ -58,10 +58,10 @@ function notifyMonitorAuthChanged() {
 }
 
 // ============ 已授权店铺列表（各工具「选择店铺」数据源） ============
-// 输出当前环境全部已授权店铺的 { category, id, name }（与 /api/stores 同构，StorePicker 直接渲染）。
-// 店铺名三级缓存：openapi-session.json(shopName) → 监控 meta.json(首次采集时补的名字) → stores.json；
-// 三处都缺才调 get_shop_info 补拉（直接签名调用、不带自动刷新），失败只记 shopNameFailedAt、
-// 10 分钟内不重试——取名失败绝不把店铺标记为失效（不影响监控采集与授权状态）。
+// 输出当前环境全部已授权店铺的 { category, id, name, region }（与 /api/stores 同构 + region 国家筛选用）。
+// 店铺名/地区三级缓存：openapi-session.json(shopName/shopRegion) → 监控 meta.json(首次采集时补的名字) → stores.json；
+// 两处都缺才调 get_shop_info 补拉（直接签名调用、不带自动刷新），失败只记失败时间戳、
+// 10 分钟内不重试——取名/取地区失败绝不把店铺标记为失效（不影响监控采集与授权状态）。
 const SHOP_NAME_RETRY_MS = 10 * 60 * 1000;
 const SHOP_NAME_CONCURRENCY = 5;
 let shopNameTask = null; // 单飞：并发请求共享同一次拉取，避免重复打网关
@@ -90,12 +90,13 @@ function storesNameMap() {
   } catch { return {}; }
 }
 
-/** 直调 get_shop_info 补拉缺失店铺名（不走 callOpenApi：避免认证类失败触发刷新/标记失效） */
+/** 直调 get_shop_info 补拉缺失的店铺名/地区（不走 callOpenApi：避免认证类失败触发刷新/标记失效） */
 async function fetchShopNames(env, shops) {
   let cursor = 0;
   const worker = async () => {
     while (cursor < shops.length) {
       const s = shops[cursor++];
+      const patch = {};
       try {
         const j = await client.signedCall({
           env,
@@ -106,37 +107,53 @@ async function fetchShopNames(env, shops) {
         });
         const pools = [j, j && j.response, j && j.data];
         let name = '';
+        let region = '';
         for (const p of pools) {
           if (!p || typeof p !== 'object') continue;
           if (!name && p.shop_name) name = String(p.shop_name);
+          // region 提取口径与监控采集（collectors.fetchShopInfo）一致
+          if (!region) {
+            for (const k of ['region', 'country', 'shop_region', 'shop_country']) {
+              if (p[k] !== undefined && p[k] !== null && p[k] !== '') { region = String(p[k]).toUpperCase(); break; }
+            }
+          }
         }
-        if (name.trim()) store.setShop(env, s.shopId, { shopName: name.trim() });
-        else store.setShop(env, s.shopId, { shopNameFailedAt: Date.now() });
+        if (name.trim()) patch.shopName = name.trim();
+        else patch.shopNameFailedAt = Date.now();
+        if (region) patch.shopRegion = region;
+        else patch.shopRegionFailedAt = Date.now();
       } catch (e) {
-        store.setShop(env, s.shopId, { shopNameFailedAt: Date.now() });
-        console.warn(`获取店铺 ${s.shopId} 名称失败: ${e.message}`);
+        patch.shopNameFailedAt = Date.now();
+        patch.shopRegionFailedAt = Date.now();
+        console.warn(`获取店铺 ${s.shopId} 名称/地区失败: ${e.message}`);
       }
+      store.setShop(env, s.shopId, patch);
     }
   };
   await Promise.all(Array.from({ length: Math.min(SHOP_NAME_CONCURRENCY, shops.length) }, worker));
 }
 
-/** 已授权店铺列表（首次调用会补拉缺失的店铺名，耗时几秒；之后走缓存秒回） */
+/** 已授权店铺列表（首次调用会补拉缺失的店铺名/地区，耗时几秒；之后走缓存秒回） */
 async function authorizedStores() {
   const app = store.getApp();
   if (!app) return [];
   const mNames = monitorNameMap();
   const sNames = storesNameMap();
+  const now = Date.now();
   const pending = store
     .getShopsRaw(app.env)
-    .filter(
-      (s) =>
-        !s.shopName &&
-        !mNames[s.shopId] &&
-        !sNames[s.shopId] &&
-        !s.invalid &&
-        !(s.shopNameFailedAt && Date.now() - s.shopNameFailedAt < SHOP_NAME_RETRY_MS)
-    );
+    .filter((s) => {
+      if (s.invalid) return false;
+      const hasName = !!(s.shopName || mNames[s.shopId] || sNames[s.shopId]);
+      const hasRegion = !!s.shopRegion;
+      if (hasName && hasRegion) return false;
+      const nameBlocked = s.shopNameFailedAt && now - s.shopNameFailedAt < SHOP_NAME_RETRY_MS;
+      const regionBlocked = s.shopRegionFailedAt && now - s.shopRegionFailedAt < SHOP_NAME_RETRY_MS;
+      // 名字/地区各自有 10 分钟失败冷却，两项都被冷却挡住时才跳过
+      if (!hasName && !hasRegion) return !(nameBlocked && regionBlocked);
+      if (!hasName) return !nameBlocked;
+      return !regionBlocked;
+    });
   if (pending.length) {
     if (!shopNameTask) {
       shopNameTask = fetchShopNames(app.env, pending).finally(() => {
@@ -151,6 +168,7 @@ async function authorizedStores() {
       category: '开放平台已授权',
       id: s.shopId,
       name: s.shopName || mNames[s.shopId] || sNames[s.shopId] || `店铺 ${s.shopId}`,
+      region: s.shopRegion || '',
     }))
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
 }

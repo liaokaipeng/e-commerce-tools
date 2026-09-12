@@ -1,105 +1,126 @@
-<!-- ② 选择店铺卡片：分组勾选（bidding / bidding-cancel 共用）
-     selected 为 reactive Set，沿用「直接操作传入集合」的既有模式。 -->
+<!-- ② 选择店铺卡片：下拉多选（bidding / bidding-cancel / hotlisting-cancel / product-export 四页共用）
+     selected 为 reactive Set，沿用「直接操作传入集合」的既有模式。
+     支持：按国家/地区筛选 + 店铺名/店铺ID 搜索（下拉内输入即搜）+ 全选筛选结果 / 取消全选。 -->
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import { regionLabel } from '../region-utils.js';
 
 const props = defineProps({
   stores: { type: Array, default: () => [] },
   selected: { type: Object, required: true }, // reactive Set<shopId>
 });
 
-const groups = computed(() => {
-  const cats = [...new Set(props.stores.map((s) => s.category))];
-  return cats.map((cat) => ({
-    category: cat,
-    list: props.stores.filter((s) => s.category === cat),
-  }));
+// ---------- 国家/地区筛选 ----------
+const regionFilter = ref('');
+const regionOptions = computed(() => {
+  const set = new Map(); // code -> 原始出现顺序去重
+  for (const s of props.stores) {
+    const code = String(s.region || '').toUpperCase();
+    if (code && !set.has(code)) set.set(code, regionLabel(code));
+  }
+  return [...set.entries()].map(([value, label]) => ({ value, label }));
 });
 
-function toggleStore(id, checked) {
-  if (checked) props.selected.add(id);
-  else props.selected.delete(id);
+// ---------- 店铺名 / 店铺ID 搜索（下拉输入即搜，两个维度同时匹配） ----------
+const keyword = ref('');
+function onFilter(query) {
+  keyword.value = String(query || '').trim();
 }
 
-function toggleGroup(cat, checked) {
-  const list = props.stores.filter((s) => s.category === cat);
-  list.forEach((s) => {
-    if (checked) props.selected.add(s.id);
-    else props.selected.delete(s.id);
+const visibleStores = computed(() => {
+  const kw = keyword.value.toLowerCase();
+  return props.stores.filter((s) => {
+    if (regionFilter.value && String(s.region || '').toUpperCase() !== regionFilter.value) return false;
+    if (!kw) return true;
+    return `${s.name || ''} ${s.id}`.toLowerCase().includes(kw);
   });
+});
+
+const isStoreVisible = (s) => visibleStores.value.includes(s);
+
+// ---------- 多选（v-model 数组 ↔ reactive Set 互转） ----------
+const checkedIds = computed(() => [...props.selected].map(String));
+
+function onSelectionChange(vals) {
+  const next = new Set((vals || []).map(String));
+  for (const id of [...props.selected]) if (!next.has(id)) props.selected.delete(id);
+  for (const id of next) props.selected.add(id);
 }
 
-function groupState(cat) {
-  const list = props.stores.filter((s) => s.category === cat);
-  const allChecked = list.length > 0 && list.every((s) => props.selected.has(s.id));
-  const some = list.some((s) => props.selected.has(s.id));
-  return { allChecked, some };
+function selectAllFiltered() {
+  visibleStores.value.forEach((s) => props.selected.add(String(s.id)));
 }
+
+function clearAll() {
+  props.selected.clear();
+}
+
+const selCount = computed(() => props.selected.size);
 </script>
 
 <template>
   <el-card shadow="never" class="card">
     <template #header>② 选择店铺</template>
-    <div v-loading="stores.length === 0" class="store-box">
-      <div v-for="g in groups" :key="g.category" class="cat-group">
-        <div class="cat-head">
-          <el-checkbox
-            :model-value="groupState(g.category).allChecked"
-            :indeterminate="!groupState(g.category).allChecked && groupState(g.category).some"
-            @change="(v) => toggleGroup(g.category, v)"
-          ></el-checkbox>
-          <span>{{ g.category }}</span>
-          <span class="cat-count">{{ g.list.length }} 个店铺</span>
-        </div>
-        <div class="store-grid">
-          <label
-            v-for="s in g.list"
+    <div v-loading="stores.length === 0" class="picker-box">
+      <div class="picker-row">
+        <el-select
+          v-model="regionFilter"
+          class="region-select"
+          clearable
+          placeholder="全部国家/地区"
+        >
+          <el-option v-for="r in regionOptions" :key="r.value" :value="r.value" :label="r.label" />
+        </el-select>
+        <el-select
+          :model-value="checkedIds"
+          class="store-select"
+          multiple
+          filterable
+          collapse-tags
+          collapse-tags-tooltip
+          :filter-method="onFilter"
+          placeholder="搜索店铺名 / 店铺ID，或下拉勾选店铺"
+          @update:model-value="onSelectionChange"
+        >
+          <el-option
+            v-for="s in stores"
             :key="s.id"
-            class="store-item"
-            :class="{ selected: selected.has(s.id) }"
+            :value="String(s.id)"
+            :label="`${s.name}（${s.id}）`"
+            :class="{ 'opt-filtered-out': !isStoreVisible(s) }"
           >
-            <el-checkbox :model-value="selected.has(s.id)" @change="(v) => toggleStore(s.id, v)"></el-checkbox>
-            <span class="store-meta">
-              <span class="store-name">{{ s.name }}</span><br />
-              <span class="store-id">ID: {{ s.id }}</span>
-            </span>
-          </label>
-        </div>
+            <span class="opt-region">{{ s.region ? regionLabel(s.region) : '地区未知' }}</span>
+            <span class="opt-name">{{ s.name }}</span>
+            <span class="opt-id">ID: {{ s.id }}</span>
+          </el-option>
+        </el-select>
+        <el-button @click="selectAllFiltered">全选筛选结果</el-button>
+        <el-button :disabled="selCount === 0" @click="clearAll">取消全选</el-button>
+        <span class="sel-hint">已选 {{ selCount }} / {{ stores.length }} 个店铺</span>
+      </div>
+      <div v-if="visibleStores.length === 0 && stores.length > 0" class="empty-tip">
+        没有匹配的店铺：换个国家/地区或搜索关键词试试。
       </div>
     </div>
   </el-card>
 </template>
 
 <style scoped>
-.store-box { min-height: 120px; }
-.cat-group { margin-bottom: 18px; }
-.cat-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-  font-weight: 600;
-  font-size: 14px;
+.picker-box { min-height: 56px; }
+.picker-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.region-select { width: 170px; flex: none; }
+.store-select { flex: 1 1 320px; min-width: 280px; }
+.sel-hint { color: var(--text-3, #999); font-size: 12px; white-space: nowrap; }
+.empty-tip { margin-top: 8px; color: var(--text-3, #999); font-size: 12px; }
+.opt-region {
+  display: inline-block;
+  min-width: 82px;
+  margin-right: 8px;
+  font-size: 12px;
+  color: var(--text-3, #999);
 }
-.cat-count { color: var(--text-3, #999); font-weight: 400; font-size: 12px; }
-.store-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 8px;
-}
-.store-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--border, #e5e5e5);
-  border-radius: 8px;
-  padding: 10px 12px;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-.store-item:hover { border-color: #ee4d2d; }
-.store-item.selected { border-color: #ee4d2d; background: #fff5f3; }
-.store-meta { line-height: 1.35; min-width: 0; }
-.store-name { font-size: 13px; font-weight: 600; }
-.store-id { font-size: 12px; color: var(--text-3, #999); }
+.opt-name { font-size: 13px; }
+.opt-id { margin-left: 8px; font-size: 12px; color: var(--text-3, #999); }
+/* 被国家/关键词筛掉的选项仍要渲染（保住已选标签的名称），只是在下拉里隐藏 */
+.opt-filtered-out { display: none; }
 </style>

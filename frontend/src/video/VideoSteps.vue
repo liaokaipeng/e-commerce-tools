@@ -1,12 +1,14 @@
 <!-- 视频上传 · ① 凭证卡片与 ② 表格卡片（展示层）。
      状态与逻辑在 video/useVideoCreds.js / useVideoTable.js，本组件只负责渲染与事件上抛。 -->
 <script setup>
+import { computed, ref } from 'vue';
 import { UploadFilled } from '@element-plus/icons-vue';
+import { regionLabel } from '../region-utils.js';
 
-defineProps({
+const props = defineProps({
   isPh: { type: Boolean, default: false },
   refreshingCreds: { type: Boolean, default: false },
-  /** 跨境多店铺下拉 */
+  /** 跨境多店铺下拉：[{ value, label, region }] */
   shopOptions: { type: Array, default: () => [] },
   selectedShopId: { type: String, default: '' },
   userid: { type: String, default: '' },
@@ -26,6 +28,31 @@ const emit = defineEmits([
   'file-change', 'file-exceed', 'file-remove', 'parse', 'download-template',
 ]);
 
+// ---------- 跨境店铺选择：国家/地区筛选 + 店铺名/店铺ID 搜索 ----------
+const shopRegionFilter = ref('');
+const shopKeyword = ref('');
+function onShopFilter(query) {
+  shopKeyword.value = String(query || '').trim();
+}
+
+const shopRegionOptions = computed(() => {
+  const seen = new Map();
+  for (const o of props.shopOptions) {
+    const code = String(o.region || '').toUpperCase();
+    if (code && !seen.has(code)) seen.set(code, regionLabel(code));
+  }
+  return [...seen.entries()].map(([value, label]) => ({ value, label }));
+});
+
+const visibleShopOptions = computed(() => {
+  const kw = shopKeyword.value.toLowerCase();
+  return props.shopOptions.filter((o) => {
+    if (shopRegionFilter.value && String(o.region || '').toUpperCase() !== shopRegionFilter.value) return false;
+    if (!kw) return true;
+    return o.label.toLowerCase().includes(kw); // label 含「店名（店铺ID）」，一个关键词同时匹配两维
+  });
+});
+
 const STATUS_TAG = { wait: 'info', run: 'warning', ok: 'success', err: 'danger' };
 const STATUS_TEXT = { run: '上传中', ok: '成功', err: '失败' };
 const statusTag = (t) => STATUS_TAG[t] || 'info';
@@ -36,14 +63,33 @@ const statusText = (t) => STATUS_TEXT[t] || '等待';
   <!-- 凭证 -->
   <el-card shadow="never" class="card">
     <template #header><span>上传凭证</span></template>
-    <div v-if="!isPh" class="row">
+    <div v-if="!isPh" class="row shop-row">
+      <el-select
+        v-model="shopRegionFilter"
+        class="shop-region-select"
+        clearable
+        placeholder="全部国家/地区"
+      >
+        <el-option v-for="r in shopRegionOptions" :key="r.value" :value="r.value" :label="r.label" />
+      </el-select>
       <el-select
         :model-value="selectedShopId"
-        style="min-width: 280px"
-        placeholder="选择要发布到的店铺"
+        class="shop-select"
+        filterable
+        :filter-method="onShopFilter"
+        placeholder="搜索店铺名 / 店铺ID，或下拉选择要发布到的店铺"
         @update:model-value="(v) => { emit('update:selectedShopId', v); emit('apply-shop', v); }"
       >
-        <el-option v-for="o in shopOptions" :key="o.value" :value="o.value" :label="o.label" />
+        <el-option
+          v-for="o in shopOptions"
+          :key="o.value"
+          :value="o.value"
+          :label="o.label"
+          :class="{ 'opt-filtered-out': !visibleShopOptions.includes(o) }"
+        >
+          <span class="opt-region">{{ o.region ? regionLabel(o.region) : '地区未知' }}</span>
+          <span class="opt-label">{{ o.label }}</span>
+        </el-option>
       </el-select>
     </div>
     <div v-if="isPh" class="row">
@@ -137,6 +183,19 @@ const statusText = (t) => STATUS_TEXT[t] || '等待';
 .pill { margin-left: 8px; }
 .file-upload { margin-top: 4px; }
 .field-label { font-size: 12px; color: #6b7280; margin-right: 8px; }
+.shop-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.shop-region-select { width: 170px; flex: none; }
+.shop-select { flex: 1 1 320px; min-width: 280px; }
+.opt-region {
+  display: inline-block;
+  min-width: 82px;
+  margin-right: 8px;
+  font-size: 12px;
+  color: var(--text-3, #999);
+}
+.opt-label { font-size: 13px; }
+/* 被国家/关键词筛掉的选项仍要渲染（保住已选标签的名称），只是在下拉里隐藏 */
+.opt-filtered-out { display: none; }
 .btn-row { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
 .mapping { margin-top: 14px; }
 .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }

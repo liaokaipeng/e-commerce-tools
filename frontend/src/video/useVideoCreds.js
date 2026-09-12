@@ -30,6 +30,11 @@ export function useVideoCreds() {
     const s = stores.value.find((x) => String(x.id) === String(id));
     return s ? s.name : '';
   };
+  // 店铺地区（国家筛选用）：来自 /api/openapi/stores 的 region 字段；查不到返回空串
+  const shopRegionOf = (id) => {
+    const s = stores.value.find((x) => String(x.id) === String(id));
+    return s && s.region ? String(s.region).toUpperCase() : '';
+  };
   // 店铺下拉选项：展示全部已知店铺（已抓凭证的排前面），无凭证的加标注。
   // 凭证账号级通用：未抓到凭证的店铺也可选（复用同账号已抓凭证发布），
   // 否则「任一店铺手动上传一次 → 同账号所有店铺可批量上传」落不了地。
@@ -40,7 +45,11 @@ export function useVideoCreds() {
       if (!shopId || seen.has(shopId)) return;
       seen.add(shopId);
       const base = name ? `${name}（${shopId}）` : `店铺 ${shopId}`;
-      out.push({ value: shopId, label: hasCred ? base : `${base}（未抓到凭证，复用同账号凭证）` });
+      out.push({
+        value: shopId,
+        label: hasCred ? base : `${base}（未抓到凭证，复用同账号凭证）`,
+        region: shopRegionOf(shopId),
+      });
     };
     for (const s of cnShops.value) if (s.hasCred) add(s.shopId, shopNameOf(s.shopId), true);
     for (const s of cnShops.value) if (!s.hasCred) add(s.shopId, shopNameOf(s.shopId), false);
@@ -146,8 +155,13 @@ export function useVideoCreds() {
           .sort((a, b) => Number(b.hasCred) - Number(a.hasCred));
         cnShops.value = list;
         if (!list.length) {
-          // 服务端跨境凭证为空（可能已被清空缓存）：同步清空页面本地残留（含所选店铺）
-          wipeLocalCreds();
+          // 服务端跨境凭证为空（可能已被清空缓存）：只清凭证材料，保留用户所选店铺。
+          // 未抓到凭证的店铺本就是合法选择目标（复用同账号凭证发布），若在这里连选择
+          // 一起抹掉，5 秒一次的同步会把用户刚选好的店铺打回空（下拉框"变空"）。
+          auth.value = '';
+          cookie.value = '';
+          userid.value = '';
+          cnShops.value = [];
           return;
         }
         if (list.length) {
@@ -163,7 +177,7 @@ export function useVideoCreds() {
             if (cur.userid) userid.value = cur.userid;
             if (!quiet) saveCreds();
           } else if (selectedShopId.value) {
-            // 所选店铺未抓到凭证：保留选择（可能是 /api/stores 里的店铺），凭证沿用最近更新的有凭证店铺
+            // 所选店铺未抓到凭证：保留选择（可能是已授权店铺列表里的店铺），凭证沿用最近更新的有凭证店铺
             shopId.value = selectedShopId.value;
             const src = withCred[0];
             if (src) {
@@ -231,13 +245,29 @@ export function useVideoCreds() {
     return true;
   }
 
+  // 店铺列表与竞价导出等页面同源：开放平台已授权店铺（/api/openapi/stores，
+  // 真实店名 + 全量授权店铺，取名缺失时后端自动调 get_shop_info 补拉）。
+  // 开放平台未配置或请求异常时回落 stores.json 手工清单（仅兜底，保持页面可用）。
+  async function loadStoreList() {
+    try {
+      const r = await fetch('/api/openapi/stores');
+      const d = await r.json();
+      if (Array.isArray(d)) {
+        stores.value = d;
+        return;
+      }
+    } catch { /* 回落到手工清单 */ }
+    try {
+      const r2 = await fetch('/api/stores');
+      const d2 = await r2.json();
+      stores.value = Array.isArray(d2) ? d2 : [];
+    } catch { /* 服务未启动忽略 */ }
+  }
+
   function startStoreSync() {
     loadLocalCreds();
     loadCredsFromServer(true);
-    fetch('/api/stores')
-      .then((r) => r.json())
-      .then((d) => { stores.value = Array.isArray(d) ? d : []; })
-      .catch(() => { /* 服务未启动忽略 */ });
+    loadStoreList();
     // 凭证由扩展推送到服务端，定时静默同步（用户在本页编辑的输入不受影响）
     return setInterval(() => loadCredsFromServer(true), 5000);
   }
@@ -245,7 +275,7 @@ export function useVideoCreds() {
   return {
     site, isPh, siteLabel,
     auth, cookie, shopId, userid, refreshingCreds,
-    cnShops, selectedShopId, stores, shopOptions, shopNameOf,
+    cnShops, selectedShopId, stores, shopOptions, shopNameOf, shopRegionOf,
     applyShop, saveCreds, refreshCreds, assertReady, startStoreSync,
   };
 }
