@@ -89,15 +89,16 @@ function register({ get, post }) {
   get('/api/monitor/alerts', (req, res, url) => {
     const q = url.searchParams;
     const excluded = store.getExcludedShopIds();
-    sendJson(res, 200, {
-      ok: true,
-      alerts: engine.getAlerts({
-        level: q.get('level') || '',
-        shopId: q.get('shopId') || '',
-        status: q.get('status') || '',
-        limit: Number(q.get('limit')) || 0,
-      }).filter((a) => !excluded.has(a.shopId)).map((a) => Object.assign({}, a, { message: engine.renderAlertMessage(a) })),
-    });
+    const limit = Number(q.get('limit')) || 0;
+    // limit 在「过滤未启用监控店铺」之后生效，避免排除店铺占用名额导致返回条数偏少
+    let alerts = engine.getAlerts({
+      level: q.get('level') || '',
+      shopId: q.get('shopId') || '',
+      status: q.get('status') || '',
+    }).filter((a) => !excluded.has(a.shopId))
+      .map((a) => Object.assign({}, a, { message: engine.renderAlertMessage(a) }));
+    if (limit > 0) alerts = alerts.slice(0, limit);
+    sendJson(res, 200, { ok: true, alerts });
   });
 
   // 告警操作：确认 / 关闭

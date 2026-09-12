@@ -27,8 +27,7 @@ const {
   selectShop, selectMetric, openRules, saveRules,
   openShopsConfig, setAllMonitored, saveShopsConfig,
   saveCurrencyMode, manualCollect, alertAction, goOpenapi, openAlertDetail,
-} = useMonitor();
-</script>
+} = useMonitor();</script>
 
 <template>
   <div class="dash" :class="{ proj: projectMode }">
@@ -98,6 +97,7 @@ const {
         :shops="overview.shops"
         :flash-ids="flashIds"
         @action="alertAction"
+        @detail="openAlertDetail"
       />
     </main>
 

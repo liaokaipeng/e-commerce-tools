@@ -104,6 +104,8 @@ function findAlert(shopId, ruleId) {
  */
 function applyDetail(alert, details) {
   const d = normalizeDetail(details && details[alert.metric]);
+  // 明细文本单独存一份：/api/monitor/alerts 路由按金额模式重渲染消息时保留明细（msgOf 只产出基础文案）
+  alert.detailText = d.text;
   alert.message = d.text ? msgOf(alert) + '；' + d.text : msgOf(alert);
   alert.detailRows = d.rows;
 }
@@ -172,8 +174,15 @@ function ingest(shopId, domain, metrics, at, details) {
       continue;
     }
     existing.current = v;
+    if (existing.status === 'recovered') {
+      // 恢复后再次触发：与「关闭后重新打开」同口径，计数与首次触发时间重新起算（否则 ×N 跨恢复周期虚增）
+      existing.count = 0;
+      existing.firstAt = now;
+      existing.recoveredAt = null;
+      existing.level = level; // 恢复期间规则/级别可能已变化，直接取本次评估值
+    }
     existing.lastAt = now;
-    existing.count = (existing.count || 1) + 1;
+    existing.count = (existing.count || 0) + 1; // 恢复分支已重置为 0：重新起算
     const escalated = isMoreSevere(level, existing.level);
     if (escalated) existing.level = level;
     applyDetail(existing, details);
@@ -395,8 +404,14 @@ module.exports = {
   replayTo,
   broadcast,
   flushAlerts,
-  // 按当前金额单位模式重新渲染告警消息（金额指标随模式切换换算；路由层读取告警时调用）
-  renderAlertMessage: msgOf,
+  // 按当前金额单位模式重渲染告警消息（金额指标随模式切换换算；路由层读取告警时调用）：
+  // 基础文案重新生成，明细文本（detailText，不随模式变化）原样保留；
+  // 旧落盘记录没有 detailText 字段时保持原 message 不动（可能已含明细文本）。
+  renderAlertMessage(a) {
+    const base = msgOf(a);
+    if (a.detailText != null) return a.detailText ? base + '；' + a.detailText : base;
+    return a.message || base;
+  },
   shopCurrency,
   _test: { alerts },
 };

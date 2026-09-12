@@ -1132,6 +1132,20 @@ async function run() {
     a = engine.getAlerts({ shopId: 'TF' })[0];
     t('引擎：detailRows 字段归一化为字符串', a.detailRows.length === 1 && a.detailRows[0].id === '123' && a.detailRows[0].title === '' && a.detailRows[0].sub === '', JSON.stringify(a.detailRows));
     engine.closeAlert(a.id);
+    // 回归：/api/monitor/alerts 路由经 renderAlertMessage 重渲染消息时不得丢明细文本
+    engine.ingest('TG', 'product', { 'product.violations': 2 }, now, { 'product.violations': { text: '明细 违禁商品2', rows: [] } });
+    a = engine.getAlerts({ shopId: 'TG' })[0];
+    const reMsg = engine.renderAlertMessage(Object.assign({}, a));
+    t('引擎：列表消息重渲染保留明细文本', reMsg.includes('当前 2') && reMsg.includes('明细 违禁商品2'), reMsg);
+    engine.closeAlert(a.id);
+    // 回归：恢复后再次触发，计数/首次触发时间重新起算（曾跨恢复周期虚增 ×N）
+    engine.ingest('TH', 'order', { 'order.pending_24h': 4 }, now + 60000);
+    engine.ingest('TH', 'order', { 'order.pending_24h': 5 }, now + 120000);
+    engine.ingest('TH', 'order', { 'order.pending_24h': 1 }, now + 180000); // 恢复
+    engine.ingest('TH', 'order', { 'order.pending_24h': 6 }, now + 240000); // 再次触发
+    a = engine.getAlerts({ shopId: 'TH' })[0];
+    t('引擎：恢复后再次触发计数重新起算', a.status === 'open' && a.count === 1, JSON.stringify({ count: a.count, status: a.status }));
+    engine.closeAlert(a.id);
   }
 
   // ===== 监控：金额换算（人民币阈值口径 + 全局展示模式） =====
