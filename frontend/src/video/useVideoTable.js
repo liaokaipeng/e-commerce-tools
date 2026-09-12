@@ -1,14 +1,12 @@
 // 视频上传页 · 表格解析与行校验。
-// 从 video/App.vue 抽出：列名智能匹配、CSV / xlsx 解析、预览行重建与即时校验。
+// 从 video/App.vue 抽出：CSV / xlsx 解析、预览行重建与即时校验。
 // 注意：校验文案与阈值必须与后端 server/lib/video-utils.js 的 validateUploadRow 保持一致；
 // 文件是否存在等需访问文件系统的检查由后端兜底。
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 
-/** 列名候选（按优先级）：先精确匹配，再包含匹配，最后回退首列 */
-export const KEY_PATH = ['视频路径', '路径', '视频', 'videopath', 'videofile', 'path', '文件', '文件路徑'];
-export const KEY_CAPTION = ['视频说明', '说明', '描述', '标题', 'caption', 'description', '备注', '视频描述'];
-export const KEY_PRODUCT = ['商品编码', '编码', '商品', 'sku', 'item', 'product', '货号', '商品id', 'itemid', '商品編碼'];
+/** 必需表头（缺一不可，不做列名映射） */
+export const REQUIRED_HEADERS = ['视频路径', '视频说明', '商品编码'];
 
 export const CAPTION_MAX_LENGTH = 250;
 
@@ -21,18 +19,6 @@ export function validateRow({ path, caption }) {
   if (caption && caption.length > CAPTION_MAX_LENGTH) return `视频说明超过${CAPTION_MAX_LENGTH}字符，请精简后再上传`;
   if (caption && /tiktok/i.test(caption)) return '视频说明不能包含 tiktok 字样';
   return '';
-}
-
-export function matchKey(hs, keys) {
-  for (const k of keys) {
-    const hit = hs.find((h) => (h || '').toString().trim().toLowerCase() === k.toLowerCase());
-    if (hit) return hit;
-  }
-  for (const k of keys) {
-    const hit = hs.find((h) => (h || '').toString().toLowerCase().includes(k.toLowerCase()));
-    if (hit) return hit;
-  }
-  return hs[0] || '';
 }
 
 /** 解析 CSV 文本（支持引号包裹与转义 ""） */
@@ -62,10 +48,6 @@ export function parseCSV(text) {
 
 export function useVideoTable() {
   const headers = ref([]);
-  const mapPath = ref('');
-  const mapCaption = ref('');
-  const mapProduct = ref('');
-  const showMapping = ref(false);
   const rows = ref([]); // { path, caption, product, error, status }
   let rawRows = [];
   let sourceName = ''; // 原表格文件名（去扩展名），导出结果表格时用
@@ -73,18 +55,14 @@ export function useVideoTable() {
   function rebuildRows(raw) {
     rawRows = raw;
     rows.value = raw.map((r) => {
-      const path = (r[mapPath.value] || '').toString().trim();
-      const caption = (r[mapCaption.value] || '').toString().trim();
-      const product = (r[mapProduct.value] || '').toString().trim();
+      const path = (r['视频路径'] || '').toString().trim();
+      const caption = (r['视频说明'] || '').toString().trim();
+      const product = (r['商品编码'] || '').toString().trim();
       return { path, caption, product, error: validateRow({ path, caption }), status: '' };
     });
   }
 
-  function onMappingChange() {
-    rebuildRows(rawRows);
-  }
-
-  /** 解析选中的文件（xlsx 走 SheetJS，csv 走内置解析） */
+  /** 解析选中的文件（xlsx 走 SheetJS，csv 走内置解析）。表头缺列直接报错，不解析。 */
   async function parseFile(file) {
     if (!file) { ElMessage.warning('请先选择表格文件'); return false; }
     const isExcel = /\.xlsx?$/i.test(file.name);
@@ -102,12 +80,13 @@ export function useVideoTable() {
       raw = parseCSV(new TextDecoder('utf-8').decode(buf));
     }
     if (!raw.length) { ElMessage.warning('未解析到数据'); return false; }
-    sourceName = (file.name || '').replace(/\.(xlsx|xls|csv)$/i, '') || '视频上传';
+    const missing = REQUIRED_HEADERS.filter((h) => !Object.keys(raw[0]).includes(h));
+    if (missing.length) {
+      ElMessage.error(`表格表头不符合要求，缺少：${missing.join('、')}。表头必须包含：视频路径、视频说明、商品编码。`);
+      return false;
+    }
     headers.value = Object.keys(raw[0]);
-    mapPath.value = matchKey(headers.value, KEY_PATH);
-    mapCaption.value = matchKey(headers.value, KEY_CAPTION);
-    mapProduct.value = matchKey(headers.value, KEY_PRODUCT);
-    showMapping.value = true;
+    sourceName = (file.name || '').replace(/\.(xlsx|xls|csv)$/i, '') || '视频上传';
     rebuildRows(raw);
     return true;
   }
@@ -150,7 +129,7 @@ export function useVideoTable() {
   }
 
   return {
-    headers, mapPath, mapCaption, mapProduct, showMapping, rows,
-    parseFile, onMappingChange, rebuildRows, downloadTemplate, exportResult,
+    headers, rows,
+    parseFile, rebuildRows, downloadTemplate, exportResult,
   };
 }

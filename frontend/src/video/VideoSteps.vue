@@ -14,18 +14,12 @@ const props = defineProps({
   selectedShopId: { type: String, default: '' },
   userid: { type: String, default: '' },
   /** 表格 */
-  headers: { type: Array, default: () => [] },
-  mapPath: { type: String, default: '' },
-  mapCaption: { type: String, default: '' },
-  mapProduct: { type: String, default: '' },
-  showMapping: { type: Boolean, default: false },
   rows: { type: Array, default: () => [] },
   uploadRef: { type: Object, default: null },
 });
 
 const emit = defineEmits([
   'refresh-creds', 'update:selectedShopId', 'update:userid', 'apply-shop',
-  'update:mapPath', 'update:mapCaption', 'update:mapProduct', 'mapping-change',
   'file-change', 'file-exceed', 'file-remove', 'parse', 'download-template',
 ]);
 
@@ -130,35 +124,9 @@ const statusText = (t) => STATUS_TEXT[t] || '';
       <el-icon class="el-icon--upload"><upload-filled /></el-icon>
       <div class="el-upload__text">把表格文件拖到这里，或 <em>点击选择文件</em></div>
       <template #tip>
-        <div class="el-upload__tip">
-          表头需包含：<b>视频路径</b>、<b>视频说明</b>、<b>商品编码</b>；如列名不同，可在下方手动映射。<br />
-          商品编码为空、或按编码查不到商品时，该行将<b>跳过上传</b>并标记「失败，商品为空」。
-        </div>
+        <div class="el-upload__tip">表头必须包含：<b>视频路径</b>、<b>视频说明</b>、<b>商品编码</b>。</div>
       </template>
     </el-upload>
-
-    <div v-if="showMapping" class="mapping">
-      <div class="grid3">
-        <div>
-          <label>视频路径列</label>
-          <el-select :model-value="mapPath" @update:model-value="(v) => { emit('update:mapPath', v); emit('mapping-change'); }">
-            <el-option v-for="h in headers" :key="h" :value="h" :label="h || '(空)'" />
-          </el-select>
-        </div>
-        <div>
-          <label>视频说明列</label>
-          <el-select :model-value="mapCaption" @update:model-value="(v) => { emit('update:mapCaption', v); emit('mapping-change'); }">
-            <el-option v-for="h in headers" :key="h" :value="h" :label="h || '(空)'" />
-          </el-select>
-        </div>
-        <div>
-          <label>商品编码列</label>
-          <el-select :model-value="mapProduct" @update:model-value="(v) => { emit('update:mapProduct', v); emit('mapping-change'); }">
-            <el-option v-for="h in headers" :key="h" :value="h" :label="h || '(空)'" />
-          </el-select>
-        </div>
-      </div>
-    </div>
 
     <div class="btn-row">
       <el-button type="primary" @click="emit('parse')">解析表格</el-button>
@@ -200,11 +168,5 @@ const statusText = (t) => STATUS_TEXT[t] || '';
 /* 被国家/关键词筛掉的选项仍要渲染（保住已选标签的名称），只是在下拉里隐藏 */
 .opt-filtered-out { display: none; }
 .btn-row { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
-.mapping { margin-top: 14px; }
-.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
-@media (max-width: 720px) {
-  .grid3 { grid-template-columns: 1fr; }
-}
-.grid3 label { display: block; font-size: 12px; color: #6b7280; margin: 0 0 4px; }
 .preview { margin-top: 14px; }
 </style>
