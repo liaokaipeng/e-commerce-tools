@@ -6,7 +6,8 @@ const { retry, exponentialBackoff } = require('../lib/retry');
 // 统一出站请求：视频上传各步骤依赖跨请求的会话 Cookie，故 useJar=true
 // 对网络错误 / 超时 / 5xx 做指数退避重试；4xx 等业务错不重试（避免重复副作用）。
 // opts.signal：任务取消时中断进行中的请求，且取消造成的中断不重试。
-// opts.idempotent=false：非幂等写操作（mergeFiles / reportupload / video/create）。
+// opts.idempotent=false：非幂等写操作（mergeFiles / reportupload / video/create / ph 整文件 PUT——
+//   body 是只读一次的文件流，重入会拿到已消费的流）。
 //   这类请求服务端可能已处理、只是响应丢失，重放会造成重复合并 / 同一次上传发两条视频，
 //   因此只在「连接根本没建立」类错误（DNS 失败、连接被拒、网络不可达）上重试。
 // 退避与重试骨架见 lib/retry.js（与开放平台 / TikTok 解析等链路共用同一实现）。

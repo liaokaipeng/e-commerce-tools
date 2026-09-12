@@ -271,6 +271,24 @@ async function run() {
     } finally {
       fs.unlinkSync(noMoov);
     }
+    // 回归：moov 本身很大（长视频帧索引多，moov 可达数 MB）——'moov' 签名距 EOF 超过 512KB
+    // 采样窗，旧逻辑小窗搜不到签名 → 返回全 0，发布接口拿到 duration=0。加宽窗后必须命中
+    {
+      const bigMoov = box('moov', Buffer.concat([
+        box('mvhd', mvhdBody(1000, 5000)),
+        box('trak', box('tkhd', tkhdBody(1280, 720))),
+        box('free', Buffer.alloc(700 * 1024)), // 把 moov 撑到 ~700KB
+      ]));
+      const bigTail = path.join(os.tmpdir(), `kp_probe_big_moov_${Date.now()}.mp4`);
+      fs.writeFileSync(bigTail, Buffer.concat([box('ftyp', Buffer.from('isom')), box('mdat', Buffer.alloc(64 * 1024)), bigMoov]));
+      try {
+        const r = probeVideoFile(bigTail);
+        t('probeVideoFile 大 moov（签名距 EOF>512KB）解析出宽高', r.width === 1280 && r.height === 720, JSON.stringify({ width: r.width, height: r.height }));
+        t('probeVideoFile 大 moov 解析出时长', r.duration === 5000, `duration=${r.duration}`);
+      } finally {
+        fs.unlinkSync(bigTail);
+      }
+    }
     // 窗口起点不对齐（前面 7 字节杂数据）：仍能由 'moov' 签名回推 box 起点
     t('findMoovInTail 窗口起点不对齐时仍能回推 box 起点', (() => {
       const buf = Buffer.concat([Buffer.alloc(7), box('moov', mvhdBody(1000, 5000))]);

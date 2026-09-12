@@ -18,6 +18,7 @@ async function preupload(signal) {
     method: 'POST',
     url: `${MMS}/uploadapi/api/v1/vod/preupload`,
     signal,
+    useJar: false, // MMS 凭证接口不带 Cookie：显式与 jar 罐都不要，罐里残留的 set-cookie 会被带上污染请求
     headers: {
       'content-type': 'application/json',
       accept: 'application/json, text/plain, */*',
@@ -40,6 +41,7 @@ async function uploadChunk(chunk, etag, auth, signal) {
     method: 'POST',
     url: `${UPLOAD}/api/v2/upload/${BIZ}`,
     signal,
+    useJar: false, // 上传域用 Authorization 鉴权，不带 Cookie（含 jar 罐）
     headers: {
       Authorization: auth,
       'Content-Type': 'application/octet-stream',
@@ -60,6 +62,7 @@ async function mergeFiles(fids, auth, fileEtag, signal) {
     signal,
     // 写操作：响应丢失后重放会重复合并，只允许「连接未建立」类错误重试
     idempotent: false,
+    useJar: false, // 上传域用 Authorization 鉴权，不带 Cookie（含 jar 罐）
     headers: {
       Authorization: auth,
       'Content-Type': 'video/mp4',
@@ -79,6 +82,7 @@ async function reportUpload({ vid, extendid, fsize, md5hexval, videourl }, signa
     url: `${MMS}/uploadapi/api/v1/vod/reportupload`,
     signal,
     idempotent: false, // 写操作：不重放（详见 request.js call 的说明）
+    useJar: false, // MMS 凭证接口不带 Cookie（含 jar 罐，见 preupload 注释）
     headers: {
       'content-type': 'application/json',
       accept: 'application/json, text/plain, */*',
@@ -189,6 +193,11 @@ async function uploadOneCn(row, creds, log, signal) {
   log('item', `查询商品编码: ${product}`);
   const isCode = /^\d+$/.test(product);
   const il = await itemList(product, cookie, shopId, signal);
+  // Cookie 失效时 solutions 常返回 302/HTML 登录页（或网关错误页），items 为空——
+  // 若不区分会误报「商品不存在」跳过上传；登录态问题是硬失败，不能当 skip 处理
+  if (il.status !== 200 || !il.json) {
+    throw new Error(`商品查询失败(HTTP ${il.status})，很可能是登录态已失效。请重新登录卖家中心，让扩展抓取最新 Cookie 后再试。响应: ${il.text.slice(0, 200)}`);
+  }
   const items = (il.json && il.json.data && il.json.data.items) || [];
   const hit = isCode
     ? items.find((it) => String(it.item_id ?? it.itemId) === product)
@@ -262,6 +271,13 @@ async function uploadOneCn(row, creds, log, signal) {
   log('report', '上报上传结果...');
   const rep = await reportUpload({ vid, extendid: extendid || '', fsize, md5hexval: wholeMd5hex, videourl }, signal);
   log('report', `响应: ${rep.text.slice(0, 300)}`);
+  // 上报失败若继续 video/create，后续报错会掩盖真实原因，这里先校验
+  if (rep.status !== 200) {
+    throw new Error(`reportupload 失败(HTTP ${rep.status})。响应: ${rep.text.slice(0, 300)}`);
+  }
+  if (rep.json && typeof rep.json.code === 'number' && rep.json.code !== 0) {
+    throw new Error(`reportupload 业务失败(code=${rep.json.code})。响应: ${rep.text.slice(0, 300)}`);
+  }
 
   log('create', '创建视频并发布...');
   const meta = probeVideoFile(filePath);

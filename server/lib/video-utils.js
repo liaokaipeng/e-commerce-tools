@@ -253,21 +253,35 @@ function findMoovInTail(tail, tailStart, fileSize) {
 /**
  * 从 MP4 文件解析宽高/时长（不整文件加载）：采样文件头尾各 512KB 定位 moov，
  * 再按偏移只读 moov 完整内容解析。faststart 的 moov 在头部、非 faststart 的在尾部。
+ * 512KB 采样失败再加宽到 PROBE_MAX_MOOV 上限重试一次——长视频的 moov（帧索引多）
+ * 本身可达数 MB，'moov' 签名会落在 512KB 窗口外，只用小窗口会把「有 moov」
+ * 误判为「解析不出」→ 元信息全 0 照样提交给发布接口。
  */
 function probeVideoFile(filePath) {
   const fd = fs.openSync(filePath, 'r');
   try {
     const size = fs.fstatSync(fd).size;
     if (size < 8) return { width: 0, height: 0, duration: 0 };
+    const wideLen = Math.min(PROBE_MAX_MOOV + PROBE_SAMPLE, size);
     const headLen = Math.min(PROBE_SAMPLE, size);
     const head = Buffer.alloc(headLen);
     fs.readSync(fd, head, 0, headLen, 0);
     let moov = findBox(head, 0, headLen, 'moov');
+    if (!moov && wideLen > headLen) {
+      const bigHead = Buffer.alloc(wideLen);
+      fs.readSync(fd, bigHead, 0, wideLen, 0);
+      moov = findBox(bigHead, 0, wideLen, 'moov');
+    }
     if (!moov && size > PROBE_SAMPLE) {
       const tailLen = Math.min(PROBE_SAMPLE, size);
       const tail = Buffer.alloc(tailLen);
       fs.readSync(fd, tail, 0, tailLen, size - tailLen);
       moov = findMoovInTail(tail, size - tailLen, size);
+      if (!moov && wideLen > tailLen) {
+        const bigTail = Buffer.alloc(wideLen);
+        fs.readSync(fd, bigTail, 0, wideLen, size - wideLen);
+        moov = findMoovInTail(bigTail, size - wideLen, size);
+      }
     }
     if (!moov) return { width: 0, height: 0, duration: 0 };
     const moovSize = moov.end - moov.body;

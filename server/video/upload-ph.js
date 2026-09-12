@@ -30,7 +30,9 @@ async function uploadOnePh(row, creds, site, log, signal) {
     throw skipError('未配置商品编码，已跳过上传');
   }
 
-  // MMS 上传接口（preupload/reportupload）不带 Cookie：带上会返回跨区 uploaddomain 导致 400
+  // MMS 上传接口（preupload/reportupload）不带 Cookie：带上会返回跨区 uploaddomain 导致 400。
+  // 且必须 useJar:false——请求不显式带 Cookie 时，Cookie 罐里该 host 的残留 set-cookie 会被
+  // 「jar 补齐」逻辑整条带上，同样触发 400（表现为间歇性，preupload 响应下发过 cookie 即发作）
   const mmsH = {
     'content-type': 'application/json',
     accept: 'application/json, text/plain, */*',
@@ -62,6 +64,11 @@ async function uploadOnePh(row, creds, site, log, signal) {
     headers: jsonH,
     signal,
   });
+  // Cookie 失效时 creator 常返回 302/HTML 登录页（或网关错误页），items 为空——
+  // 若不区分会误报「商品不存在」跳过上传；登录态问题是硬失败，不能当 skip 处理
+  if (il.status !== 200 || !il.json) {
+    throw new Error(`商品查询失败(HTTP ${il.status})，很可能是 creator 登录态已失效。请重新登录 creator.shopee.ph 后让扩展重新抓取 Cookie 再试。响应: ${il.text.slice(0, 200)}`);
+  }
   const items = (il.json && il.json.data && il.json.data.items) || [];
   const hit = isCode ? items.find((it) => String(it.itemId) === product) : items[0];
   if (hit) {
@@ -86,6 +93,7 @@ async function uploadOnePh(row, creds, site, log, signal) {
     method: 'POST',
     url: `${S.mms}/uploadapi/api/v1/vod/preupload`,
     signal,
+    useJar: false, // MMS 接口不带 Cookie（含 jar 罐，见 mmsH 注释）
     headers: Object.assign({ 'content-type': 'application/json;charset=UTF-8' }, mmsH),
     body: JSON.stringify({
       biz: S.biz,
@@ -147,8 +155,14 @@ async function uploadOnePh(row, creds, site, log, signal) {
   const putResp = await call({
     method: 'PUT',
     url: `${uploaddomain}${objectKey}?x-id=PutObject`,
-    timeout: 300000,
+    // body 是只读一次的文件流：retry 重入会拿到已消费/已销毁的同一个流，传出 0 字节或坏数据。
+    // PUT 对固定对象键在服务端是幂等的，但请求体不可重放，故按非幂等处理——
+    // 只在「连接未建立」类错误（流尚未被消费）时重试，5xx/超时一律失败让用户重跑该行
+    idempotent: false,
+    // 超时按文件大小缩放（约 100KB/s 下限，如 100MB ≈ 17 分钟），固定 300s 对大文件慢网必超时
+    timeout: Math.max(300000, Math.ceil(fsize / 100)),
     signal,
+    useJar: false, // 上传域用 SigV4 鉴权，不带 Cookie（含 jar 罐）
     headers: Object.assign(
       {
         'Content-Type': 'video/mp4',
@@ -179,6 +193,7 @@ async function uploadOnePh(row, creds, site, log, signal) {
     url: `${S.mms}/uploadapi/api/v1/vod/reportupload`,
     signal,
     idempotent: false, // 写操作：不重放（详见 request.js call 的说明）
+    useJar: false, // MMS 接口不带 Cookie（含 jar 罐，见 mmsH 注释）
     headers: mmsH,
     body: JSON.stringify({
       vid,
@@ -197,6 +212,13 @@ async function uploadOnePh(row, creds, site, log, signal) {
     }),
   });
   log('report', `响应: ${repResp.text.slice(0, 200)}`);
+  // 上报失败若继续 task/edit/post，后续报错（视频不存在等）会掩盖真实原因，这里先校验
+  if (repResp.status !== 200) {
+    throw new Error(`reportupload 失败(HTTP ${repResp.status})。响应: ${repResp.text.slice(0, 300)}`);
+  }
+  if (repResp.json && typeof repResp.json.code === 'number' && repResp.json.code !== 0) {
+    throw new Error(`reportupload 业务失败(code=${repResp.json.code})。响应: ${repResp.text.slice(0, 300)}`);
+  }
 
   // 5. 本地探测视频元信息
   const meta = probeVideoFile(filePath);
