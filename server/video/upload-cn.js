@@ -57,6 +57,8 @@ async function mergeFiles(fids, auth, fileEtag, signal) {
     method: 'POST',
     url: `${UPLOAD}/api/v2/mergeFiles/${BIZ}`,
     signal,
+    // 写操作：响应丢失后重放会重复合并，只允许「连接未建立」类错误重试
+    idempotent: false,
     headers: {
       Authorization: auth,
       'Content-Type': 'video/mp4',
@@ -75,6 +77,7 @@ async function reportUpload({ vid, extendid, fsize, md5hexval, videourl }, signa
     method: 'POST',
     url: `${MMS}/uploadapi/api/v1/vod/reportupload`,
     signal,
+    idempotent: false, // 写操作：不重放（详见 request.js call 的说明）
     headers: {
       'content-type': 'application/json',
       accept: 'application/json, text/plain, */*',
@@ -122,6 +125,8 @@ async function videoCreate({ cookie, shopId, vid, videourl, caption, itemId, vid
     method: 'POST',
     url: `${SOLUTIONS}/sellers/video-upload/api/v1/video/create`,
     signal,
+    // 写操作：重放会在同一次点击里发出两条视频，绝不重试 5xx/超时
+    idempotent: false,
     headers: {
       'content-type': 'application/json',
       accept: 'application/json, text/plain, */*',
@@ -162,6 +167,10 @@ async function uploadOneCn(row, creds, log, signal) {
   const wholeEtag = etagFromSha1Hex(hashes.sha1);
   const videoSizeKB = Math.round(fsize / 1024);
 
+  // 前端已按所选店铺断言凭证，这里兜底：缺 shopId 会让 video/create 提交 Number(undefined)=NaN
+  if (!shopId) {
+    throw new Error('缺少店铺 ID（shopId），跨境上传需先选择要发布视频的店铺，请在大厅选择店铺后重试。');
+  }
   // 凭证统一由 resolveCnAuth 解析：优先本地已抓凭证中有效期最长的（账号级通用）→ 兜底 Cookie 换取 → 报错引导手动上传
   auth = await resolveCnAuth({ auth, cookie, shopId }, log, signal);
 
@@ -264,7 +273,12 @@ async function uploadOneCn(row, creds, log, signal) {
   if (vc.status !== 200 && vc.status !== 201) {
     throw new Error(`video/create 失败 (${vc.status}): ${vc.text.slice(0, 500)}`);
   }
-  const createCode = vc.json ? (vc.json.errorCode ?? vc.json.code) : null;
+  // 响应不是 JSON（如网关返回 200 + HTML 错误页）时无法确认发布结果，按失败处理，
+  // 否则 createCode=null 会绕过下方业务码校验，被误判为「发布成功」
+  if (!vc.json) {
+    throw new Error(`video/create 返回非 JSON 响应 (${vc.status})，无法确认发布结果: ${vc.text.slice(0, 500)}`);
+  }
+  const createCode = vc.json.errorCode ?? vc.json.code;
   const postId = (vc.json && vc.json.data && (vc.json.data.post_id ?? vc.json.data.postId)) || null;
   // solutions 接口成功码为 200000（msg="成功"，返回 post_id）；旧版接口可能用 0。有 post_id 即视为发布成功
   if (createCode != null && createCode !== 0 && createCode !== 200000 && !postId) {

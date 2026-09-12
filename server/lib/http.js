@@ -46,6 +46,39 @@ function getCookieHeader(hostname) {
   return names.map((k) => `${k}=${entry.jar[k]}`).join('; ');
 }
 
+// 按名字（大小写不敏感）找已存在的 header 键。
+// http 头名大小写不敏感，但 JS 对象是大小写敏感的：调用方传 'cookie'、这里查 'Cookie'
+// 会查不到，然后用 setHeader 语义「后写覆盖先写」，把调用方显式的 Cookie 整条顶掉。
+function findHeaderKey(headers, name) {
+  const lower = name.toLowerCase();
+  for (const k of Object.keys(headers)) {
+    if (k.toLowerCase() === lower) return k;
+  }
+  return null;
+}
+
+/**
+ * 合并 Cookie：调用方显式传入的优先（同名以显式为准），jar 只补齐显式没带的键。
+ * 空串表示不需要设置 Cookie。
+ */
+function mergeCookieHeader(explicit, jarCookie) {
+  if (!jarCookie) return explicit || '';
+  if (!explicit) return jarCookie;
+  const seen = new Set();
+  for (const part of String(explicit).split(';')) {
+    const n = part.split('=')[0].trim().toLowerCase();
+    if (n) seen.add(n);
+  }
+  const extra = String(jarCookie)
+    .split(';')
+    .map((p) => p.trim())
+    .filter((p) => {
+      const n = p.split('=')[0].trim().toLowerCase();
+      return n && !seen.has(n);
+    });
+  return extra.length ? `${explicit}; ${extra.join('; ')}` : explicit;
+}
+
 /**
  * 发送请求
  * @param {object} opts { method, url, headers, body, useJar, timeout, signal }
@@ -60,10 +93,16 @@ function request({ method = 'GET', url, headers = {}, body = null, useJar = fals
     const isStream = body && typeof body.pipe === 'function' && typeof body.on === 'function';
     const reqHeaders = Object.assign({}, headers);
     if (useJar) {
-      const cookie = getCookieHeader(u.hostname);
-      if (cookie && reqHeaders['Cookie'] === undefined) reqHeaders['Cookie'] = cookie;
+      // 显式 Cookie 优先，jar 仅补齐缺失键；统一落到 'Cookie' 单键，避免大小写各留一份
+      const jarCookie = getCookieHeader(u.hostname);
+      const key = findHeaderKey(reqHeaders, 'cookie');
+      const merged = mergeCookieHeader(key ? reqHeaders[key] : '', jarCookie);
+      if (merged) {
+        if (key && key !== 'Cookie') delete reqHeaders[key];
+        reqHeaders['Cookie'] = merged;
+      }
     }
-    if (body && !isStream && reqHeaders['Content-Length'] === undefined && reqHeaders['content-length'] === undefined) {
+    if (body && !isStream && findHeaderKey(reqHeaders, 'content-length') === null) {
       reqHeaders['Content-Length'] = Buffer.isBuffer(body) ? body.length : Buffer.byteLength(body);
     }
 
@@ -103,4 +142,4 @@ function request({ method = 'GET', url, headers = {}, body = null, useJar = fals
   });
 }
 
-module.exports = { request, _test: { cookieJars, sweepJars, JAR_TTL_MS } };
+module.exports = { request, _test: { cookieJars, sweepJars, JAR_TTL_MS, mergeCookieHeader, findHeaderKey } };

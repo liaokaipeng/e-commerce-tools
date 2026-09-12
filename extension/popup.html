@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <style>
-    body { width: 320px; font-family: "Microsoft YaHei", sans-serif; padding: 12px; margin: 0; }
+    body { width: 340px; font-family: "Microsoft YaHei", sans-serif; padding: 12px; margin: 0; box-sizing: border-box; }
     h1 { font-size: 15px; margin: 0 0 10px; color: #ee4d2d; }
+    h2 { font-size: 13px; margin: 16px 0 4px; color: #333; border-top: 1px solid #eee; padding-top: 12px; }
     p { font-size: 12px; color: #666; margin: 6px 0; line-height: 1.5; }
     .tip { background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; border-radius: 6px; padding: 8px 10px; font-size: 12px; margin: 8px 0; }
     button {
@@ -15,6 +16,16 @@
     #status { margin-top: 10px; font-size: 12px; color: #333; word-break: break-all; }
     .ok { color: #2e7d32; }
     .err { color: #c62828; }
+    /* 缓存清理区 */
+    .sub { font-size: 11px; color: #999; }
+    .cache-item { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+    .cache-item:last-of-type { border-bottom: none; }
+    .ci-main { flex: 1; min-width: 0; }
+    .ci-name { font-size: 13px; color: #333; font-weight: bold; }
+    .ci-info { font-size: 11px; color: #999; margin-top: 2px; }
+    .ci-desc { font-size: 11px; color: #aaa; margin-top: 2px; }
+    .ci-btn { width: auto; padding: 6px 12px; font-size: 12px; flex-shrink: 0; }
+    #cacheStatus { margin-top: 8px; font-size: 12px; color: #333; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -24,6 +35,11 @@
   <p>竞价 Cookie：点击下方按钮，将当前浏览器中 Shopee 卖家中心的登录 Cookie 发送到本地工具（127.0.0.1:8765）。发送后到本地网页「竞价导出」Tab 选择店铺并导出 Excel。</p>
   <button id="send">发送登录信息到本地工具</button>
   <div id="status"></div>
+
+  <h2>缓存清理</h2>
+  <p class="sub">按类别清空缓存/凭证数据；配置类（店铺清单、阈值规则、导出目录）不受影响。</p>
+  <div id="cacheList"></div>
+  <div id="cacheStatus"></div>
   <script src="popup.js"></script>
 </body>
 </html>

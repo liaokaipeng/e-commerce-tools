@@ -11,7 +11,7 @@ const props = defineProps({
   flashIds: { type: Object, required: true },
 });
 
-const emit = defineEmits(['action']);
+const emit = defineEmits(['action', 'detail']);
 
 /** 告警所属店铺名（列表里找不到时给空串，与原实现一致） */
 function shopNameOf(shopId) {
@@ -54,9 +54,10 @@ function shopNameOf(shopId) {
             <i v-if="a.status === 'recovered'" class="ai-recovered">✓ 已恢复</i>
             <i v-else-if="a.status === 'ack'" class="ai-ack">已确认</i>
           </div>
-          <div v-if="a.status === 'open' || a.status === 'ack'" class="ai-ops">
+          <div class="ai-ops">
+            <el-button size="small" @click="emit('detail', a)">详情</el-button>
             <el-button v-if="a.status === 'open'" size="small" @click="emit('action', a, 'ack')">确认</el-button>
-            <el-button size="small" type="danger" plain @click="emit('action', a, 'close')">关闭</el-button>
+            <el-button v-if="a.status === 'open' || a.status === 'ack'" size="small" type="danger" plain @click="emit('action', a, 'close')">关闭</el-button>
           </div>
         </div>
       </div>

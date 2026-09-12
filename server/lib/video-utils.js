@@ -220,6 +220,35 @@ function probeVideo(buf) {
 
 const PROBE_SAMPLE = 512 * 1024; // 头/尾采样窗口
 const PROBE_MAX_MOOV = 8 * 1024 * 1024; // moov 超过该大小跳过探测（罕见，避免读大块）
+const MOOV_SIG = Buffer.from('moov', 'latin1');
+
+/**
+ * 在尾部采样窗口内定位 moov box（非 faststart 布局：moov 在文件末尾）。
+ * 窗口起点不保证与 box 边界对齐，不能像 findBox 那样按 box 头顺序解析，
+ * 改为直接反向搜索 'moov' 签名，再由签名前 4 字节的 size 回推 box 起止。
+ * 命中条件：size 合法且 box 不越界；优先取「恰好收尾」的那个（末尾布局最可靠），
+ * 否则退回第一个合法的（容忍 moov 之后还有 free 等小 box）。
+ * @param {Buffer} tail 尾部窗口内容
+ * @param {number} tailStart 窗口在文件中的起始偏移
+ * @param {number} fileSize 文件总大小
+ * @returns {{body:number,end:number}|null}
+ */
+function findMoovInTail(tail, tailStart, fileSize) {
+  let fallback = null;
+  let idx = tail.lastIndexOf(MOOV_SIG);
+  while (idx >= 4) {
+    const boxStart = idx - 4;
+    const size = tail.readUInt32BE(boxStart);
+    const absStart = tailStart + boxStart;
+    if (size >= 8 && size <= PROBE_MAX_MOOV && absStart + size <= fileSize) {
+      const box = { body: absStart + 8, end: absStart + size };
+      if (absStart + size === fileSize) return box;
+      if (!fallback) fallback = box;
+    }
+    idx = tail.lastIndexOf(MOOV_SIG, idx - 1);
+  }
+  return fallback;
+}
 
 /**
  * 从 MP4 文件解析宽高/时长（不整文件加载）：采样文件头尾各 512KB 定位 moov，
@@ -238,8 +267,7 @@ function probeVideoFile(filePath) {
       const tailLen = Math.min(PROBE_SAMPLE, size);
       const tail = Buffer.alloc(tailLen);
       fs.readSync(fd, tail, 0, tailLen, size - tailLen);
-      moov = findBox(tail, 0, tailLen, 'moov');
-      if (moov) { moov.body += size - tailLen; moov.end += size - tailLen; }
+      moov = findMoovInTail(tail, size - tailLen, size);
     }
     if (!moov) return { width: 0, height: 0, duration: 0 };
     const moovSize = moov.end - moov.body;
@@ -258,7 +286,14 @@ function validateUploadRow(row) {
   if (!row.path) return '缺少视频路径';
   if (row.caption && row.caption.length > CAPTION_MAX_LENGTH) return `视频说明超过${CAPTION_MAX_LENGTH}字符，请精简后再上传`;
   if (row.caption && /tiktok/i.test(row.caption)) return '视频说明不能包含 tiktok 字样';
-  if (!fs.existsSync(row.path)) return `表格中填写的视频文件不存在，请检查路径是否正确: ${row.path}`;
+  let st;
+  try {
+    st = fs.statSync(row.path);
+  } catch (e) {
+    return `表格中填写的视频文件不存在，请检查路径是否正确: ${row.path}`;
+  }
+  if (st.isDirectory()) return `表格中填写的是文件夹而不是视频文件，请检查路径: ${row.path}`;
+  if (st.size === 0) return `视频文件内容为空（0 字节），请检查文件是否损坏: ${row.path}`;
   return '';
 }
 
@@ -275,6 +310,7 @@ module.exports = {
   findItemIds,
   probeVideo,
   probeVideoFile,
+  findMoovInTail,
   validateUploadRow,
   CAPTION_MAX_LENGTH,
 };

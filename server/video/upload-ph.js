@@ -144,6 +144,7 @@ async function uploadOnePh(row, creds, site, log, signal) {
     method: 'POST',
     url: `${S.mms}/uploadapi/api/v1/vod/reportupload`,
     signal,
+    idempotent: false, // 写操作：不重放（详见 request.js call 的说明）
     headers: mmsH,
     body: JSON.stringify({
       vid,
@@ -223,7 +224,7 @@ async function uploadOnePh(row, creds, site, log, signal) {
 
   // 8. task/post 发布
   log('post', '发布(task/post)...');
-  const postResp = await call({ method: 'POST', url: `${S.creator}/publish/pc/api/task/post`, headers: jsonH, body: JSON.stringify({ taskIdList: [taskId] }), signal });
+  const postResp = await call({ method: 'POST', url: `${S.creator}/publish/pc/api/task/post`, headers: jsonH, body: JSON.stringify({ taskIdList: [taskId] }), signal, idempotent: false });
   const postTask = ((postResp.json && postResp.json.data && postResp.json.data.taskList) || [])[0] || {};
   if (postResp.status !== 200 || postTask.errorCode !== 0) {
     throw new Error(`task/post 失败(${postResp.status})。响应: ${postResp.text.slice(0, 500)}`);

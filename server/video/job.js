@@ -34,12 +34,20 @@ function broadcast(jobId, data) {
   }
 }
 
-// 任务收尾：中断请求、清取消标志、断开 SSE 连接（clients 由各连接 close 自行清理，这里兜底）
+// 任务收尾：中断请求、清取消标志、断开 SSE 连接。
+// 收尾前事件已由 processJob 广播完毕，这里主动 end 掉连接，避免前端未自己 close 时连接悬挂；
+// 迟到连接的回放由 video.js 的 /api/events 按终态事件直接关闭。
 function finishJob(jobId) {
   const c = jobControllers.get(jobId);
   if (c) { try { c.abort(); } catch (e) { /* ignore */ } jobControllers.delete(jobId); }
   abortedJobs.delete(jobId);
-  clients.delete(jobId);
+  const set = clients.get(jobId);
+  if (set) {
+    for (const res of set) {
+      try { if (!res.writableEnded) res.end(); } catch (e) { /* 忽略写错误 */ }
+    }
+    clients.delete(jobId);
+  }
 }
 
 async function processJob(jobId, rows, creds, uploadOne) {

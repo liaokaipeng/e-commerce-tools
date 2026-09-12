@@ -136,6 +136,17 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
   ['requestHeaders', 'extraHeaders']
 );
 
+// popup「清空扩展凭证缓存」：内存与 chrome.storage.local 必须一起清——
+// 只清存储的话，service worker 里的 credsBySite 会在下次请求时 persist() 写回。
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg && msg.type === 'clear-creds-cache') {
+    for (const k of Object.keys(credsBySite)) delete credsBySite[k];
+    chrome.storage.local.remove('credsBySite', () => sendResponse({ ok: true }));
+    console.log('[creds] 扩展凭证缓存已清空（内存 + 本地存储）');
+    return true; // 异步响应
+  }
+});
+
 // 从前端上报请求体抓取 userid：本土上传接口（preupload/reportupload）依赖它确定账号区域，
 // 缺失会回落到跨区域导致上传失败。userId 出现在 report/add 请求体的 ext 字符串里。
 chrome.webRequest.onBeforeRequest.addListener(

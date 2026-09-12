@@ -43,13 +43,15 @@ function register({ get, post }) {
     // CORS 由 main.js 统一按白名单处理，这里不再单独写 Access-Control-Allow-Origin
     const emit = sse(res, { 'X-Accel-Buffering': 'no' });
     emit({ type: 'connected' });
-    // 迟到连接：任务已产生过事件（可能已结束）则回放，若已 finished 直接关闭
+    // 迟到连接：任务已产生过事件（可能已结束）则回放，若已到终态（finished/cancelled/fatal）直接关闭。
+    // 只认 finished 会让以 cancelled/fatal 结束的任务在回放后被重新挂进 clients，连接永不释放。
     const past = jobEvents.get(jobId) || [];
     for (const ev of past) {
       if (res.writableEnded) break;
       emit(ev);
     }
-    if (past.length && past[past.length - 1].type === 'finished') {
+    const terminal = past.length ? past[past.length - 1].type : '';
+    if (terminal === 'finished' || terminal === 'cancelled' || terminal === 'fatal') {
       res.end();
       return;
     }
@@ -75,7 +77,13 @@ function register({ get, post }) {
     let applied = 0;
     // 扩展单条推送：{ site, auth, cookie, shopId, userid }
     if (p.site && SITES[p.site]) {
-      if (p.site === 'cn' && p.shopId) setCnShop(p.shopId, credsPatch(p, false));
+      // 跨境按店铺存储：无 shopId 的扁平推送若落入 setCredsFor 会把 { shops: {...} }
+      // 整个覆盖成扁平结构，导致全部跨境店铺凭证丢失并落盘，必须明确拒绝
+      if (p.site === 'cn' && !p.shopId) {
+        sendJson(res, 400, { ok: false, message: '跨境（cn）凭证推送必须带 shopId（按店铺存储）' });
+        return;
+      }
+      if (p.site === 'cn') setCnShop(p.shopId, credsPatch(p, false));
       else setCredsFor(p.site, credsPatch(p, true));
       applied += 1;
     }
@@ -95,7 +103,15 @@ function register({ get, post }) {
             setCnShop(v.shopId, credsPatch(v, false));
           }
         } else {
-          setCredsFor(s, credsPatch(v, true));
+          // 扩展对所有站点统一推 { shops: {...} }（见 extension/background.js push）；
+          // ph 等单店铺站点归一化为扁平结构存储，否则 credsPatch 拿不到字段、凭证被静默丢弃
+          let flat = v;
+          if (v.shops && typeof v.shops === 'object') {
+            const ids = Object.keys(v.shops);
+            const first = ids.map((id) => v.shops[id]).find((sv) => sv && typeof sv === 'object');
+            flat = first ? Object.assign({ shopId: ids[0] }, first) : {};
+          }
+          setCredsFor(s, credsPatch(flat, true));
         }
       }
     }
@@ -172,6 +188,7 @@ module.exports = { register };
 module.exports._test = {
   processJob,
   jobEvents,
+  clients,
   broadcast,
   abortedJobs,
   jobControllers,

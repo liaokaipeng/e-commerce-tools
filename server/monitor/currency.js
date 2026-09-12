@@ -170,6 +170,23 @@ const rateTimer = setInterval(() => {
 }, 6 * 3600 * 1000);
 if (rateTimer.unref) rateTimer.unref();
 
+/** 清空汇率缓存（内存 + 磁盘），供缓存清理调用；下次需要时重新在线拉取 */
+function clearRateCache() {
+  liveRates = null;
+  lastAttempt = 0;
+  try {
+    fs.rmSync(RATES_FILE, { force: true });
+  } catch (e) {
+    console.warn('[监控] 清空汇率缓存失败:', e.message);
+  }
+}
+
+/** 汇率缓存状态（缓存清理面板展示用） */
+function ratesInfo() {
+  const live = liveRates || loadCachedRates();
+  return { cached: !!live, fetchedAt: (live && live.fetchedAt) || 0 };
+}
+
 /**
  * 起测前把汇率表钉死在内置静态表（离线快照），并屏蔽磁盘缓存与在线拉取。
  * 供单元测试使用：金额阈值用例断言「500 泰铢 ≈ 105 元」这类具体数值，
@@ -193,5 +210,7 @@ module.exports = {
   symbolOf,
   roundMoney,
   moneyText,
+  clearRateCache,
+  ratesInfo,
   _test: { currentRates, loadCachedRates, fetchLiveRates, lockStaticRatesForTest },
 };

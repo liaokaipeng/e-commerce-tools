@@ -24,6 +24,7 @@ const video = require('./video');
 const openapi = require('./openapi');
 const monitor = require('./monitor');
 const productExport = require('./product-export');
+const cache = require('./cache');
 
 const { LISTEN_PORT: PORT, CALLBACK_PORT } = require('./lib/config');
 // 前端为 Vite 构建产物（frontend/dist），由 main.js 托管
@@ -49,6 +50,7 @@ video.register({ get, post });
 openapi.register({ get, post });
 monitor.register({ get, post });
 productExport.register({ get, post });
+cache.register({ get, post });
 
 // ============ 工具默认目录（settings.json 持久化） ============
 // GET  /api/settings            读取各工具默认目录

@@ -78,6 +78,16 @@ function setCredsFor(site, patch) {
 function cnShops() {
   return (storedCreds.cn && storedCreds.cn.shops) || {};
 }
+// 清空全部站点凭证（内存 + 落盘），供缓存清理调用；注意必须原地删键，
+// 不能整体重赋值（video.js 等模块持有 storedCreds 的同一引用）。
+function clearCreds() {
+  for (const k of Object.keys(storedCreds)) delete storedCreds[k];
+  try {
+    fs.mkdirSync(path.dirname(CREDS_FILE), { recursive: true });
+    fs.writeFileSync(CREDS_FILE, '{}');
+  }
+  catch (e) { console.warn('清空视频凭证文件失败:', e.message); }
+}
 function getCnShop(shopId) {
   return cnShops()[String(shopId)] || { auth: '', cookie: '', userid: '' };
 }
@@ -154,5 +164,6 @@ module.exports = {
   setCredsFor,
   getCnShop,
   setCnShop,
+  clearCreds,
   resolveCnAuth,
 };

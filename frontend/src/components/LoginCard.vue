@@ -14,7 +14,7 @@ const emit = defineEmits(['refresh']);
     <div class="status-bar" :class="{ flash }">
       <el-tag :type="status.checking ? 'info' : status.loggedIn ? 'success' : 'danger'" effect="light">
         <span class="dot" :class="status.loggedIn ? 'ok' : 'err'"></span>
-        {{ status.checking ? '检查中…' : status.loggedIn ? `已登录（${status.cookieCount} 个 Cookie）` : '未登录' }}
+        {{ status.checking ? '检查中…' : status.loggedIn ? '已登录' : '未登录' }}
       </el-tag>
       <span class="status-tip">{{ status.tip }}</span>
       <el-button size="small" :loading="refreshing" @click="emit('refresh')">刷新状态</el-button>

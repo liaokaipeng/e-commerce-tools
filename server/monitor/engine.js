@@ -44,6 +44,30 @@ function replayTo(res) {
 // 时间触发升级窗口：P2 持续 24h 升 P1；P1 每 2h 重闪（大屏重新置顶提醒）
 const ESCALATE_P2_MS = 24 * 3600 * 1000;
 const REFLASH_P1_MS = 2 * 3600 * 1000;
+// 单条告警结构化明细行数上限（防止异常数据撑爆内存 / alerts.json / 接口响应）
+const DETAIL_ROWS_CAP = 200;
+
+/**
+ * 归一化告警明细：兼容两种形态——
+ * - 旧：纯文本字符串（只拼消息，无明细行）
+ * - 新：{ text, rows }，text 拼进告警消息，rows 为结构化明细行 [{ id, title, sub }] 供大屏「详情」抽屉展示
+ */
+function normalizeDetail(d) {
+  if (d == null) return { text: '', rows: [] };
+  if (typeof d === 'string') return { text: d, rows: [] };
+  if (typeof d !== 'object') return { text: String(d), rows: [] };
+  const rows = Array.isArray(d.rows)
+    ? d.rows
+      .filter((r) => r && typeof r === 'object')
+      .slice(0, DETAIL_ROWS_CAP)
+      .map((r) => ({
+        id: String(r.id == null ? '' : r.id),
+        title: String(r.title == null ? '' : r.title),
+        sub: String(r.sub == null ? '' : r.sub),
+      }))
+    : [];
+  return { text: String(d.text || ''), rows };
+}
 
 function msgOf(alert) {
   if (alert.domain === 'system') return alert.message || '采集异常';
@@ -74,11 +98,14 @@ function findAlert(shopId, ruleId) {
   return alerts.find((a) => a.shopId === shopId && a.ruleId === ruleId);
 }
 
-/** 告警消息文本：基础消息 + 可选明细（如「明细 违禁商品2/假冒商品1」） */
-function msgWithDetail(alert, details) {
-  const base = msgOf(alert);
-  const d = details && details[alert.metric] ? String(details[alert.metric]) : '';
-  return d ? base + '；' + d : base;
+/**
+ * 告警消息 + 结构化明细回填：基础消息 + 可选明细文本（如「明细 违禁商品2/假冒商品1」），
+ * 并把结构化明细行写入 alert.detailRows（本次采集未提供该指标明细时清空，避免残留旧清单）。
+ */
+function applyDetail(alert, details) {
+  const d = normalizeDetail(details && details[alert.metric]);
+  alert.message = d.text ? msgOf(alert) + '；' + d.text : msgOf(alert);
+  alert.detailRows = d.rows;
 }
 
 /**
@@ -87,7 +114,8 @@ function msgWithDetail(alert, details) {
  * @param {string} domain 采集域（order/product/health/ads/funds/aftersale）
  * @param {object} metrics { metricId: number }
  * @param {number} at 采样时间（ms）
- * @param {object} [details] { metricId: 明细文本 }，拼入告警消息（如问题商品原因分布/退货原因聚合）
+ * @param {object} [details] { metricId: 明细 }，值为纯文本（拼入消息，兼容旧调用）
+ *                           或 { text, rows } 对象（text 拼入消息；rows 为结构化明细行 [{id,title,sub}]，存入告警供大屏详情抽屉展示）
  */
 function ingest(shopId, domain, metrics, at, details) {
   const now = at || Date.now();
@@ -123,7 +151,7 @@ function ingest(shopId, domain, metrics, at, details) {
         suggest: rule.suggest,
         message: '',
       };
-      a.message = msgWithDetail(a, details);
+      applyDetail(a, details);
       alerts.push(a);
       changed.push(Object.assign({}, a, { change: 'new' }));
       continue;
@@ -139,7 +167,7 @@ function ingest(shopId, domain, metrics, at, details) {
       existing.lastAt = now;
       existing.updatedAt = now;
       existing.recoveredAt = null;
-      existing.message = msgWithDetail(existing, details);
+      applyDetail(existing, details);
       changed.push(Object.assign({}, existing, { change: 'reopen' }));
       continue;
     }
@@ -148,7 +176,7 @@ function ingest(shopId, domain, metrics, at, details) {
     existing.count = (existing.count || 1) + 1;
     const escalated = isMoreSevere(level, existing.level);
     if (escalated) existing.level = level;
-    existing.message = msgWithDetail(existing, details);
+    applyDetail(existing, details);
     if (existing.status === 'recovered') existing.status = 'open';
     existing.updatedAt = now;
     changed.push(Object.assign({}, existing, { change: escalated ? 'escalate' : 'update' }));
@@ -280,6 +308,14 @@ function closeAlert(id) {
   return Object.assign({}, a);
 }
 
+/** 清空全部告警（内存 + 落盘 + 广播 reset），供缓存清理调用；注意原地清空（_test 持有同一数组引用） */
+function clearAllAlerts() {
+  alerts.splice(0, alerts.length);
+  alertsDirty = true;
+  flushAlerts();
+  broadcast('reset', { at: Date.now() });
+}
+
 /** 关闭某店铺全部未关闭告警（停用监控时调用，重新启用后触发会重新打开）；已恢复的历史记录保留，返回关闭条数 */
 function closeShopAlerts(shopId) {
   let n = 0;
@@ -351,6 +387,7 @@ module.exports = {
   ackAlert,
   closeAlert,
   closeShopAlerts,
+  clearAllAlerts,
   getAlerts,
   summary,
   addClient,

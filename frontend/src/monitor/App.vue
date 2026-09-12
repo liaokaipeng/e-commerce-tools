@@ -20,12 +20,13 @@ const {
   projectMode, soundOn, rotateOn, sseOk, flashIds,
   rulesDrawer, ruleEdits, savingRules,
   shopsDrawer, shopConfig, savingShops, shopSearch,
+  detailDrawer, detailAlert,
   sortedShops, normalCount, reAuthCount,
   openTopAlerts, openCount, tickerText, metricChips,
   selectedShopObj, selectedFail, shownShopConfig, monitoredCount,
   selectShop, selectMetric, openRules, saveRules,
   openShopsConfig, setAllMonitored, saveShopsConfig,
-  saveCurrencyMode, manualCollect, alertAction, goOpenapi,
+  saveCurrencyMode, manualCollect, alertAction, goOpenapi, openAlertDetail,
 } = useMonitor();
 </script>
 
@@ -103,17 +104,19 @@ const {
     <!-- ===== 底部：跑马灯 + 采集状态 ===== -->
     <MonitorFooter :overview="overview" :ticker-text="tickerText" :open-top-alerts="openTopAlerts" />
 
-    <!-- ===== 规则 / 监控店铺抽屉 ===== -->
+    <!-- ===== 规则 / 监控店铺 / 告警详情抽屉 ===== -->
     <MonitorDrawers
       v-model:rulesDrawer="rulesDrawer"
       v-model:shopsDrawer="shopsDrawer"
       v-model:shopSearch="shopSearch"
+      v-model:detailDrawer="detailDrawer"
       :rule-edits="ruleEdits"
       :saving-rules="savingRules"
       :shop-config="shopConfig"
       :saving-shops="savingShops"
       :shown-shop-config="shownShopConfig"
       :monitored-count="monitoredCount"
+      :detail-alert="detailAlert"
       @save-rules="saveRules"
       @save-shops="saveShopsConfig"
       @set-all="setAllMonitored"

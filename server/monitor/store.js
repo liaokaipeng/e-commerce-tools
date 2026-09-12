@@ -230,6 +230,19 @@ function flushMeta() {
   writeJson(META_FILE, meta);
 }
 
+/** 清空监控数据（meta + 快照目录），供缓存清理调用；规则/店铺配置/金额模式保留。告警由 engine.clearAllAlerts 负责 */
+function clearData() {
+  meta = { shops: {} };
+  metaDirty = true;
+  flushMeta();
+  try {
+    fs.rmSync(SNAPSHOT_DIR, { recursive: true, force: true });
+  } catch (e) {
+    console.warn('[监控] 清空快照目录失败:', e.message);
+  }
+  ensureDirs();
+}
+
 // 防抖落盘定时器（unref 不阻塞进程退出）
 const metaTimer = setInterval(flushMeta, 5000);
 if (metaTimer.unref) metaTimer.unref();
@@ -250,4 +263,5 @@ module.exports = {
   getMeta,
   patchMeta,
   flushMeta,
+  clearData,
 };

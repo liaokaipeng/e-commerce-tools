@@ -44,6 +44,9 @@ export function useMonitor() {
   const shopConfig = ref([]);
   const savingShops = ref(false);
   const shopSearch = ref('');
+  // 告警详情抽屉：当前查看的告警快照（SSE 更新会替换 alerts 里的对象，抽屉内保持打开时的快照）
+  const detailDrawer = ref(false);
+  const detailAlert = ref(null);
   const now = ref(Date.now());
 
   let es = null;
@@ -140,6 +143,13 @@ export function useMonitor() {
   function goOpenapi() {
     try { window.parent.postMessage({ type: 'switch-tab', key: 'openapi' }, location.origin || '*'); } catch { /* 忽略 */ }
     showToast('请到「开放平台」Tab 用主账号重新授权一次，全部店铺即恢复');
+  }
+
+  /** 打开告警详情抽屉（查看该告警的具体明细清单，如断货商品 ID / 待发货订单号） */
+  function openAlertDetail(a) {
+    if (!a) return;
+    detailAlert.value = a;
+    detailDrawer.value = true;
   }
 
   // ---------- 接口调用 ----------
@@ -500,6 +510,7 @@ export function useMonitor() {
     projectMode, soundOn, rotateOn, sseOk, flashIds,
     rulesDrawer, ruleEdits, savingRules,
     shopsDrawer, shopConfig, savingShops, shopSearch,
+    detailDrawer, detailAlert,
     // 派生
     alerts: shownAlerts, sortedShops, normalCount, reAuthCount,
     openTopAlerts, openCount, tickerText, metricChips,
@@ -507,6 +518,6 @@ export function useMonitor() {
     // 动作
     selectShop, selectMetric, openRules, saveRules,
     openShopsConfig, setAllMonitored, saveShopsConfig,
-    saveCurrencyMode, manualCollect, alertAction, goOpenapi,
+    saveCurrencyMode, manualCollect, alertAction, goOpenapi, openAlertDetail,
   };
 }

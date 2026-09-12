@@ -8,7 +8,7 @@
 'use strict';
 const { sendJson, jsonAction } = require('./lib/http-utils');
 const { CALLBACK_PORT } = require('./lib/config');
-const { DEFAULT_REDIRECT, LOCAL_REDIRECT_HOSTS } = require('./openapi/constants');
+const { DEFAULT_REDIRECT, LOCAL_REDIRECT_HOSTS, API_PATH } = require('./openapi/constants');
 const { nowSec, maskToken } = require('./lib/openapi-utils');
 const store = require('./openapi/store');
 const client = require('./openapi/client');
@@ -55,6 +55,104 @@ function notifyMonitorAuthChanged() {
   try {
     require('./monitor/scheduler').notifyAuthChanged();
   } catch { /* 监控模块未加载时忽略 */ }
+}
+
+// ============ 已授权店铺列表（各工具「选择店铺」数据源） ============
+// 输出当前环境全部已授权店铺的 { category, id, name }（与 /api/stores 同构，StorePicker 直接渲染）。
+// 店铺名三级缓存：openapi-session.json(shopName) → 监控 meta.json(首次采集时补的名字) → stores.json；
+// 三处都缺才调 get_shop_info 补拉（直接签名调用、不带自动刷新），失败只记 shopNameFailedAt、
+// 10 分钟内不重试——取名失败绝不把店铺标记为失效（不影响监控采集与授权状态）。
+const SHOP_NAME_RETRY_MS = 10 * 60 * 1000;
+const SHOP_NAME_CONCURRENCY = 5;
+let shopNameTask = null; // 单飞：并发请求共享同一次拉取，避免重复打网关
+
+/** 监控大屏缓存的店铺名（meta.json，首次采集时经 get_shop_info 补过） */
+function monitorNameMap() {
+  try {
+    const meta = require('./monitor/store').getMeta();
+    const out = {};
+    for (const [id, m] of Object.entries((meta && meta.shops) || {})) {
+      if (m && m.name) out[String(id)] = String(m.name);
+    }
+    return out;
+  } catch { return {}; } // 监控模块不可用时忽略
+}
+
+/** stores.json（手工维护的店铺清单）里的店铺名 */
+function storesNameMap() {
+  try {
+    const list = require('./lib/shopee-session').loadStores();
+    const out = {};
+    for (const s of Array.isArray(list) ? list : []) {
+      if (s && s.id && s.name) out[String(s.id)] = String(s.name);
+    }
+    return out;
+  } catch { return {}; }
+}
+
+/** 直调 get_shop_info 补拉缺失店铺名（不走 callOpenApi：避免认证类失败触发刷新/标记失效） */
+async function fetchShopNames(env, shops) {
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < shops.length) {
+      const s = shops[cursor++];
+      try {
+        const j = await client.signedCall({
+          env,
+          apiPath: API_PATH.getShopInfo,
+          accessToken: s.accessToken || '',
+          shopId: s.shopId,
+          method: 'GET',
+        });
+        const pools = [j, j && j.response, j && j.data];
+        let name = '';
+        for (const p of pools) {
+          if (!p || typeof p !== 'object') continue;
+          if (!name && p.shop_name) name = String(p.shop_name);
+        }
+        if (name.trim()) store.setShop(env, s.shopId, { shopName: name.trim() });
+        else store.setShop(env, s.shopId, { shopNameFailedAt: Date.now() });
+      } catch (e) {
+        store.setShop(env, s.shopId, { shopNameFailedAt: Date.now() });
+        console.warn(`获取店铺 ${s.shopId} 名称失败: ${e.message}`);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(SHOP_NAME_CONCURRENCY, shops.length) }, worker));
+}
+
+/** 已授权店铺列表（首次调用会补拉缺失的店铺名，耗时几秒；之后走缓存秒回） */
+async function authorizedStores() {
+  const app = store.getApp();
+  if (!app) return [];
+  const mNames = monitorNameMap();
+  const sNames = storesNameMap();
+  const pending = store
+    .getShopsRaw(app.env)
+    .filter(
+      (s) =>
+        !s.shopName &&
+        !mNames[s.shopId] &&
+        !sNames[s.shopId] &&
+        !s.invalid &&
+        !(s.shopNameFailedAt && Date.now() - s.shopNameFailedAt < SHOP_NAME_RETRY_MS)
+    );
+  if (pending.length) {
+    if (!shopNameTask) {
+      shopNameTask = fetchShopNames(app.env, pending).finally(() => {
+        shopNameTask = null;
+      });
+    }
+    await shopNameTask;
+  }
+  return store
+    .getShopsRaw(app.env)
+    .map((s) => ({
+      category: '开放平台已授权',
+      id: s.shopId,
+      name: s.shopName || mNames[s.shopId] || sNames[s.shopId] || `店铺 ${s.shopId}`,
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
 }
 
 // ============ 授权回调页（浏览器从官方授权页跳回这里） ============
@@ -123,6 +221,15 @@ function register({ get, post }) {
   // 当前登录状态（token 一律打码）
   get('/api/openapi/status', (req, res) => {
     sendJson(res, 200, Object.assign({ ok: true }, store.status()));
+  });
+
+  // 已授权店铺列表（「选择店铺」数据源）：店铺ID + 店铺名
+  get('/api/openapi/stores', async (req, res) => {
+    try {
+      sendJson(res, 200, await authorizedStores());
+    } catch (e) {
+      sendJson(res, 500, { ok: false, msg: `获取已授权店铺失败：${e.message}` });
+    }
   });
 
   // 保存 App 配置（partner_id / partner_key / 环境）

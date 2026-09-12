@@ -107,6 +107,12 @@ function removeShop(env, shopId) {
   return true;
 }
 
+/** 清空全部环境下的店铺凭证（保留 App 配置），供缓存清理调用；清后各店铺需重新授权 */
+function clearShops() {
+  store.shops = {};
+  saveFile();
+}
+
 /** 当前环境下已授权店铺的对外状态（token 打码 + 有效性判断） */
 function status() {
   const app = getApp();
@@ -140,6 +146,6 @@ function status() {
 }
 
 module.exports = {
-  getApp, setApp, getShop, getShopsRaw, setShop, removeShop,
+  getApp, setApp, getShop, getShopsRaw, setShop, removeShop, clearShops,
   markShopInvalid, clearShopInvalid, status,
 };

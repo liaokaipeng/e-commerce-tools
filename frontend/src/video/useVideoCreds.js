@@ -30,23 +30,38 @@ export function useVideoCreds() {
     const s = stores.value.find((x) => String(x.id) === String(id));
     return s ? s.name : '';
   };
-  // 店铺下拉选项：展示全部已知店铺，无凭证的加标注
-  const shopOptions = computed(() => cnShops.value.map((s) => {
-    const base = shopNameOf(s.shopId) ? `${shopNameOf(s.shopId)}（${s.shopId}）` : `店铺 ${s.shopId}`;
-    return { value: s.shopId, label: s.hasCred ? base : `${base}（无凭证，需上传一次）` };
-  }));
+  // 店铺下拉选项：展示全部已知店铺（已抓凭证的排前面），无凭证的加标注。
+  // 凭证账号级通用：未抓到凭证的店铺也可选（复用同账号已抓凭证发布），
+  // 否则「任一店铺手动上传一次 → 同账号所有店铺可批量上传」落不了地。
+  const shopOptions = computed(() => {
+    const out = [];
+    const seen = new Set();
+    const add = (shopId, name, hasCred) => {
+      if (!shopId || seen.has(shopId)) return;
+      seen.add(shopId);
+      const base = name ? `${name}（${shopId}）` : `店铺 ${shopId}`;
+      out.push({ value: shopId, label: hasCred ? base : `${base}（未抓到凭证，复用同账号凭证）` });
+    };
+    for (const s of cnShops.value) if (s.hasCred) add(s.shopId, shopNameOf(s.shopId), true);
+    for (const s of cnShops.value) if (!s.hasCred) add(s.shopId, shopNameOf(s.shopId), false);
+    for (const st of stores.value) add(String(st.id), st.name || '', false);
+    return out;
+  });
 
   function applyShop(id) {
-    const s = cnShops.value.find((x) => x.shopId === String(id));
-    if (!s) return;
-    auth.value = s.auth || '';
-    cookie.value = s.cookie || '';
-    shopId.value = s.shopId;
-    userid.value = s.userid || '';
-    saveCreds();
-    if (!s.hasCred) {
-      ElMessage.warning(`店铺 ${s.shopId} 暂无有效凭证，请登录同账号下任一店铺短视频页手动上传一次以抓取凭证（凭证账号级通用）`);
+    const sid = String(id);
+    shopId.value = sid;
+    selectedShopId.value = sid;
+    const s = cnShops.value.find((x) => x.shopId === sid);
+    if (s && s.hasCred) {
+      auth.value = s.auth || '';
+      cookie.value = s.cookie || '';
+      userid.value = s.userid || '';
+    } else {
+      // 该店铺未抓到凭证：保留当前同账号凭证，仅切换发布目标
+      ElMessage.warning(`店铺 ${sid} 未抓到凭证，将复用同账号已抓取的凭证发布；如失败请在该店铺短视频页手动上传一次`);
     }
+    saveCreds();
   }
 
   function saveCreds() {
@@ -82,6 +97,20 @@ export function useVideoCreds() {
     if (el && v && document.activeElement !== el) userid.value = v;
   }
 
+  const CREDS_KEY = (s) => `shopee_creds_${s}`;
+
+  function wipeLocalCreds() {
+    // 服务端该站点凭证已被清空（如扩展「缓存清理」）：页面内存与本地镜像一并清掉，
+    // 避免服务端已空而页面仍拿旧凭证上传。localStorage 只存服务端同步来的数据，清了不丢用户输入。
+    auth.value = '';
+    cookie.value = '';
+    shopId.value = '';
+    userid.value = '';
+    selectedShopId.value = '';
+    cnShops.value = [];
+    localStorage.removeItem(CREDS_KEY(site.value));
+  }
+
   async function loadCredsFromServer(quiet) {
     try {
       const r = await fetch('/api/creds');
@@ -95,6 +124,9 @@ export function useVideoCreds() {
           if (cur.cookie) cookie.value = cur.cookie;
           setUseridIfNotFocused(cur.userid);
           if (!quiet) saveCreds();
+        } else if (auth.value || cookie.value || userid.value) {
+          // 服务端本土凭证为空（可能已被清空缓存）：同步清空页面本地残留
+          wipeLocalCreds();
         }
       } else {
         const shopsMap = (sites.cn && sites.cn.shops) || {};
@@ -113,22 +145,42 @@ export function useVideoCreds() {
           })
           .sort((a, b) => Number(b.hasCred) - Number(a.hasCred));
         cnShops.value = list;
+        if (!list.length) {
+          // 服务端跨境凭证为空（可能已被清空缓存）：同步清空页面本地残留（含所选店铺）
+          wipeLocalCreds();
+          return;
+        }
         if (list.length) {
           // 优先沿用当前所选店铺（用户手动选择或上次记住的），未选择时自动挑最近更新的有凭证店铺
           const withCred = list
             .filter((x) => x.hasCred)
             .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-          let cur = selectedShopId.value ? list.find((x) => x.shopId === selectedShopId.value) : null;
-          if (!cur) cur = withCred[0] || list[0];
-          if (selectedShopId.value !== cur.shopId) {
-            selectedShopId.value = cur.shopId;
-            saveCreds();
+          const cur = selectedShopId.value ? list.find((x) => x.shopId === selectedShopId.value) : null;
+          if (cur) {
+            if (cur.auth) auth.value = cur.auth;
+            if (cur.cookie) cookie.value = cur.cookie;
+            shopId.value = cur.shopId;
+            if (cur.userid) userid.value = cur.userid;
+            if (!quiet) saveCreds();
+          } else if (selectedShopId.value) {
+            // 所选店铺未抓到凭证：保留选择（可能是 /api/stores 里的店铺），凭证沿用最近更新的有凭证店铺
+            shopId.value = selectedShopId.value;
+            const src = withCred[0];
+            if (src) {
+              if (src.auth) auth.value = src.auth;
+              if (src.cookie) cookie.value = src.cookie;
+              if (src.userid) userid.value = src.userid;
+            }
+            if (!quiet) saveCreds();
+          } else if (withCred[0] || list[0]) {
+            const pick = withCred[0] || list[0];
+            selectedShopId.value = pick.shopId;
+            if (pick.auth) auth.value = pick.auth;
+            if (pick.cookie) cookie.value = pick.cookie;
+            shopId.value = pick.shopId;
+            if (pick.userid) userid.value = pick.userid;
+            if (!quiet) saveCreds();
           }
-          if (cur.auth) auth.value = cur.auth;
-          if (cur.cookie) cookie.value = cur.cookie;
-          shopId.value = cur.shopId;
-          if (cur.userid) userid.value = cur.userid;
-          if (!quiet) saveCreds();
         }
       }
     } catch {
@@ -140,6 +192,21 @@ export function useVideoCreds() {
     refreshingCreds.value = true;
     await loadCredsFromServer(false);
     refreshingCreds.value = false;
+    // 手动刷新后给出明确反馈：按钮变主色只是焦点态，别让用户误以为报错
+    if (isPh.value) {
+      if (auth.value.trim() || cookie.value.trim()) {
+        ElMessage.success('凭证已刷新');
+      } else {
+        ElMessage.warning('服务端暂无本土凭证：请安装扩展，登录卖家中心并在短视频页手动上传一次以自动抓取');
+      }
+    } else {
+      const n = cnShops.value.filter((s) => s.hasCred).length;
+      if (n) {
+        ElMessage.success(`凭证已刷新：共 ${n} 个店铺有凭证`);
+      } else {
+        ElMessage.warning('服务端暂无跨境凭证：请安装扩展，在任一店铺短视频页手动上传一次以自动抓取');
+      }
+    }
   }
 
   /** 执行上传前的凭证校验；返回 false 表示缺凭证（已提示用户） */

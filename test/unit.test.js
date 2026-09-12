@@ -26,8 +26,10 @@ const {
   findItemIds,
   probeVideo,
   probeVideoFile,
+  findMoovInTail,
   validateUploadRow,
 } = require('../server/lib/video-utils');
+const videoRequest = require('../server/video/request');
 const video = require('../server/video');
 const {
   extractUrls,
@@ -64,9 +66,10 @@ const {
   evaluateRule, isMoreSevere, mergeRules, levelOf,
 } = require('../server/monitor/rules');
 const {
-  listOf, orderAgeBuckets, stockOfModel, stockSummary, itemStockState, normalizeHealth,
-  totalOf, orderSnDate, formatDdMmYyyy, normalizeAdsHourly, normalizeBalance, normalizePunishments,
-  violationBreakdown, walletSummary, returnSummary, commentSummary, isPermissionDenied,
+  listOf, orderAgeBuckets, stockOfModel, stockSummary, itemStockState, itemStockTotal,
+  normalizeHealth, totalOf, orderSnDate, formatDdMmYyyy, normalizeAdsHourly, normalizeBalance,
+  normalizePunishments, violationBreakdown, walletSummary, returnSummary, commentSummary,
+  negativeCommentItems, isPermissionDenied,
 } = require('../server/monitor/collectors');
 const monitorStore = require('../server/monitor/store');
 const monitorEngine = require('../server/monitor/engine');
@@ -101,6 +104,18 @@ function buildMp4() {
   const trak = box('trak', tkhd);
   const moov = box('moov', Buffer.concat([mvhd, trak]));
   return Buffer.concat([box('ftyp', Buffer.from('isom')), moov]);
+}
+
+// 非 faststart 布局：ftyp + mdat(填充) + moov，moov 落在文件末尾（ffmpeg 默认即此布局）。
+// 文件必须 > 512KB（探测采样窗口）才能走到尾采样分支。
+function buildMp4TailMoov(padSize, trailingBox) {
+  const mvhd = box('mvhd', mvhdBody(1000, 5000));
+  const tkhd = box('tkhd', tkhdBody(1280, 720));
+  const trak = box('trak', tkhd);
+  const moov = box('moov', Buffer.concat([mvhd, trak]));
+  const parts = [box('ftyp', Buffer.from('isom')), box('mdat', Buffer.alloc(padSize)), moov];
+  if (trailingBox) parts.push(trailingBox);
+  return Buffer.concat(parts);
 }
 
 // ---------- 构造 Authorization（base64("50007225:<jwt>")） ----------
@@ -226,6 +241,49 @@ async function run() {
     }
   }
 
+  // ===== probeVideoFile：非 faststart（moov 在尾部）布局必须能探测到 =====
+  // 回归：尾采样窗口起点与 box 边界不对齐，旧实现按 box 头顺序解析 → >512KB 且 moov 在尾的文件
+  // 恒返回 0x0/0ms，导致 video/create 提交 width/height/duration 全 0。
+  {
+    const tail = path.join(os.tmpdir(), `kp_probe_tail_${Date.now()}.mp4`);
+    fs.writeFileSync(tail, buildMp4TailMoov(600 * 1024)); // 总大小 ≈ 600KB > 512KB 采样窗口
+    try {
+      const r = probeVideoFile(tail);
+      t('probeVideoFile 尾置 moov（>512KB）解析出宽高', r.width === 1280 && r.height === 720, JSON.stringify(r));
+      t('probeVideoFile 尾置 moov（>512KB）解析出时长', r.duration === 5000, JSON.stringify(r));
+      t('probeVideoFile 尾置 moov 不再返回全 0（回归旧 bug）', r.width !== 0 && r.duration !== 0);
+    } finally {
+      fs.unlinkSync(tail);
+    }
+    // moov 之后还有小 box（如 free）：moov 不恰好收尾，走兜底分支也要命中
+    const tailFree = path.join(os.tmpdir(), `kp_probe_tail_free_${Date.now()}.mp4`);
+    fs.writeFileSync(tailFree, buildMp4TailMoov(600 * 1024, box('free', Buffer.alloc(16))));
+    try {
+      t('probeVideoFile 尾置 moov 后跟 free box 仍能解析', probeVideoFile(tailFree).width === 1280, JSON.stringify(probeVideoFile(tailFree)));
+    } finally {
+      fs.unlinkSync(tailFree);
+    }
+    // >512KB 但整份文件里没有 moov → 返回 0，不抛错
+    const noMoov = path.join(os.tmpdir(), `kp_probe_nomoov_${Date.now()}.mp4`);
+    fs.writeFileSync(noMoov, Buffer.concat([box('ftyp', Buffer.from('isom')), box('mdat', Buffer.alloc(600 * 1024))]));
+    try {
+      t('probeVideoFile 大文件无 moov 返回 0 不抛错', probeVideoFile(noMoov).width === 0);
+    } finally {
+      fs.unlinkSync(noMoov);
+    }
+    // 窗口起点不对齐（前面 7 字节杂数据）：仍能由 'moov' 签名回推 box 起点
+    t('findMoovInTail 窗口起点不对齐时仍能回推 box 起点', (() => {
+      const buf = Buffer.concat([Buffer.alloc(7), box('moov', mvhdBody(1000, 5000))]);
+      const hit = findMoovInTail(buf, 0, buf.length);
+      return !!hit && hit.end === buf.length && hit.body === 7 + 8;
+    })());
+    // size 越界（声明 100 字节但窗口只有 16 字节）不误判
+    t('findMoovInTail 越界 size 不误判', (() => {
+      const b = Buffer.from('00000000646d6f6f7600000000', 'hex'); // size=100 的 moov，仅 12 字节
+      return findMoovInTail(b, 0, b.length) === null;
+    })());
+  }
+
   // ===== validateUploadRow =====
   {
     const tmp = path.join(os.tmpdir(), `kp_tools_test_${Date.now()}.mp4`);
@@ -238,6 +296,21 @@ async function run() {
       t('validateUploadRow 合法行通过', validateUploadRow({ path: tmp, caption: 'ok', product: '1' }) === '');
     } finally {
       fs.unlinkSync(tmp);
+    }
+    // 0 字节文件 / 目录：必须给出可读原因，而不是让分片读取抛 ERR_OUT_OF_RANGE
+    const empty = path.join(os.tmpdir(), `kp_tools_empty_${Date.now()}.mp4`);
+    fs.writeFileSync(empty, '');
+    try {
+      t('validateUploadRow 空文件（0 字节）报错并说明原因', validateUploadRow({ path: empty }).includes('0 字节'), validateUploadRow({ path: empty }));
+    } finally {
+      fs.unlinkSync(empty);
+    }
+    const dir = path.join(os.tmpdir(), `kp_tools_dir_${Date.now()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    try {
+      t('validateUploadRow 目录路径报错', validateUploadRow({ path: dir }).includes('文件夹'), validateUploadRow({ path: dir }));
+    } finally {
+      fs.rmdirSync(dir);
     }
   }
 
@@ -457,6 +530,53 @@ async function run() {
     finishJob(jobB);
   }
 
+  // ===== SSE：任务收尾释放连接 / 迟到连接遇终态即关闭 =====
+  {
+    const { clients, finishJob, jobEvents } = video._test;
+
+    // 收尾时应主动 end 掉该任务的 SSE 连接（而不是只从 clients 里删掉，留下悬挂连接）
+    const jobA = 'sse-finish-a';
+    const ended = [];
+    clients.set(jobA, new Set([
+      { writableEnded: false, end() { this.writableEnded = true; ended.push('alive'); } },
+      { writableEnded: true, end() { ended.push('already-ended'); } },
+    ]));
+    finishJob(jobA);
+    t('收尾：finishJob 关闭未结束的 SSE 连接并清理 clients',
+      ended.length === 1 && ended[0] === 'alive' && !clients.has(jobA), JSON.stringify(ended));
+
+    // 迟到连接回放：以 cancelled / fatal 结束的任务同样要直接关闭（旧实现只认 finished → 连接悬挂）
+    const routes = {};
+    video.register({ get: (p, fn) => { routes[p] = fn; }, post: () => {} });
+    const onEvents = routes['/api/events'];
+    t('SSE：/api/events 路由已注册', typeof onEvents === 'function');
+    for (const terminal of ['cancelled', 'fatal', 'finished']) {
+      const jobId = `sse-replay-${terminal}`;
+      jobEvents.set(jobId, [{ type: 'connected' }, { type: terminal, error: 'x' }]);
+      const res = {
+        writableEnded: false, headersSent: false, chunks: [],
+        writeHead() { this.headersSent = true; return this; },
+        write(c) { this.chunks.push(c); return true; },
+        end() { this.writableEnded = true; },
+      };
+      onEvents({ on() {} }, res, new URL(`http://127.0.0.1/api/events?jobId=${jobId}`));
+      t(`SSE：迟到连接回放 ${terminal} 后关闭连接且不挂入 clients`,
+        res.writableEnded === true && !clients.has(jobId), `ended=${res.writableEnded} inClients=${clients.has(jobId)}`);
+      jobEvents.delete(jobId);
+    }
+    // 进行中的任务：回放后保持连接并纳入 clients
+    const liveId = 'sse-replay-live';
+    jobEvents.set(liveId, [{ type: 'connected' }, { type: 'step', step: 'read', msg: 'x' }]);
+    const liveRes = {
+      writableEnded: false, writeHead() {}, write() { return true; }, end() { this.writableEnded = true; },
+    };
+    onEvents({ on() {} }, liveRes, new URL(`http://127.0.0.1/api/events?jobId=${liveId}`));
+    t('SSE：未结束任务的迟到连接保持打开并纳入 clients',
+      !liveRes.writableEnded && !!(clients.get(liveId) && clients.get(liveId).has(liveRes)));
+    finishJob(liveId);
+    jobEvents.delete(liveId);
+  }
+
   // ===== 共享层：请求体解析 / 卖家中心 URL 拼接 / 导出工具（四模块收敛后的公共契约） =====
   {
     t('parseJsonText 容忍 UTF-8 BOM', parseJsonText('\uFEFF{"a":1}').a === 1 && parseJsonText('{"b":2}').b === 2);
@@ -673,6 +793,82 @@ async function run() {
     t('cookieJars：可重复巡检不报错', (() => { sweepJars(); sweepJars(); return true; })());
   }
 
+  // ===== 共享层：Cookie 头的 jar 合并（显式优先 / 大小写不敏感 / 真实请求回归） =====
+  {
+    const { mergeCookieHeader } = httpLib._test;
+    t('mergeCookie：jar 为空时原样返回显式 cookie', mergeCookieHeader('A=1', '') === 'A=1');
+    t('mergeCookie：无显式 cookie 时用 jar', mergeCookieHeader('', 'A=1') === 'A=1');
+    t('mergeCookie：同名以显式为准且不重复', mergeCookieHeader('A=1', 'A=2; B=3') === 'A=1; B=3', mergeCookieHeader('A=1', 'A=2; B=3'));
+    t('mergeCookie：jar 补齐显式缺失的键', mergeCookieHeader('SPC_CDS=x', 'vod=1') === 'SPC_CDS=x; vod=1');
+    t('mergeCookie：同名比较大小写不敏感', mergeCookieHeader('spc_cds=x', 'SPC_CDS=y; vod=1') === 'spc_cds=x; vod=1', mergeCookieHeader('spc_cds=x', 'SPC_CDS=y; vod=1'));
+
+    // 回归：旧实现判断 reqHeaders['Cookie']（大写）但调用方传小写 'cookie' → 判断恒真 →
+    // jar 非空时追加 'Cookie' 键，经 setHeader 语义（大小写不敏感、后写覆盖）把显式 Cookie 整条顶掉。
+    const httpMod = require('http');
+    const seen = [];
+    const srv = httpMod.createServer((req, res) => {
+      seen.push(req.headers.cookie || '');
+      res.setHeader('Set-Cookie', 'VODSESSION=jarval');
+      res.end('{}');
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const url = `http://127.0.0.1:${srv.address().port}/x`;
+    try {
+      await httpLib.request({ url, useJar: true, headers: { cookie: 'SELLER=keepme' } }); // jar 尚为空
+      await httpLib.request({ url, useJar: true, headers: { cookie: 'SELLER=keepme' } }); // jar 已有 VODSESSION
+      await httpLib.request({ url, useJar: true, headers: { cookie: 'VODSESSION=mine' } });
+      t('http：jar 为空时显式 cookie 原样发出', seen[0] === 'SELLER=keepme', seen[0]);
+      t('http：jar 非空后显式 cookie 不被顶掉（回归旧 bug）', seen[1].includes('SELLER=keepme'), seen[1]);
+      t('http：jar 中显式未带的键被补齐', seen[1].includes('VODSESSION=jarval'), seen[1]);
+      t('http：同名键以显式 cookie 为准', seen[2].includes('VODSESSION=mine') && !seen[2].includes('jarval'), seen[2]);
+    } finally {
+      srv.close();
+      delete httpLib._test.cookieJars['127.0.0.1'];
+    }
+  }
+
+  // ===== 视频出站请求：分片区间校验 + 非幂等写操作不重放 =====
+  {
+    const { isSafeToRetryNonIdempotent } = videoRequest._test;
+    t('非幂等重试：连接未建立类错误可重试',
+      isSafeToRetryNonIdempotent({ code: 'ECONNREFUSED' }) && isSafeToRetryNonIdempotent({ code: 'ENOTFOUND' }) && isSafeToRetryNonIdempotent({ code: 'EAI_AGAIN' }));
+    t('非幂等重试：超时 / 5xx / 空值不可重试',
+      !isSafeToRetryNonIdempotent(new Error('请求超时')) && !isSafeToRetryNonIdempotent(new Error('上游返回 HTTP 502')) && !isSafeToRetryNonIdempotent(null));
+
+    // 空文件的分片区间：给出可读错误，而不是 createReadStream 的 ERR_OUT_OF_RANGE
+    let rcErr = null;
+    try { await videoRequest.readChunk(path.join(os.tmpdir(), 'kp_no_such_file.mp4'), 0, 0); } catch (e) { rcErr = e; }
+    t('readChunk：空区间给出可读原因而非 ERR_OUT_OF_RANGE',
+      !!rcErr && rcErr.message.includes('分片范围无效') && !/ERR_OUT_OF_RANGE/.test(rcErr.message), String(rcErr));
+
+    const httpMod = require('http');
+    // 非幂等：全是 5xx 也只请求一次（服务端可能已写入，重放会造成重复合并/重复发布）
+    let hits = 0;
+    const srv = httpMod.createServer((req, res) => { hits += 1; res.statusCode = 500; res.end('boom'); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    try {
+      let err = null;
+      try { await videoRequest.call({ method: 'POST', url: `http://127.0.0.1:${srv.address().port}/x`, body: '{}', idempotent: false }); } catch (e) { err = e; }
+      t('非幂等：5xx 只请求一次（不重放）', hits === 1 && !!err, `hits=${hits} err=${err && err.message}`);
+    } finally { srv.close(); }
+
+    // 对照：幂等请求（默认）仍按 attempts 重试
+    let hits2 = 0;
+    const srv2 = httpMod.createServer((req, res) => {
+      hits2 += 1;
+      if (hits2 === 1) { res.statusCode = 500; res.end('boom'); return; }
+      res.statusCode = 200;
+      res.end('{}');
+    });
+    await new Promise((r) => srv2.listen(0, '127.0.0.1', r));
+    try {
+      const r = await videoRequest.call({ method: 'GET', url: `http://127.0.0.1:${srv2.address().port}/x`, retries: 1 });
+      t('幂等（默认）：5xx 会重试一次后成功', hits2 === 2 && r.status === 200, `hits=${hits2}`);
+    } catch (e) {
+      t('幂等（默认）：5xx 会重试一次后成功', false, String(e));
+    } finally { srv2.close(); }
+  }
+
   // ===== 监控：规则引擎（纯函数） =====
   {
     const upRule = { id: 'r1', metric: 'order.pending_24h', type: 'threshold', thresholds: { p2: 3, p1: 8, p0: 15 } };
@@ -739,6 +935,8 @@ async function run() {
       t('itemStockState 合计 ≤ 安全线 → low', itemStockState([{ stock: 0 }, { stock: 3 }], 5) === 'low');
       t('itemStockState 合计充足 → ok', itemStockState([{ stock: 0 }, { stock: 20 }], 5) === 'ok');
       t('itemStockState 无库存数据 → null', itemStockState([{}, { stock: null }]) === null && itemStockState([]) === null);
+      t('itemStockTotal 型号库存合计', itemStockTotal([{ stock: 2 }, { stock_info_v2: { summary_info: { total_available_stock: 3 } } }]) === 5);
+      t('itemStockTotal 无库存数据 → null', itemStockTotal([{}, null]) === null && itemStockTotal([]) === null);
     }
     {
       const h = normalizeHealth({
@@ -826,6 +1024,12 @@ async function run() {
       t('commentSummary 关键词命中明细', cs.detail.includes('质量差') && cs.detail.includes('假货') && cs.detail.includes('太慢'), cs.detail);
       t('commentSummary 自定义关键词', commentSummary([{ rating_star: 1, comment: '色差', create_time: Math.floor(now / 1000) }], ['色差'], now).detail.includes('「色差」1'));
       t('commentSummary 空输入全 0', commentSummary([], null, now).count === 0);
+      const negs = negativeCommentItems([
+        { rating_star: 1, comment: '质量差', create_time: Math.floor((now - 3600000) / 1000), item_id: 1001 },
+        { rating_star: 5, comment: '很好', create_time: Math.floor((now - 3600000) / 1000) },
+        { rating_star: 2, comment: '太慢', create_time: Math.floor((now - 2 * 86400000) / 1000) }, // 超 24h
+      ], now);
+      t('negativeCommentItems 与 commentSummary 同口径（24h 内 1~3 星）', negs.length === 1 && negs[0].item_id === 1001);
     }
     t('isPermissionDenied 命中权限类错误', isPermissionDenied('开放平台错误 error_no_permission：you have no permission to access this api') === true
       && isPermissionDenied('not authorized for this api') === true && isPermissionDenied('无权访问该接口') === true);
@@ -881,6 +1085,34 @@ async function run() {
     engine.ingest('T4', 'product', { 'product.violations': 1 }, now + 120000); // 不带 details
     a = engine.getAlerts({ shopId: 'T4' })[0];
     t('引擎：无 details 时消息回退基础文案（向后兼容）', !!a && !a.message.includes('明细'), a && a.message);
+    t('引擎：无 details 时 detailRows 清空（不残留旧清单）', Array.isArray(a.detailRows) && a.detailRows.length === 0);
+    engine.closeAlert(a.id);
+  }
+
+  // ===== 监控：告警结构化明细（details { text, rows } → 消息 + detailRows） =====
+  {
+    const engine = monitorEngine;
+    const now = Date.now();
+    const rows = Array.from({ length: 250 }, (_, i) => ({ id: String(i), title: '商品 ' + i, sub: '断货' }));
+    engine.ingest('TD', 'product', { 'product.violations': 2 }, now, {
+      'product.violations': { text: '明细 违禁商品2', rows: [{ id: '111', title: '商品 111', sub: '违禁商品' }, { id: '222', title: '商品 222', sub: '假冒商品' }] },
+    });
+    let a = engine.getAlerts({ shopId: 'TD' })[0];
+    t('引擎：对象 details 的 text 拼入消息', !!a && a.message.includes('明细 违禁商品2'), a && a.message);
+    t('引擎：对象 details 的 rows 存入 detailRows', Array.isArray(a.detailRows) && a.detailRows.length === 2 && a.detailRows[0].id === '111' && a.detailRows[0].sub === '违禁商品', JSON.stringify(a && a.detailRows));
+    engine.ingest('TD', 'product', { 'product.violations': 1 }, now + 60000); // 不带 details → rows 清空
+    a = engine.getAlerts({ shopId: 'TD' })[0];
+    t('引擎：明细随采集刷新（无 details 清空 rows）', a.detailRows.length === 0);
+    engine.closeAlert(a.id);
+    // 超限截断：250 行 → 200 行（DETAIL_ROWS_CAP）
+    engine.ingest('TE', 'product', { 'product.violations': 250 }, now, { 'product.violations': { text: '', rows } });
+    a = engine.getAlerts({ shopId: 'TE' })[0];
+    t('引擎：detailRows 超限截断到 200', a.detailRows.length === 200, String(a.detailRows.length));
+    engine.closeAlert(a.id);
+    // 明细行字段统一为字符串（前端展示/复制直接用）
+    engine.ingest('TF', 'product', { 'product.violations': 1 }, now, { 'product.violations': { text: '', rows: [{ id: 123, title: null, sub: undefined }] } });
+    a = engine.getAlerts({ shopId: 'TF' })[0];
+    t('引擎：detailRows 字段归一化为字符串', a.detailRows.length === 1 && a.detailRows[0].id === '123' && a.detailRows[0].title === '' && a.detailRows[0].sub === '', JSON.stringify(a.detailRows));
     engine.closeAlert(a.id);
   }
 

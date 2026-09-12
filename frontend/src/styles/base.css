@@ -18,6 +18,15 @@
   --el-color-primary-light-9: #fdedea;
   --el-color-primary-dark-2: #be3e24;
 }
+
+/* Element Plus 按钮点击后会保留 focus 态（文字/边框/底色变主色）——主色是 Shopee
+   橙红，点完整颗按钮发红，看起来像报错，容易误导。这里把 focus 态还原为静止外观，
+   高亮只保留在 hover；键盘 Tab 操作仍有 :focus-visible 描边兜底（Element Plus 自带）。 */
+.el-button:focus:not(:hover) {
+  color: var(--el-button-text-color);
+  border-color: var(--el-button-border-color);
+  background-color: var(--el-button-bg-color);
+}
 .page {
   font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", sans-serif;
   background: var(--bg);

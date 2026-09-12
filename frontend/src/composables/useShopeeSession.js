@@ -41,6 +41,8 @@ export function useShopeeSession(readyTip = 'Cookie 已就绪，可直接选择�
   }
 
   // ---------- 店铺列表 ----------
+  // 数据源：开放平台已授权店铺（/api/openapi/stores，店铺ID + 店铺名），
+  // 不再用 stores.json（该文件只保留给后端运行时兜底取名）。
   const stores = ref([]);
   const selected = reactive(new Set());
 
@@ -48,8 +50,9 @@ export function useShopeeSession(readyTip = 'Cookie 已就绪，可直接选择�
 
   async function loadStores() {
     try {
-      const r = await fetch('/api/stores');
-      stores.value = await r.json();
+      const r = await fetch('/api/openapi/stores');
+      const d = await r.json();
+      stores.value = Array.isArray(d) ? d : [];
     } catch {
       ElMessage.error('加载店铺失败，请确认服务已启动。');
     }

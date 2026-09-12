@@ -294,17 +294,26 @@ async function run() {
       t('GET /api/creds 返回 200 且含 sites', r.status === 200 && typeof JSON.parse(r.text).sites === 'object', r.text);
     }
     {
-      // 模拟视频上传扩展推送凭证（按站点批量）
+      // 模拟视频上传扩展推送凭证（按站点批量；扩展对所有站点统一推 { shops: {...} }，见 extension/background.js push）
       const r = await req('POST', '/api/creds', {
         sites: {
           cn: { shops: { '557630453': { auth: 'NTAwMDcyMjU6dGVzdA==', cookie: 'video_upload_session_id=1; SPC_F=2' } } },
-          ph: { auth: 'NTAwMDcyMjU6cGhwZXN0', cookie: 'x'.repeat(100), shopId: '888', userid: '12345' },
+          ph: { shops: { '888': { auth: 'NTAwMDcyMjU6cGhwZXN0', cookie: 'x'.repeat(100), userid: '12345' } } },
         },
       });
       t('POST /api/creds（扩展推送）返回 ok', r.status === 200 && JSON.parse(r.text).ok === true, r.text);
       const g = await req('GET', '/api/creds');
       const j = JSON.parse(g.text);
       t('POST /api/creds 后按店铺可读回', j.sites.cn.shops['557630453'] && j.sites.cn.shops['557630453'].auth.startsWith('NTAw'), g.text);
+      t('扩展 shops 格式的 ph 凭证归一化为扁平存储', j.sites.ph && j.sites.ph.auth === 'NTAwMDcyMjU6cGhwZXN0' && String(j.sites.ph.shopId) === '888' && j.sites.ph.userid === '12345', g.text);
+    }
+    {
+      // 跨境无 shopId 的扁平推送必须被拒绝：若落入扁平分支会把 { shops } 整个覆盖，全部店铺凭证丢失
+      const r = await req('POST', '/api/creds', { site: 'cn', auth: 'NTAwMDcyMjU6eA==', cookie: 'x'.repeat(100) });
+      t('POST /api/creds 跨境缺 shopId 返回 400', r.status === 400, `status=${r.status} ${r.text}`);
+      const g = await req('GET', '/api/creds');
+      const j = JSON.parse(g.text);
+      t('被拒绝的推送不破坏已有跨境店铺凭证', !!(j.sites.cn && j.sites.cn.shops && j.sites.cn.shops['557630453']), g.text);
     }
     {
       const r = await req('POST', '/api/start', { site: 'cn', rows: [] });
@@ -504,6 +513,56 @@ async function run() {
       t('POST /api/monitor/presence 缺 active 字段视为离开（不报错）', pBad.status === 200 && JSON.parse(pBad.text).ok === true, pBad.text);
       const events = await readSSEUntil('/api/monitor/events', ['connected']);
       t('GET /api/monitor/events 首事件为 connected', events.some((e) => e.type === 'connected'), JSON.stringify(events));
+    }
+
+    console.log('  -- 缓存清理 API --');
+    {
+      // 服务端凭证文件测试前后均由 helpers 备份/恢复，这里可放心清。
+      // 造数据：先推送视频凭证，确保「清空后为空」断言有意义
+      const seed = await req('POST', '/api/creds', {
+        sites: {
+          cn: { shops: { '557630453': { auth: 'NTAwMDcyMjU6dGVzdA==', cookie: 'video_upload_session_id=1; SPC_F=2' } } },
+          ph: { shops: { '888': { auth: 'NTAwMDcyMjU6cGhwZXN0', cookie: 'x'.repeat(100), userid: '12345' } } },
+        },
+      });
+      t('POST /api/creds 造凭证数据（前置）', seed.status === 200 && JSON.parse(seed.text).ok === true, seed.text);
+
+      const list = await req('GET', '/api/cache');
+      const lj = JSON.parse(list.text);
+      const ids = (lj.categories || []).map((c) => c.id).join(',');
+      t('GET /api/cache 返回四类缓存', list.status === 200 && lj.ok === true
+        && lj.categories.length === 4
+        && ['video', 'bidding', 'openapi', 'monitor'].every((x) => ids.includes(x))
+        && lj.categories.every((c) => typeof c.info === 'string'), list.text);
+
+      const bad = await req('POST', '/api/cache/clear', { category: 'nope' });
+      t('POST /api/cache/clear 未知类别返回 400', bad.status === 400, `status=${bad.status} ${bad.text}`);
+
+      const cv = await req('POST', '/api/cache/clear', { category: 'video' });
+      const cvj = JSON.parse(cv.text);
+      t('清空视频上传凭证返回 ok', cv.status === 200 && cvj.ok === true, cv.text);
+      const g = JSON.parse((await req('GET', '/api/creds')).text);
+      const videoEmpty = !g.sites || Object.keys(g.sites).length === 0
+        || (!g.sites.cn && !g.sites.ph)
+        || (!((g.sites.cn && g.sites.cn.shops && Object.keys(g.sites.cn.shops).length) || (g.sites.ph && (g.sites.ph.auth || g.sites.ph.cookie))));
+      t('清空后 /api/creds 无任何凭证', videoEmpty, JSON.stringify(g));
+      const videoInfo = JSON.parse((await req('GET', '/api/cache')).text).categories.find((c) => c.id === 'video');
+      t('video 类别 info 反映已清空', videoInfo.info.includes('0 个店铺') && videoInfo.info.includes('无凭证'), videoInfo.info);
+
+      const cb = await req('POST', '/api/cache/clear', { category: 'bidding' });
+      t('清空竞价登录 Cookie 返回 ok', cb.status === 200 && JSON.parse(cb.text).ok === true, cb.text);
+      t('清空后 bidding-session.json 已删除', !fs.existsSync(path.join(ROOT, 'server', 'data', 'bidding-session.json')));
+
+      const co = await req('POST', '/api/cache/clear', { category: 'openapi' });
+      t('清空开放平台店铺 Token 返回 ok', co.status === 200 && JSON.parse(co.text).ok === true, co.text);
+
+      const cm = await req('POST', '/api/cache/clear', { category: 'monitor' });
+      t('清空监控数据返回 ok', cm.status === 200 && JSON.parse(cm.text).ok === true, cm.text);
+      const al = JSON.parse((await req('GET', '/api/monitor/alerts')).text);
+      t('清空监控后告警列表为空', al.ok === true && al.alerts.length === 0, JSON.stringify(al));
+
+      const empty = await req('POST', '/api/cache/clear', {});
+      t('POST /api/cache/clear 缺类别返回 400', empty.status === 400, `status=${empty.status}`);
     }
 
     console.log('  -- 404 兜底 --');

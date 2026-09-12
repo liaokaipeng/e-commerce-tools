@@ -27,6 +27,47 @@ const NEGATIVE_STAR_MAX = 3; // 差评判定：1~3 星
 // 差评关键词（告警明细用；命中仅作展示，不影响差评计数口径）
 const COMMENT_KEYWORDS = ['假货', '假的', '质量差', '很烂', '垃圾', '不满意', '太慢', '破损', '坏了'];
 
+// ---------- 告警结构化明细（rows：[{ id, title, sub }]，行数上限由引擎统一截断） ----------
+const SNIPPET_MAX = 60;
+
+/** 截断长文本（明细行展示用） */
+function snippet(s, n) {
+  const max = n || SNIPPET_MAX;
+  const t = String(s == null ? '' : s).trim();
+  return t.length > max ? t.slice(0, max) + '…' : t;
+}
+
+/** 组装明细对象：text 拼进告警消息（可为空），rows 进大屏告警详情抽屉 */
+function detail(text, rows) {
+  return { text: text || '', rows: Array.isArray(rows) ? rows : [] };
+}
+
+/** Unix 秒 → 'YYYY-MM-DD HH:mm'（无效值返回空串） */
+function fmtSec(ts) {
+  const n = Number(ts);
+  if (!isFinite(n) || n <= 0) return '';
+  const d = new Date(n * 1000);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** order_sn 的 YYMMDD → 'YYYY-MM-DD'（解析失败返回空串） */
+function snDateText(sn) {
+  const d = orderSnDate(sn);
+  if (!d) return '';
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** 提取对象里第一个非空字段值（接口字段未实测时多键兜底） */
+function firstOf(obj, keys) {
+  for (const k of keys) {
+    const v = obj ? obj[k] : undefined;
+    if (v !== undefined && v !== null && v !== '') return v;
+  }
+  return null;
+}
+
 const round2 = (n) => Math.round(n * 100) / 100;
 
 /** 取响应里的通用列表（response/response.data/顶层多字段兜底） */
@@ -141,6 +182,17 @@ function stockSummary(items, lowLine) {
   return { out_of_stock: out, low_stock: low };
 }
 
+/** 商品库存合计（纯函数）：全部型号库存求和，无任何库存数据返回 null */
+function itemStockTotal(models) {
+  let total = null;
+  for (const m of models || []) {
+    const s = stockOfModel(m);
+    if (s == null) continue;
+    total = (total || 0) + s;
+  }
+  return total;
+}
+
 /**
  * 商品粒度库存状态（纯函数）：一个商品的库存 = 其全部型号库存之和，
  * 全 0 视为断货（避免停产变体把「断货SKU数」撑爆），≤ 安全线视为低库存。
@@ -148,14 +200,9 @@ function stockSummary(items, lowLine) {
  * @returns {'out'|'low'|'ok'|null} null=无可用库存数据
  */
 function itemStockState(models, lowLine) {
-  const line = typeof lowLine === 'number' ? lowLine : LOW_STOCK_LINE;
-  let total = null;
-  for (const m of models || []) {
-    const s = stockOfModel(m);
-    if (s == null) continue;
-    total = (total || 0) + s;
-  }
+  const total = itemStockTotal(models);
   if (total == null) return null;
+  const line = typeof lowLine === 'number' ? lowLine : LOW_STOCK_LINE;
   if (total <= 0) return 'out';
   if (total <= line) return 'low';
   return 'ok';
@@ -324,6 +371,21 @@ function returnSummary(returns, nowMs) {
   return { count, detail };
 }
 
+/** 近 24h 内 1~3 星的原始评论（结构化明细行用，与 commentSummary 同口径） */
+function negativeCommentItems(items, nowMs) {
+  const now = nowMs || Date.now();
+  const out = [];
+  for (const c of items || []) {
+    if (!c || typeof c !== 'object') continue;
+    const ct = c.create_time != null ? Number(c.create_time) * 1000 : NaN;
+    if (!isFinite(ct) || ct > now || now - ct > AFTERSALE_WINDOW_MS) continue;
+    const star = Number(c.rating_star);
+    if (!isFinite(star) || star > NEGATIVE_STAR_MAX) continue;
+    out.push(c);
+  }
+  return out;
+}
+
 /**
  * 差评汇总（纯函数）：近 24h 内 1~3 星评价数 + 差评文本关键词命中分布（top5）。
  * 关键词仅用于告警明细展示，不影响差评计数口径（差评 = 星级判定）。
@@ -390,19 +452,39 @@ async function collectDomain(shopId, domain) {
 
 async function collectOrderDomain(shopId) {
   const metrics = {};
+  const details = {};
   const errors = [];
   const now = Date.now();
   try {
     const orders = await collectOrdersByStatus(shopId, 'READY_TO_SHIP');
-    const buckets = orderAgeBuckets(orders, now);
-    metrics['order.pending_12_24h'] = buckets.pending_12_24h;
-    metrics['order.pending_24h'] = buckets.pending_24h;
+    const today0 = new Date(now);
+    today0.setHours(0, 0, 0, 0);
+    const todaySns = [];
+    const olderSns = [];
+    for (const o of orders || []) {
+      const sn = o && o.order_sn;
+      const d = orderSnDate(sn);
+      if (!d) continue;
+      (d.getTime() >= today0.getTime() ? todaySns : olderSns).push(sn);
+    }
+    metrics['order.pending_12_24h'] = todaySns.length;
+    metrics['order.pending_24h'] = olderSns.length;
+    details['order.pending_12_24h'] = detail('', todaySns.map((sn) => ({
+      id: sn, title: sn, sub: `${snDateText(sn) || '今日'} 创建·待发货`,
+    })));
+    details['order.pending_24h'] = detail('', olderSns.map((sn) => ({
+      id: sn, title: sn, sub: `${snDateText(sn) || '更早'} 创建·待发货（超 24h 风险）`,
+    })));
   } catch (e) {
     errors.push('待发货订单：' + e.message);
   }
   try {
     const cancels = await collectOrdersByStatus(shopId, 'IN_CANCEL');
+    const sns = (cancels || []).map((o) => o && o.order_sn).filter(Boolean);
     metrics['order.cancel_pending'] = cancels.length;
+    details['order.cancel_pending'] = detail('', sns.map((sn) => ({
+      id: sn, title: sn, sub: '买家申请取消·待处理',
+    })));
   } catch (e) {
     errors.push('取消申请：' + e.message);
   }
@@ -421,11 +503,14 @@ async function collectOrderDomain(shopId) {
       if (!cursor) break;
     }
     metrics['firstmile.unbound'] = orders.length;
+    details['firstmile.unbound'] = detail('', orders
+      .map((o) => o && o.order_sn).filter(Boolean)
+      .map((sn) => ({ id: sn, title: sn, sub: '首公里未交接·待打单发货' })));
   } catch (e) {
     errors.push('首公里：' + e.message);
   }
   if (Object.keys(metrics).length === 0) throw new Error(errors.join('；') || '订单域无可用数据');
-  return { domain: 'order', metrics, errors };
+  return { domain: 'order', metrics, details, errors };
 }
 
 async function collectProductDomain(shopId) {
@@ -463,19 +548,28 @@ async function collectProductDomain(shopId) {
     try {
       let out = 0;
       let low = 0;
+      const outRows = [];
+      const lowRows = [];
       for (const id of ids.slice(0, ITEMS_PER_SCAN)) {
         try {
           const j = await callOpenApi('/api/v2/product/get_model_list', { item_id: Number(id) }, { shopId, method: 'GET' });
           const models = listOf(j, ['model', 'models']);
           const st = itemStockState(models);
-          if (st === 'out') out += 1;
-          else if (st === 'low') low += 1;
+          if (st === 'out') {
+            out += 1;
+            outRows.push({ id, title: id, sub: `库存合计 0（断货）` });
+          } else if (st === 'low') {
+            low += 1;
+            lowRows.push({ id, title: id, sub: `库存合计 ${itemStockTotal(models)}（≤ 安全线 ${LOW_STOCK_LINE} 件）` });
+          }
         } catch (e) {
           // 单品失败（如套装/下架中）跳过，不影响整域
         }
       }
       metrics['product.out_of_stock'] = out;
       metrics['product.low_stock'] = low;
+      details['product.out_of_stock'] = detail('', outRows);
+      details['product.low_stock'] = detail('', lowRows);
     } catch (e) {
       errors.push('库存：' + e.message);
     }
@@ -497,8 +591,14 @@ async function collectProductDomain(shopId) {
       if (list.length < PAGE_SIZE) break;
     }
     metrics['product.violations'] = total != null ? total : items.length;
-    const detail = violationBreakdown(items);
-    if (detail) details['product.violations'] = '明细 ' + detail;
+    const breakdown = violationBreakdown(items);
+    if (breakdown || items.length) {
+      details['product.violations'] = detail('明细 ' + breakdown, items.map((it) => ({
+        id: String(it && it.item_id != null ? it.item_id : ''),
+        title: String(it && it.item_id != null ? it.item_id : '未知商品'),
+        sub: VIOLATION_REASON_NAMES[it && it.reason] || (it && it.reason != null ? '其他(' + it.reason + ')' : '未知原因'),
+      })));
+    }
   } catch (e) {
     errors.push('问题商品：' + e.message);
   }
@@ -524,6 +624,15 @@ async function collectHealthDomain(shopId) {
     const j = await callOpenApi('/api/v2/account_health/get_penalty_point_history', {}, { shopId, method: 'GET' });
     const total = totalOf(j);
     metrics['health.penalty_points'] = total != null ? total : 0;
+    // 扣分明细兜底（接口返回列表字段未实测，多键防御式提取；取不到就没有明细行）
+    const plist = listOf(j, ['penalty_point_list', 'penalty_points_list', 'history_list']);
+    if (plist.length) {
+      details['health.penalty_points'] = detail('', plist.map((x, i) => {
+        const o = x || {};
+        const id = firstOf(o, ['penalty_point_id', 'penalty_id', 'id']) || 'No.' + (i + 1);
+        return { id: String(id), title: String(id), sub: snippet(firstOf(o, ['reason', 'description', 'title']) || '扣分记录') };
+      }));
+    }
   } catch (e) {
     errors.push('扣分记录：' + e.message);
   }
@@ -536,7 +645,15 @@ async function collectHealthDomain(shopId) {
     }, { shopId, method: 'GET' });
     const p = normalizePunishments(j);
     metrics['health.punishments'] = p.count;
-    if (p.detail) details['health.punishments'] = '处罚级别 ' + p.detail;
+    const plist = (j && j.response && Array.isArray(j.response.punishment_list)) ? j.response.punishment_list : [];
+    if (p.detail || plist.length) {
+      details['health.punishments'] = detail('处罚级别 ' + p.detail, plist.map((x, i) => {
+        const o = x || {};
+        const id = firstOf(o, ['punishment_id', 'punishment_log_id', 'log_id', 'id']) || 'No.' + (i + 1);
+        const tier = PUNISHMENT_TIER_NAMES[o.reason] || (o.reason != null ? '类型' + o.reason : '未知类型');
+        return { id: String(id), title: String(id), sub: tier + (o.grant_time ? '·' + fmtSec(o.grant_time) : '') };
+      }));
+    }
   } catch (e) {
     errors.push('处罚记录：' + e.message);
   }
@@ -602,6 +719,7 @@ async function collectFundsDomain(shopId) {
   try {
     let total = 0;
     let got = false;
+    const payoutRows = [];
     for (let page = 1; page <= MAX_PAGES; page++) {
       const j = await callOpenApi('/api/v2/payment/get_payout_detail', {
         payout_time_from: nowSec - FUNDS_WINDOW_DAYS * 86400,
@@ -612,12 +730,24 @@ async function collectFundsDomain(shopId) {
       const resp = (j && j.response) || {};
       const list = Array.isArray(resp.payout_list) ? resp.payout_list : [];
       for (const p of list) {
-        const amt = p && p.payout_info ? Number(p.payout_info.payout_amount) : NaN;
-        if (isFinite(amt)) { total += amt; got = true; }
+        const info = (p && p.payout_info) || {};
+        const amt = Number(info.payout_amount);
+        if (isFinite(amt)) {
+          total += amt;
+          got = true;
+          payoutRows.push({
+            id: String(firstOf(info, ['payout_id', 'payout_sn']) || ''),
+            title: '金额 ' + round2(amt),
+            sub: fmtSec(firstOf(info, ['payout_time', 'create_time'])),
+          });
+        }
       }
       if (!resp.more || list.length < PAGE_SIZE) break;
     }
-    if (got) metrics['funds.payout_15d'] = round2(total);
+    if (got) {
+      metrics['funds.payout_15d'] = round2(total);
+      details['funds.payout_15d'] = detail('', payoutRows);
+    }
     anyOk = true;
   } catch (e) {
     errors.push('打款明细：' + e.message);
@@ -626,6 +756,7 @@ async function collectFundsDomain(shopId) {
   try {
     let total = 0;
     let got = false;
+    const escrowRows = [];
     for (let page = 1; page <= MAX_PAGES; page++) {
       const j = await callOpenApi('/api/v2/payment/get_escrow_list', {
         release_time_from: nowSec - FUNDS_WINDOW_DAYS * 86400,
@@ -637,13 +768,21 @@ async function collectFundsDomain(shopId) {
       const list = Array.isArray(resp.escrow_list) ? resp.escrow_list : [];
       for (const it of list) {
         const amt = it ? Number(it.payout_amount) : NaN;
-        if (isFinite(amt)) { total += amt; got = true; }
+        if (isFinite(amt)) {
+          total += amt;
+          got = true;
+          escrowRows.push({
+            id: String(firstOf(it, ['escrow_id', 'order_sn']) || ''),
+            title: '金额 ' + round2(amt),
+            sub: fmtSec(firstOf(it, ['release_time', 'create_time'])),
+          });
+        }
       }
       if (!resp.more || list.length < PAGE_SIZE) break;
     }
     if (got && metrics['funds.payout_15d'] == null) {
       metrics['funds.payout_15d'] = round2(total);
-      details['funds.payout_15d'] = '近15天已释放担保金额合计（官方担保列表无状态字段，仅已释放记录）';
+      details['funds.payout_15d'] = detail('近15天已释放担保金额合计（官方担保列表无状态字段，仅已释放记录）', escrowRows);
     }
     anyOk = true;
   } catch (e) {
@@ -668,6 +807,21 @@ async function collectFundsDomain(shopId) {
     metrics['funds.pending_txn'] = s.pending;
     metrics['funds.failed_txn'] = s.failed;
     if (s.balance != null) metrics['funds.wallet_balance'] = s.balance;
+    const pendingRows = [];
+    const failedRows = [];
+    for (const t of txns || []) {
+      const st = String((t && t.status) || '').toUpperCase();
+      if (st !== 'PENDING' && st !== 'INITIAL' && st !== 'FAILED') continue;
+      const id = String(firstOf(t, ['transaction_id', 'wallet_transaction_id', 'reference_id']) || '');
+      const row = {
+        id,
+        title: id || ('流水·' + st),
+        sub: `${st}${t && t.amount != null ? '·金额 ' + t.amount : ''}${t && t.create_time ? '·' + fmtSec(t.create_time) : ''}`,
+      };
+      (st === 'FAILED' ? failedRows : pendingRows).push(row);
+    }
+    details['funds.pending_txn'] = detail('', pendingRows);
+    details['funds.failed_txn'] = detail('', failedRows);
     anyOk = true;
   } catch (e) {
     errors.push('钱包流水：' + e.message);
@@ -742,7 +896,7 @@ async function scanCommentsByItems(shopId, nowMs) {
       // 单品失败（已下架等）跳过，不影响整域
     }
   }
-  return commentSummary(all, COMMENT_KEYWORDS, nowMs);
+  return Object.assign(commentSummary(all, COMMENT_KEYWORDS, nowMs), { items: negativeCommentItems(all, nowMs) });
 }
 
 async function collectAftersaleDomain(shopId) {
@@ -769,23 +923,43 @@ async function collectAftersaleDomain(shopId) {
     }
     const s = returnSummary(returns, nowMs);
     metrics['aftersale.returns_24h'] = s.count;
-    if (s.detail) details['aftersale.returns_24h'] = '原因分布 ' + s.detail;
+    const recent = returns.filter((r) => {
+      const ct = r && r.create_time != null ? Number(r.create_time) * 1000 : NaN;
+      return isFinite(ct) && ct <= nowMs && nowMs - ct <= AFTERSALE_WINDOW_MS;
+    });
+    if (s.detail || recent.length) {
+      details['aftersale.returns_24h'] = detail('原因分布 ' + s.detail, recent.map((r) => {
+        const o = r || {};
+        const id = String(firstOf(o, ['return_id', 'return_sn', 'id']) || '');
+        const reason = RETURN_REASON_NAMES[o.reason] || String(o.reason || '未知原因');
+        return { id, title: id || '退货申请', sub: `${reason}${o.status ? '·' + String(o.status) : ''}·${fmtSec(o.create_time)}` };
+      }));
+    }
     anyOk = true;
   } catch (e) {
     errors.push('退货申请：' + e.message);
   }
   // 2) 差评扫描（全店游标模式优先，失败/为空降级逐商品抽查）
-  try {
-    const s = await scanCommentsShopWide(shopId, nowMs);
+  const applyCommentResult = (s) => {
     metrics['aftersale.negative_24h'] = s.count;
-    if (s.detail) details['aftersale.negative_24h'] = '关键词命中 ' + s.detail;
+    if (s.detail || (s.items && s.items.length)) {
+      details['aftersale.negative_24h'] = detail('关键词命中 ' + s.detail, (s.items || []).map((c) => {
+        const o = c || {};
+        const id = String(firstOf(o, ['comment_id', 'id']) || '');
+        return {
+          id,
+          title: `★${o.rating_star != null ? o.rating_star : '?'} ${snippet(o.comment, 40)}`,
+          sub: `商品 ${o.item_id != null ? o.item_id : '?'}·${fmtSec(o.create_time)}`,
+        };
+      }));
+    }
     anyOk = true;
+  };
+  try {
+    applyCommentResult(await scanCommentsShopWide(shopId, nowMs));
   } catch (e) {
     try {
-      const s = await scanCommentsByItems(shopId, nowMs);
-      metrics['aftersale.negative_24h'] = s.count;
-      if (s.detail) details['aftersale.negative_24h'] = '关键词命中 ' + s.detail;
-      anyOk = true;
+      applyCommentResult(await scanCommentsByItems(shopId, nowMs));
     } catch (e2) {
       errors.push('差评扫描：' + e2.message);
     }
@@ -810,6 +984,7 @@ module.exports = {
   stockOfModel,
   stockSummary,
   itemStockState,
+  itemStockTotal,
   normalizeHealth,
   formatDdMmYyyy,
   normalizeAdsHourly,
@@ -819,5 +994,6 @@ module.exports = {
   walletSummary,
   returnSummary,
   commentSummary,
+  negativeCommentItems,
   isPermissionDenied,
 };
