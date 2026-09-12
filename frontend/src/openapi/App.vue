@@ -1,6 +1,7 @@
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { runSSE } from '../composables/useToolPage.js';
 
 // 开放平台 API 登录：App 配置 → 生成授权链接 → 店铺授权回调换 token → 店铺管理。
 // 后端：/api/openapi/*（server/openapi.js），token 存本机 server/data/openapi-session.json（不入库）。
@@ -207,6 +208,65 @@ async function refreshShop(shopId) {
   });
 }
 
+// ---------- 批量刷新 token ----------
+// 后端按共享 token 分组去重后逐组整组续期（见 server/openapi/refresh-all.js），这里只消费 SSE 进度。
+const batch = reactive({ running: false, jobId: '', done: 0, total: 0, synced: 0, failed: 0, skipped: 0 });
+const batchProgress = computed(() => {
+  const p = batch.total ? `${batch.done}/${batch.total} 组` : '准备中';
+  const tail = batch.skipped ? `，跳过 ${batch.skipped} 店` : '';
+  return `批量刷新中…（${p}，已续期 ${batch.synced} 店${tail}）`;
+});
+
+async function refreshAll() {
+  if (batch.running) return;
+  Object.assign(batch, { running: true, jobId: '', done: 0, total: 0, synced: 0, failed: 0, skipped: 0 });
+  try {
+    await runSSE('/api/openapi/refresh-all/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    }, (ev) => {
+      if (ev.type === 'start') {
+        batch.jobId = ev.jobId || '';
+        batch.total = ev.totalGroups || 0;
+      } else if (ev.type === 'group-done') {
+        batch.done += 1;
+        if (ev.ok) batch.synced += ev.synced || 0;
+        else batch.failed += 1;
+      } else if (ev.type === 'skipped') {
+        batch.skipped += ev.size || 0;
+      } else if (ev.type === 'summary') {
+        batch.synced = ev.synced || 0;
+        batch.failed = ev.failed || 0;
+        batch.skipped = ev.skipped || batch.skipped;
+        ElMessage.success(ev.msg || '批量刷新完成');
+      } else if (ev.type === 'cancelled') {
+        ElMessage.warning(ev.msg || '已取消批量刷新');
+      } else if (ev.type === 'fatal') {
+        ElMessage.error(ev.msg || '批量刷新失败');
+      }
+    }, (msg) => ElMessage.error(msg));
+  } catch (e) {
+    ElMessage.error('批量刷新失败：' + e.message);
+  } finally {
+    batch.running = false;
+    batch.jobId = '';
+    await refreshStatus();
+  }
+}
+
+// 取消批量刷新：后端在下一个组间门控点退出（进行中的那一组会跑完）
+async function cancelRefreshAll() {
+  if (!batch.jobId) return;
+  try {
+    await fetch('/api/openapi/refresh-all/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobId: batch.jobId }),
+    });
+  } catch { /* 忽略：SSE 断开后后端也会按取消收尾 */ }
+}
+
 async function removeShop(shopId) {
   try {
     await ElMessageBox.confirm(`确定删除店铺 ${shopId} 的授权吗？删除后相关功能将无法调用官方接口。`, '删除授权', {
@@ -326,8 +386,17 @@ onUnmounted(() => {
 
       <el-card shadow="never" class="card">
         <template #header>
-          ③ 已授权店铺
-          <el-button size="small" style="float: right" :loading="status.loading" @click="refreshStatus(true)">刷新状态</el-button>
+          <div class="card-header-row">
+            <span>③ 已授权店铺</span>
+            <div class="row">
+              <span v-if="batch.running" class="hint">{{ batchProgress }}</span>
+              <el-button size="small" :disabled="batch.running" :loading="status.loading" @click="refreshStatus(true)">刷新状态</el-button>
+              <el-button size="small" type="warning" :loading="batch.running" :disabled="!status.shops.length" @click="refreshAll">
+                批量刷新 token
+              </el-button>
+              <el-button v-if="batch.running" size="small" type="danger" plain @click="cancelRefreshAll">取消</el-button>
+            </div>
+          </div>
         </template>
         <el-table v-loading="status.loading" :data="status.shops" empty-text="暂无已授权店铺，请先完成 ② 店铺授权">
           <el-table-column prop="shopId" label="店铺 ID" min-width="140" />
@@ -347,18 +416,19 @@ onUnmounted(() => {
           </el-table-column>
           <el-table-column label="操作" width="230">
             <template #default="{ row }">
-              <el-button size="small" :loading="busyShop.has(row.shopId)" @click="testShop(row.shopId)">测试</el-button>
-              <el-button size="small" type="warning" :disabled="busyShop.has(row.shopId)" @click="refreshShop(row.shopId)">
+              <el-button size="small" :disabled="batch.running" :loading="busyShop.has(row.shopId)" @click="testShop(row.shopId)">测试</el-button>
+              <el-button size="small" type="warning" :disabled="busyShop.has(row.shopId) || batch.running" @click="refreshShop(row.shopId)">
                 刷新 token
               </el-button>
-              <el-button size="small" type="danger" plain :disabled="busyShop.has(row.shopId)" @click="removeShop(row.shopId)">
+              <el-button size="small" type="danger" plain :disabled="busyShop.has(row.shopId) || batch.running" @click="removeShop(row.shopId)">
                 删除
               </el-button>
             </template>
           </el-table-column>
         </el-table>
         <div class="hint" style="margin-top: 8px">
-          access_token 约 4 小时有效（过期自动刷新）；refresh_token 约 30 天有效，长期不用需重新授权。
+          access_token 约 4 小时有效（过期自动刷新）；refresh_token 约 30 天有效，长期不用需重新授权。<br />
+          批量刷新按共享 token 分组整组续期（每组只刷一次），不会因逐店刷新把同组其它店铺的凭证作废；标「需重新授权」的店铺会被跳过，重新授权后自动恢复。
         </div>
       </el-card>
 

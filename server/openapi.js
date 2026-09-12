@@ -12,6 +12,8 @@ const { DEFAULT_REDIRECT, LOCAL_REDIRECT_HOSTS, API_PATH } = require('./openapi/
 const { nowSec, maskToken } = require('./lib/openapi-utils');
 const store = require('./openapi/store');
 const client = require('./openapi/client');
+// 批量刷新 token 链路（分组编排 + SSE + 暂停/取消）拆在子模块，这里只注册路由
+const refreshAll = require('./openapi/refresh-all');
 
 /**
  * 校验授权回调地址，返回 { url, mode }：
@@ -334,6 +336,10 @@ function register({ get, post }) {
         : 'Token 刷新成功（旧 refresh_token 已失效）',
     });
   }));
+
+  // 批量刷新全部已授权店铺的 token（SSE 流式进度）：内部按共享 token 分组去重，
+  // 每组只刷一次（逐店刷新会作废旧 refresh_token、把同组店铺拖成「需重新授权」，见 refresh-all.js）
+  refreshAll.register({ post });
 
   // 删除某店铺授权（幂等）
   post('/api/openapi/remove-shop', jsonAction('/api/openapi/remove-shop', (body, req, res) => {
