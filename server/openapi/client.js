@@ -177,7 +177,7 @@ function getAuthUrl(env, redirect) {
   const sign = hmacHex(app.partnerKey, base);
   const params = { partner_id: app.partnerId, timestamp, sign, redirect };
   const authUrl = `${host}${API_PATH.authPartner}?${new URLSearchParams(params).toString()}`;
-  return { authUrl, expire: 0 };
+  return { authUrl };
 }
 
 /**
@@ -185,11 +185,26 @@ function getAuthUrl(env, redirect) {
  * 主账号授权时回调只带 code + main_account_id（无 shop_id），这里用 main_account_id 换，
  * 官方返回 shop_id_list（该主账号下全部已授权店铺）。
  */
+/**
+ * 取网关响应中的有效载荷：多数接口把结果放顶层，少数接口/网关版本会包一层 response / data。
+ * 换 token、刷新 token 共用同一口径，避免同一份响应出现两套解析。
+ * @param {object} j 网关原始响应
+ * @param {string[]} keys 判定「命中该层」的字段名（任一字段有值即认为该层是目标载荷）
+ */
+function pickPayload(j, keys) {
+  for (const p of [j, j && j.response, j && j.data]) {
+    if (!p || typeof p !== 'object') continue;
+    if (keys.some((k) => p[k] !== undefined && p[k] !== null && p[k] !== '')) return p;
+  }
+  return j;
+}
+
 async function exchangeToken(env, { code, shopId, mainAccountId }) {
   const business = { code };
   if (shopId) business.shop_id = shopId;
   if (mainAccountId) business.main_account_id = mainAccountId;
-  const j = await signedCall({ env, apiPath: API_PATH.tokenGet, business });
+  const raw = await signedCall({ env, apiPath: API_PATH.tokenGet, business });
+  const j = pickPayload(raw, ['access_token', 'refresh_token']);
   if (!j.access_token || !j.refresh_token) {
     throw new Error('未获取到 access_token / refresh_token');
   }
@@ -208,14 +223,15 @@ async function exchangeToken(env, { code, shopId, mainAccountId }) {
 
 /** 解析 access_token/get 响应：非对象 / 带 error 一律抛中文提示，成功返回统一结构 */
 function parseTokenResponse(resp) {
-  const j = resp.json;
-  if (!j || typeof j !== 'object') {
+  const raw = resp.json;
+  if (!raw || typeof raw !== 'object') {
     throw new Error(`开放平台返回异常（HTTP ${resp.status}）: ${(resp.text || '').slice(0, 200)}`);
   }
-  if (j.error) {
-    const hint = hintOf(j.error, j.message);
-    throw new Error(`开放平台错误 ${j.error}${j.message ? '：' + j.message : ''}${hint ? '（' + hint + '）' : ''}`);
+  if (raw.error) {
+    const hint = hintOf(raw.error, raw.message);
+    throw new Error(`开放平台错误 ${raw.error}${raw.message ? '：' + raw.message : ''}${hint ? '（' + hint + '）' : ''}`);
   }
+  const j = pickPayload(raw, ['access_token', 'refresh_token']);
   if (!j.access_token || !j.refresh_token) {
     throw new Error('刷新未返回新 token');
   }
@@ -243,11 +259,21 @@ async function refreshVia(env, idKey, idValue, refreshToken) {
   if (!app) throw new Error('尚未配置开放平台 App');
   const host = ENV_HOSTS[env];
   if (!host) throw new Error('无效的环境：' + env);
+  // 官方要求这两个 id 在 body 里必须是数字类型：缺失/非数字时 Number() 会得到 NaN、
+  // JSON 序列化成 null，网关只会回误导性的格式错——这里提前明确报错，避免静默发出坏请求
+  const pid = String(app.partnerId == null ? '' : app.partnerId).trim();
+  const rid = String(idValue == null ? '' : idValue).trim();
+  if (!/^\d+$/.test(pid)) {
+    throw new Error(`partner_id 必须为纯数字（当前：${pid || '空'}），请检查「开放平台」页的 App 配置`);
+  }
+  if (!/^\d+$/.test(rid)) {
+    throw new Error(`${idKey} 缺失或非数字（当前：${rid || '空'}），请到「开放平台」页重新授权该店铺`);
+  }
   const timestamp = nowSec();
-  const base = buildBaseString(app.partnerId, API_PATH.accessTokenGet, timestamp);
+  const base = buildBaseString(pid, API_PATH.accessTokenGet, timestamp);
   const sign = hmacHex(app.partnerKey, base);
   const url = `${host}${API_PATH.accessTokenGet}?${new URLSearchParams({
-    partner_id: app.partnerId,
+    partner_id: pid,
     timestamp: String(timestamp),
     sign,
   }).toString()}`;
@@ -256,8 +282,8 @@ async function refreshVia(env, idKey, idValue, refreshToken) {
     url,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      partner_id: Number(app.partnerId),
-      [idKey]: Number(idValue),
+      partner_id: Number(pid),
+      [idKey]: Number(rid),
       refresh_token: refreshToken,
     }),
     timeout: 30000,
@@ -283,11 +309,12 @@ async function refreshTokenWithMerchant(env, merchantId, refreshToken) {
  * 实测语义（2026-08 生产环境）：主账号授权得到的 token 为账号级通用，但
  * access_token/get 返回的新 token 对**绑定到发起刷新的那个 shop_id**——
  * 其它店铺拿它调接口会报 Invalid access_token，拿它刷新会报 refresh token 或 shop_id 错误。
- * 因此刷新结果只写回发起刷新的店铺，不跨店传播；其余店铺失效时需重新授权
- * （大屏/开放平台页会给出对应提示）。
+ * 因此独立凭证的刷新结果只写回发起刷新的店铺，不跨店传播；其余店铺失效时需重新授权
+ * （大屏/开放平台页会给出对应提示）。共享 token 组由 planRefresh 决策走整组续期，
+ * 不走本函数（见 performRefresh / saveRefreshResultGroup）。
  * @returns 更新的店铺数（恒为 1）
  */
-function saveRefreshResult(env, shopId, oldRefreshToken, fresh) {
+function saveRefreshResult(env, shopId, fresh) {
   store.setShop(env, shopId, {
     accessToken: fresh.accessToken,
     refreshToken: fresh.refreshToken,
@@ -335,60 +362,112 @@ function markGroupInvalid(env, oldRefreshToken, reason) {
   return group.length;
 }
 
-function ensureFresh(env, shopId) {
+/**
+ * 确认凭证死透后按分组语义标记：独立凭证只标记本店，共享 token 组整组标记。
+ * 手动刷新、自动续期、通用接口调用的失败路径统一走这里，避免「同一件事两套标记口径」。
+ */
+function markInvalidByPlan(env, shopId, reason) {
+  const latest = store.getShop(env, shopId);
+  if (!latest) return 0;
+  const plan = planRefresh(latest, store.getShopsRaw(env));
+  if (plan.mode === 'individual') {
+    store.markShopInvalid(env, shopId, reason);
+    return 1;
+  }
+  return markGroupInvalid(env, latest.refreshToken, '主账号共享 token 已失效且无法续期，请到「开放平台」页重新主账号授权一次即可全部恢复');
+}
+
+/**
+ * 执行一次刷新（无锁，由调用方保证串行），返回 { accessToken, accessExpireAt, synced, mode }。
+ * 分组决策统一走 planRefresh —— **手动刷新与自动续期必须是同一条路**：
+ * 共享 token 组若被单店刷新，旧 refresh_token 立即作废且新 token 只绑定该店，
+ * 其余店铺随后会用已作废的旧 token 去整组续期，导致整组被判「需重新授权」。
+ */
+async function performRefresh(env, shopId) {
+  // 串行轮到本店时重读最新凭证（可能已被其它店铺的刷新轮换/标记失效）
+  const latest = store.getShop(env, shopId);
+  if (!latest) throw new Error(`店铺 ${shopId} 尚未授权，请先在「开放平台」页面完成店铺授权`);
+  if (latest.invalid) {
+    throw new Error(`店铺 ${shopId} 授权已失效：${latest.invalidReason || '凭证无效'}（到「开放平台」页重新授权后自动恢复采集）`);
+  }
+  const oldRefresh = latest.refreshToken;
+  const plan = planRefresh(latest, store.getShopsRaw(env));
+  if (plan.mode === 'group-merchant') {
+    // 共享 token 整组续期：merchant_id 刷新 + 全组传播（单店刷新会绑定该店并拖死其余店铺）
+    const fresh = await refreshTokenWithMerchant(env, plan.merchantId, oldRefresh);
+    return {
+      accessToken: fresh.accessToken,
+      accessExpireAt: nowSec() + fresh.expireIn,
+      synced: saveRefreshResultGroup(env, oldRefresh, fresh),
+      mode: plan.mode,
+    };
+  }
+  if (plan.mode === 'group-nomerchant') {
+    // 共享 token 无法整组续期（无 merchant_id 或组内跨多个商户）：整组标记需重新授权，避免每店轮番失败刷网关
+    markGroupInvalid(env, oldRefresh, '主账号共享 token 已到期且无法整组续期，请到「开放平台」页重新主账号授权一次即可全部恢复');
+    throw new Error('主账号共享 token 已到期且无 merchant_id 可整组续期，请到「开放平台」页重新授权');
+  }
+  const fresh = await refreshToken(env, shopId, oldRefresh);
+  return {
+    accessToken: fresh.accessToken,
+    accessExpireAt: nowSec() + fresh.expireIn,
+    synced: saveRefreshResult(env, shopId, fresh),
+    mode: plan.mode,
+  };
+}
+
+/**
+ * 取可用 access_token：未过期直接复用（force=true 跳过该判断，强制走刷新）。
+ * 同一店铺的并发刷新共享同一个 Promise；跨店铺刷新统一排进全局串行链（共享 token 轮换防踩踏）。
+ * 刷新失败且确认凭证死透时按分组语义标记「需重新授权」。
+ * @param {string} env 环境
+ * @param {string|number} shopId 店铺 ID
+ * @param {object} [opts] { force } force=true 时即使未过期也强制刷新（手动刷新 / 认证失败重试）
+ * @returns {Promise<{accessToken: string, accessExpireAt: number, synced: number, mode: string}>}
+ */
+function ensureFresh(env, shopId, opts = {}) {
+  const force = !!opts.force;
   const shop = store.getShop(env, shopId);
   if (!shop) throw new Error(`店铺 ${shopId} 尚未授权，请先在「开放平台」页面完成店铺授权`);
   if (shop.invalid) {
     throw new Error(`店铺 ${shopId} 授权已失效：${shop.invalidReason || '凭证无效'}（到「开放平台」页重新授权后自动恢复采集）`);
   }
   const remain = (shop.accessExpireAt || 0) - nowSec() - ACCESS_EXPIRE_MARGIN;
-  if (remain > 0) return Promise.resolve(shop.accessToken);
-  // 过期：先刷新（同一店铺的并发刷新共享同一个 Promise）
-  let p = refreshLocks.get(String(shopId));
-  if (!p) {
-    p = refreshChain.then(async () => {
-      try {
-        // 串行轮到本店时重读最新凭证（可能已被其它店铺的刷新轮换/标记失效）
-        const latest = store.getShop(env, shopId);
-        if (!latest) throw new Error(`店铺 ${shopId} 尚未授权，请先在「开放平台」页面完成店铺授权`);
-        if (latest.invalid) throw new Error(`店铺 ${shopId} 授权已失效：${latest.invalidReason || '凭证无效'}（到「开放平台」页重新授权后自动恢复采集）`);
-        const oldRefresh = latest.refreshToken;
-        const plan = planRefresh(latest, store.getShopsRaw(env));
-        if (plan.mode === 'group-merchant') {
-          // 共享 token 整组续期：merchant_id 刷新 + 全组传播（单店刷新会绑定该店并拖死其余店铺）
-          const fresh = await refreshTokenWithMerchant(env, plan.merchantId, oldRefresh);
-          saveRefreshResultGroup(env, oldRefresh, fresh);
-          return fresh.accessToken;
-        }
-        if (plan.mode === 'group-nomerchant') {
-          // 共享 token 无法整组续期（无 merchant_id 或组内跨多个商户）：整组标记需重新授权，避免每店轮番失败刷网关
-          markGroupInvalid(env, oldRefresh, '主账号共享 token 已到期且无法整组续期，请到「开放平台」页重新主账号授权一次即可全部恢复');
-          throw new Error('主账号共享 token 已到期且无 merchant_id 可整组续期，请到「开放平台」页重新授权');
-        }
-        const fresh = await refreshToken(env, shopId, oldRefresh);
-        saveRefreshResult(env, shopId, oldRefresh, fresh);
-        return fresh.accessToken;
-      } catch (e) {
-        // 凭证死透：组内共享 token 的店铺整组标记，独立凭证只标记本店
-        const latest = store.getShop(env, shopId);
-        if (latest && isAuthDead(e.message)) {
-          const plan = planRefresh(latest, store.getShopsRaw(env));
-          if (plan.mode === 'individual') {
-            store.markShopInvalid(env, shopId, e.message);
-          } else {
-            markGroupInvalid(env, latest.refreshToken, '主账号共享 token 已失效且无法续期，请到「开放平台」页重新主账号授权一次即可全部恢复');
-          }
-        }
-        throw e;
-      } finally {
-        refreshLocks.delete(String(shopId));
-      }
+  if (!force && remain > 0) {
+    return Promise.resolve({
+      accessToken: shop.accessToken,
+      accessExpireAt: shop.accessExpireAt || 0,
+      synced: 0,
+      mode: 'cached',
     });
-    refreshLocks.set(String(shopId), p);
+  }
+  // 需要刷新（同一店铺的并发刷新共享同一个 Promise，跨店铺走全局串行链）
+  const key = String(shopId);
+  let p = refreshLocks.get(key);
+  if (!p) {
+    p = refreshChain
+      .then(() => performRefresh(env, shopId))
+      .catch((e) => {
+        // 凭证死透：按分组语义标记（共享 token 整组标记，独立凭证只标本店）
+        if (isAuthDead(e.message)) markInvalidByPlan(env, shopId, e.message);
+        throw e;
+      })
+      .finally(() => { refreshLocks.delete(key); });
+    refreshLocks.set(key, p);
     // 单个刷新失败不能卡死后续排队（错误由本次调用方消化）
     refreshChain = p.catch(() => {});
   }
   return p;
+}
+
+/**
+ * 强制刷新某店铺（「开放平台」页的「刷新」按钮）。
+ * 与自动续期走完全相同的分组决策与串行链：共享 token 组会整组续期，
+ * 避免「手动刷新单店 → 同组其它店铺的 refresh_token 被作废」。
+ * @returns {Promise<{accessToken: string, accessExpireAt: number, synced: number, mode: string}>}
+ */
+function refreshShopNow(env, shopId) {
+  return ensureFresh(env, shopId, { force: true });
 }
 
 /**
@@ -407,28 +486,28 @@ async function callOpenApi(apiPath, business = {}, opts = {}) {
   const app = resolveApp();
   const id = String(shopId || '');
   if (!id) throw new Error('缺少 shop_id');
-  let accessToken;
   try {
-    accessToken = await ensureFresh(app.env, id);
-    const j = await signedCall({ env: app.env, apiPath, business, accessToken, shopId: id, signal, method });
+    const fresh = await ensureFresh(app.env, id);
+    const j = await signedCall({ env: app.env, apiPath, business, accessToken: fresh.accessToken, shopId: id, signal, method });
     store.clearShopInvalid(app.env, id);
     return j;
   } catch (e) {
-    // 认证类错误：刷新一次后重试（一次机会，避免死循环）。
+    // 认证类错误：强制刷新一次后重试（一次机会，避免死循环）。
+    // 必须带 force —— access_token 名义未过期但被网关拒绝时（例如凭证已被轮换、绑定到其它店铺），
+    // 非强制刷新会直接复用同一个 token，重试必然再次失败，白白把店铺标记成「需重新授权」。
     // 网关存在拼写变体 invalid_acceess_token，以及 refresh token 失效的误导性文案，一并纳入
     if (autoRefresh && isAuthRetryable(e.message)) {
-      refreshLocks.delete(id);
       try {
-        const fresh = await ensureFresh(app.env, id);
-        const j = await signedCall({ env: app.env, apiPath, business, accessToken: fresh, shopId: id, signal, method });
+        const fresh = await ensureFresh(app.env, id, { force: true });
+        const j = await signedCall({ env: app.env, apiPath, business, accessToken: fresh.accessToken, shopId: id, signal, method });
         store.clearShopInvalid(app.env, id);
         return j;
       } catch (e2) {
-        if (isAuthDead(e2.message)) store.markShopInvalid(app.env, id, e2.message);
+        if (isAuthDead(e2.message)) markInvalidByPlan(app.env, id, e2.message);
         throw e2;
       }
     }
-    if (isAuthDead(e.message)) store.markShopInvalid(app.env, id, e.message);
+    if (isAuthDead(e.message)) markInvalidByPlan(app.env, id, e.message);
     throw e;
   }
 }
@@ -443,6 +522,9 @@ module.exports = {
   getShopInfo,
   callOpenApi,
   signedCall,
+  ensureFresh,
+  refreshShopNow,
+  pickPayload,
   // 纯函数（单测覆盖）
   isAuthDead,
   isAuthRetryable,

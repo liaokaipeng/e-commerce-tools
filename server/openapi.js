@@ -105,18 +105,13 @@ async function fetchShopNames(env, shops) {
           shopId: s.shopId,
           method: 'GET',
         });
-        const pools = [j, j && j.response, j && j.data];
-        let name = '';
+        // 载荷层口径与 client.pickPayload 统一（顶层 / response / data）
+        const p = client.pickPayload(j, ['shop_name', 'region', 'country', 'shop_region', 'shop_country']) || {};
+        let name = p.shop_name ? String(p.shop_name) : '';
         let region = '';
-        for (const p of pools) {
-          if (!p || typeof p !== 'object') continue;
-          if (!name && p.shop_name) name = String(p.shop_name);
-          // region 提取口径与监控采集（collectors.fetchShopInfo）一致
-          if (!region) {
-            for (const k of ['region', 'country', 'shop_region', 'shop_country']) {
-              if (p[k] !== undefined && p[k] !== null && p[k] !== '') { region = String(p[k]).toUpperCase(); break; }
-            }
-          }
+        // region 提取口径与监控采集（collectors.fetchShopInfo）一致
+        for (const k of ['region', 'country', 'shop_region', 'shop_country']) {
+          if (p[k] !== undefined && p[k] !== null && p[k] !== '') { region = String(p[k]).toUpperCase(); break; }
         }
         if (name.trim()) patch.shopName = name.trim();
         else patch.shopNameFailedAt = Date.now();
@@ -164,6 +159,8 @@ async function authorizedStores() {
   }
   return store
     .getShopsRaw(app.env)
+    // 失效店铺不作为可选目标（选中后调用必然失败）；其状态仍在 /api/openapi/status 与监控大屏展示
+    .filter((s) => !s.invalid)
     .map((s) => ({
       category: '开放平台已授权',
       id: s.shopId,
@@ -253,12 +250,16 @@ function register({ get, post }) {
   // 保存 App 配置（partner_id / partner_key / 环境）
   post('/api/openapi/app', jsonAction('/api/openapi/app', (body, req, res) => {
     const app = store.setApp({ partnerId: body.partnerId, partnerKey: body.partnerKey, env: body.env });
+    if (app.shopsCleared) notifyMonitorAuthChanged(); // 换 App 后旧店铺凭证已清空，通知大屏刷新
     sendJson(res, 200, {
       ok: true,
       env: app.env,
       partnerId: app.partnerId,
       partnerKeyMasked: maskToken(app.partnerKey),
-      message: 'App 配置已保存（仅存于本机 server/data，不会上传）',
+      shopsCleared: !!app.shopsCleared,
+      message: app.shopsCleared
+        ? 'App 配置已保存；检测到 partner_id 变更，该环境下原有店铺授权已清空（需重新授权）'
+        : 'App 配置已保存（仅存于本机 server/data，不会上传）',
     });
   }));
 
@@ -268,11 +269,10 @@ function register({ get, post }) {
     const { url: redirect, mode } = validateRedirect(redirectInput);
     const app = store.getApp();
     if (!app) throw new Error('尚未配置 App，请先保存 partner_id / partner_key');
-    const { authUrl, expire } = await client.getAuthUrl(app.env, redirect);
+    const { authUrl } = await client.getAuthUrl(app.env, redirect);
     sendJson(res, 200, {
       ok: true,
       authUrl,
-      expire,
       redirect,
       mode,
       message: mode === 'auto'
@@ -321,7 +321,8 @@ function register({ get, post }) {
     });
   }));
 
-  // 手动刷新某店铺 token（旧 refresh_token 刷新后立即失效；新 token 对绑定该店铺）
+  // 手动刷新某店铺 token：与自动续期共用 client.refreshShopNow 的分组决策 ——
+  // 共享主账号 token 的店铺整组续期（旧 refresh_token 一次性作废，单店刷新会拖死同组其它店铺）。
   post('/api/openapi/refresh', jsonAction('/api/openapi/refresh', async (body, req, res) => {
     const shopId = String(body.shopId || '').trim();
     if (!shopId) throw new Error('缺少 shop_id');
@@ -332,17 +333,18 @@ function register({ get, post }) {
     if (shop.invalid) {
       throw new Error(`店铺 ${shopId} 授权已失效：${shop.invalidReason || '凭证无效'}，重新授权后才能恢复`);
     }
-    const oldRefresh = shop.refreshToken;
-    const fresh = await client.refreshToken(app.env, shopId, oldRefresh);
-    const synced = client.saveRefreshResult(app.env, shopId, oldRefresh, fresh);
-    notifyMonitorAuthChanged(); // 刷新成功即恢复该店铺采集
+    const r = await client.refreshShopNow(app.env, shopId);
+    notifyMonitorAuthChanged(); // 刷新成功即恢复采集
     sendJson(res, 200, {
       ok: true,
       shopId,
-      syncedShops: synced,
-      accessTokenMasked: maskToken(fresh.accessToken),
-      accessExpireAt: nowSec() + fresh.expireIn,
-      message: 'Token 刷新成功（旧 refresh_token 已失效）',
+      syncedShops: r.synced,
+      mode: r.mode,
+      accessTokenMasked: maskToken(r.accessToken),
+      accessExpireAt: r.accessExpireAt,
+      message: r.synced > 1
+        ? `Token 刷新成功，已同步续期同组 ${r.synced} 个店铺（旧 refresh_token 已失效）`
+        : 'Token 刷新成功（旧 refresh_token 已失效）',
     });
   }));
 

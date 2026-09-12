@@ -4,22 +4,7 @@
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
-const { BASE, ROOT, t, req, startServer } = require('./helpers');
-
-// 删除文件（绕过本机可能存在的 node 安全删除 shim：它按「每轮删除数」计数，
-// 测试里零散的 unlinkSync 会连同构建缓存一起累加，偶发触发 BULK_CONFIRM 拦截而中断测试）。
-// 测试删的都是自己造的临时文件 / 会话文件的隔离副本，直接用 .NET 删除最稳。
-function removeFile(p) {
-  try {
-    if (!fs.existsSync(p)) return;
-    if (process.platform === 'win32') {
-      require('child_process').execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
-        `[System.IO.File]::Delete('${p.replace(/'/g, "''")}')`], { stdio: 'ignore' });
-    } else {
-      fs.unlinkSync(p);
-    }
-  } catch { /* 删不掉不阻断测试 */ }
-}
+const { BASE, ROOT, t, req, startServer, removeFile } = require('./helpers');
 
 // 发送任意原始请求体（验「非法 JSON 应显式 400」用，req() 只能发合法 JSON）
 async function rawPost(urlPath, raw) {

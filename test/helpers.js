@@ -105,4 +105,4 @@ function printSummary() {
   return fail === 0;
 }
 
-module.exports = { ROOT, PORT, BASE, t, req, waitReady, startServer, printSummary };
+module.exports = { ROOT, PORT, BASE, t, req, waitReady, startServer, removeFile, printSummary };

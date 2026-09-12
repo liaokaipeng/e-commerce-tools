@@ -41,7 +41,11 @@ function getApp() {
   return store.app ? Object.assign({}, store.app) : null;
 }
 
-/** 保存 App 配置：字段校验通过才写入 */
+/**
+ * 保存 App 配置：字段校验通过才写入。
+ * **partner_id 变化（换 App）时清空该环境下的店铺凭证**：旧 token 与新 partner 不匹配，
+ * 留着只会在店铺列表里变成必然失败的幽灵店铺；返回值带 shopsCleared 供上层提示与刷新大屏。
+ */
 function setApp({ partnerId, partnerKey, env }) {
   const id = String(partnerId || '').trim();
   const key = String(partnerKey || '').trim();
@@ -49,10 +53,12 @@ function setApp({ partnerId, partnerKey, env }) {
   if (!id) throw new Error('partner_id 不能为空');
   if (!key) throw new Error('partner_key 不能为空');
   if (!ENVS.includes(e)) throw new Error('无效的环境：' + e);
+  const prev = store.app;
+  const partnerChanged = !!(prev && prev.partnerId && String(prev.partnerId) !== id);
   store.app = { partnerId: id, partnerKey: key, env: e };
-  if (!store.shops[e]) store.shops[e] = {};
+  store.shops[e] = partnerChanged ? {} : (store.shops[e] || {});
   saveFile();
-  return Object.assign({}, store.app);
+  return Object.assign({}, store.app, { shopsCleared: partnerChanged });
 }
 
 /** 取某环境下的店铺凭证（完整值，仅 client 内部使用） */
