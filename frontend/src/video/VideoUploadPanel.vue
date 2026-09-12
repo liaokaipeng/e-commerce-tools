@@ -11,7 +11,7 @@ defineProps({
   logLines: { type: Array, default: () => [] },
 });
 
-const emit = defineEmits(['start', 'cancel', 'clear-log', 'update:autoScroll']);
+const emit = defineEmits(['start', 'cancel', 'clear-log', 'export-result', 'update:autoScroll']);
 </script>
 
 <template>
@@ -25,6 +25,7 @@ const emit = defineEmits(['start', 'cancel', 'clear-log', 'update:autoScroll']);
         取消上传
       </el-button>
       <el-button @click="emit('clear-log')">清空日志</el-button>
+      <el-button :disabled="!hasRows" @click="emit('export-result')">导出结果表格</el-button>
       <el-switch
         :model-value="autoScroll"
         inline-prompt

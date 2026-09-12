@@ -342,6 +342,24 @@ async function run() {
       }
     }
     {
+      // 端到端 SSE：商品编码为空 → 跳过上传，row-error 带 skip 标记（前端状态列显示「失败，商品为空」）
+      const tmp = path.join(os.tmpdir(), `kp_skip_${Date.now()}.mp4`);
+      fs.writeFileSync(tmp, 'x');
+      try {
+        const r = await req('POST', '/api/start', { site: 'cn', rows: [{ path: tmp, caption: '', product: '' }] });
+        const j = JSON.parse(r.text);
+        if (j.jobId) {
+          const events = await readSSEUntil('/api/events?jobId=' + j.jobId, ['finished']);
+          t('商品为空行跳过：row-error 带 skip 标记且错误含「商品」',
+            events.some((e) => e.type === 'row-error' && e.skip === true && /商品/.test(e.error)),
+            JSON.stringify(events));
+          t('商品为空行跳过后任务正常收尾 finished', events.some((e) => e.type === 'finished'));
+        }
+      } finally {
+        removeFile(tmp);
+      }
+    }
+    {
       // SSE 连接即发 connected，然后断开
       const events = await readSSEUntil('/api/events?jobId=conn-test', ['connected']);
       t('GET /api/events 首事件为 connected', events.some((e) => e.type === 'connected'), JSON.stringify(events));
@@ -357,13 +375,14 @@ async function run() {
     }
     {
       // 取消进行中任务：行指向真实存在的 20MB 稀疏文件，每行流式哈希耗时足以让 cancel 稳定到达；
+      // 行必须带商品编码——商品编码为空会在流式哈希前被「商品为空」秒跳过，任务瞬间结束，取消无法稳定到达；
       // 取消后任务在下一行停止，SSE（含迟到回放）应收到 cancelled 而非 finished。
       const tmp = path.join(os.tmpdir(), `kp_cancel_${Date.now()}.mp4`);
       const fd = fs.openSync(tmp, 'w');
       fs.ftruncateSync(fd, 20 * 1024 * 1024);
       fs.closeSync(fd);
       try {
-        const rows = Array.from({ length: 3 }, () => ({ path: tmp, caption: '', product: '' }));
+        const rows = Array.from({ length: 3 }, () => ({ path: tmp, caption: '', product: '123' }));
         const r = await req('POST', '/api/start', { site: 'cn', rows });
         const { jobId } = JSON.parse(r.text);
         const c = await fetch(BASE + '/api/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId }) });

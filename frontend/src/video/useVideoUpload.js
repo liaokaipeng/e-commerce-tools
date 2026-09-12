@@ -4,7 +4,7 @@ import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useLog } from '../composables/useToolPage.js';
 
-export function useVideoUpload({ site, isPh, siteLabel }) {
+export function useVideoUpload({ site, isPh, siteLabel, onFinish }) {
   const { logLines, log, clear: clearLog } = useLog();
   const autoScroll = ref(true);
   const uploading = ref(false);
@@ -64,9 +64,9 @@ export function useVideoUpload({ site, isPh, siteLabel }) {
       .then(({ jobId }) => {
         currentJobId.value = jobId;
         es = new EventSource('/api/events?jobId=' + jobId);
-        let done = 0, ok = 0, fail = 0, total = 0;
+        let done = 0, ok = 0, fail = 0, skip = 0, total = 0;
         const updateSummary = () => {
-          summary.value = `进度：${done} / ${total}　成功 ${ok} / 失败 ${fail}`;
+          summary.value = `进度：${done} / ${total}　成功 ${ok} / 失败 ${fail}` + (skip ? `（含商品为空跳过 ${skip}）` : '');
         };
         es.onmessage = (ev) => {
           const d = JSON.parse(ev.data);
@@ -84,19 +84,31 @@ export function useVideoUpload({ site, isPh, siteLabel }) {
             if (row) row.status = 'ok';
             log(`  ✓ 任务 ${d.index + 1} 完成 → vid=${d.result.vid}` + (d.result.itemId ? ` item_id=${d.result.itemId}` : ''), 'ok');
           } else if (d.type === 'row-error') {
-            done++; fail++;
-            updateSummary();
-            if (row) row.status = 'err';
-            log(`  ✗ 任务 ${d.index + 1} 失败: ${d.error}`, 'err');
+            done++;
+            if (d.skip) {
+              // 后端判定「商品为空」跳过上传：状态列显示「失败，商品为空」
+              skip++;
+              updateSummary();
+              if (row) row.status = 'no-product';
+              log(`  ⊘ 任务 ${d.index + 1} 跳过（不上传）: ${d.error}`, 'err');
+            } else {
+              fail++;
+              updateSummary();
+              if (row) row.status = 'err';
+              log(`  ✗ 任务 ${d.index + 1} 失败: ${d.error}`, 'err');
+            }
           } else if (d.type === 'finished') {
-            log(`全部完成：成功 ${ok}，失败 ${fail}，共 ${d.total}`, ok ? 'ok' : 'err');
-            summary.value = `已完成：成功 ${ok} / 失败 ${fail}`;
+            log(`全部完成：成功 ${ok}，失败 ${fail}` + (skip ? `（含商品为空跳过 ${skip}）` : '') + `，共 ${d.total}`, ok ? 'ok' : 'err');
+            summary.value = `已完成：成功 ${ok} / 失败 ${fail}` + (skip ? `（含商品为空跳过 ${skip}）` : '');
             finish();
+            // 任务正常结束后导出带【状态】列的结果表格（cancelled 同理，保留已处理行的状态）
+            if (onFinish) { try { onFinish({ ok, fail, skip }); } catch (e) { /* 导出失败不影响主流程 */ } }
           } else if (d.type === 'cancelled') {
-            log(`已取消：已处理 ${d.done} / ${d.total}（成功 ${ok}，失败 ${fail}）`, 'err');
-            summary.value = `已取消：成功 ${ok} / 失败 ${fail}`;
+            log(`已取消：已处理 ${d.done} / ${d.total}（成功 ${ok}，失败 ${fail}` + (skip ? `，含商品为空跳过 ${skip}` : '') + `）`, 'err');
+            summary.value = `已取消：成功 ${ok} / 失败 ${fail}` + (skip ? `（含商品为空跳过 ${skip}）` : '');
             cancelledFlag = true;
             finish();
+            if (onFinish) { try { onFinish({ ok, fail, skip }); } catch (e) { /* 导出失败不影响主流程 */ } }
           } else if (d.type === 'fatal') {
             log('致命错误: ' + d.error, 'err');
             finish();

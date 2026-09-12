@@ -36,7 +36,11 @@ function onFileRemove() {
   pendingFile.value = null;
 }
 
-const upload = useVideoUpload({ site: creds.site, isPh: creds.isPh, siteLabel: creds.siteLabel });
+const upload = useVideoUpload({
+  site: creds.site, isPh: creds.isPh, siteLabel: creds.siteLabel,
+  // 任务结束（完成/取消）后自动导出带【状态】列的结果表格
+  onFinish: () => table.exportResult(),
+});
 
 function onStart() {
   upload.startUpload(
@@ -89,6 +93,7 @@ function onStart() {
         @start="onStart"
         @cancel="upload.cancelUpload"
         @clear-log="upload.clearLog"
+        @export-result="table.exportResult"
       />
     </div>
   </div>

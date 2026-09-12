@@ -12,6 +12,9 @@ export const KEY_PRODUCT = ['商品编码', '编码', '商品', 'sku', 'item', '
 
 export const CAPTION_MAX_LENGTH = 250;
 
+/** 行状态 → 展示文案（VideoSteps 状态列与结果表格导出共用单一来源） */
+export const STATUS_TEXT = { run: '上传中', ok: '成功', err: '失败', 'no-product': '失败，商品为空' };
+
 /** 即时预览校验（纯规则，与后端 video-utils.validateUploadRow 同步） */
 export function validateRow({ path, caption }) {
   if (!path) return '缺少视频路径';
@@ -65,6 +68,7 @@ export function useVideoTable() {
   const showMapping = ref(false);
   const rows = ref([]); // { path, caption, product, error, status }
   let rawRows = [];
+  let sourceName = ''; // 原表格文件名（去扩展名），导出结果表格时用
 
   function rebuildRows(raw) {
     rawRows = raw;
@@ -98,6 +102,7 @@ export function useVideoTable() {
       raw = parseCSV(new TextDecoder('utf-8').decode(buf));
     }
     if (!raw.length) { ElMessage.warning('未解析到数据'); return false; }
+    sourceName = (file.name || '').replace(/\.(xlsx|xls|csv)$/i, '') || '视频上传';
     headers.value = Object.keys(raw[0]);
     mapPath.value = matchKey(headers.value, KEY_PATH);
     mapCaption.value = matchKey(headers.value, KEY_CAPTION);
@@ -122,8 +127,30 @@ export function useVideoTable() {
     window.XLSX.writeFile(wb, '视频批量上传模板.xlsx');
   }
 
+  /** 导出带【状态】列的结果表格：保留原表全部列与行序，追加/覆盖「状态」列后下载 <原名>_结果.xlsx。
+   *  浏览器无法改写磁盘上的原文件，以「下载结果副本」的方式落到实际表格里。 */
+  function exportResult() {
+    if (!window.XLSX) { ElMessage.error('SheetJS 未加载，无法导出结果表格'); return; }
+    if (!rawRows.length || !headers.value.length) { ElMessage.warning('请先解析表格再导出结果'); return; }
+    // 原表已有「状态」列则原位覆盖，避免出现两列状态
+    const hs = headers.value.slice();
+    let statusCol = hs.findIndex((h) => (h || '').toString().trim() === '状态');
+    if (statusCol < 0) { statusCol = hs.length; hs.push('状态'); }
+    const statusOf = (row) => (row && row.error) || STATUS_TEXT[row && row.status] || '';
+    const aoa = [hs];
+    rawRows.forEach((r, i) => {
+      const vals = hs.map((h, j) => (j === statusCol ? '' : (r[h] ?? '')));
+      vals[statusCol] = statusOf(rows.value[i]);
+      aoa.push(vals);
+    });
+    const ws = window.XLSX.utils.aoa_to_sheet(aoa);
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, '视频上传');
+    window.XLSX.writeFile(wb, `${sourceName}_结果.xlsx`);
+  }
+
   return {
     headers, mapPath, mapCaption, mapProduct, showMapping, rows,
-    parseFile, onMappingChange, rebuildRows, downloadTemplate,
+    parseFile, onMappingChange, rebuildRows, downloadTemplate, exportResult,
   };
 }

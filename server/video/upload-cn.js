@@ -9,6 +9,7 @@ const {
   findItemIds,
   probeVideoFile,
   validateUploadRow,
+  skipError,
 } = require('../lib/video-utils');
 
 // ------- 跨境 .cn 上传流程各步骤 -------
@@ -160,6 +161,15 @@ async function uploadOneCn(row, creds, log, signal) {
   const rowErr = validateUploadRow(row);
   if (rowErr) throw new Error(rowErr);
 
+  // 商品前置校验①：未配置商品编码 → 直接跳过，不上传（前端状态列显示「失败，商品为空」）。
+  // 放在流式哈希之前：没必要为注定跳过的行先读完整个大文件
+  const product = String(row.product || '').trim();
+  if (!product) {
+    log('item', '未配置商品编码，跳过上传');
+    throw skipError('未配置商品编码，已跳过上传');
+  }
+
+  // 注意：「先流式哈希、后解析凭证」的顺序不能调（测试依赖首行哈希耗时让 cancel 稳定到达）
   log('read', `读取文件: ${filePath}`);
   const hashes = await streamHashes(filePath);
   const fsize = hashes.size;
@@ -173,6 +183,30 @@ async function uploadOneCn(row, creds, log, signal) {
   }
   // 凭证统一由 resolveCnAuth 解析：优先本地已抓凭证中有效期最长的（账号级通用）→ 兜底 Cookie 换取 → 报错引导手动上传
   auth = await resolveCnAuth({ auth, cookie, shopId }, log, signal);
+
+  // 商品前置校验②：配置了商品但查不到 → 跳过上传（原逻辑在上传完成后才查询，现提前到上传前，避免白传大文件）
+  let itemId = null;
+  log('item', `查询商品编码: ${product}`);
+  const isCode = /^\d+$/.test(product);
+  const il = await itemList(product, cookie, shopId, signal);
+  const items = (il.json && il.json.data && il.json.data.items) || [];
+  const hit = isCode
+    ? items.find((it) => String(it.item_id ?? it.itemId) === product)
+    : items[0];
+  if (hit) {
+    itemId = hit.item_id ?? hit.itemId;
+    log('item', `匹配到 item_id=${itemId}`);
+  } else {
+    const ids = findItemIds(il.json || {});
+    if (ids.length) {
+      itemId = ids[0];
+      log('item', `匹配到 item_id=${itemId}（模糊）`);
+    }
+  }
+  if (!itemId) {
+    log('item', `未找到商品，响应: ${il.text.slice(0, 300)}`);
+    throw skipError(`未找到商品编码 ${product} 对应的商品，已跳过上传`);
+  }
 
   log('preupload', '申请上传...');
   const pre = await preupload(signal);
@@ -228,31 +262,6 @@ async function uploadOneCn(row, creds, log, signal) {
   log('report', '上报上传结果...');
   const rep = await reportUpload({ vid, extendid: extendid || '', fsize, md5hexval: wholeMd5hex, videourl }, signal);
   log('report', `响应: ${rep.text.slice(0, 300)}`);
-
-  let itemId = null;
-  if (row.product) {
-    log('item', `查询商品编码: ${row.product}`);
-    const isCode = /^\d+$/.test(String(row.product).trim());
-    const il = await itemList(row.product, cookie, shopId, signal);
-    const items = (il.json && il.json.data && il.json.data.items) || [];
-    const hit = isCode
-      ? items.find((it) => String(it.item_id ?? it.itemId) === String(row.product).trim())
-      : items[0];
-    if (hit) {
-      itemId = hit.item_id ?? hit.itemId;
-      log('item', `匹配到 item_id=${itemId}`);
-    } else {
-      const ids = findItemIds(il.json || {});
-      if (ids.length) {
-        itemId = ids[0];
-        log('item', `匹配到 item_id=${itemId}（模糊）`);
-      } else {
-        log('item', `未匹配到商品，响应: ${il.text.slice(0, 300)}`);
-      }
-    }
-  } else {
-    log('item', '未提供商品编码，仅上传视频不关联商品');
-  }
 
   log('create', '创建视频并发布...');
   const meta = probeVideoFile(filePath);

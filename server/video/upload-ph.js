@@ -9,11 +9,12 @@ const {
   awsSigV4,
   probeVideoFile,
   validateUploadRow,
+  skipError,
 } = require('../lib/video-utils');
 
 // ------- 单个视频的完整上传（本土菲律宾 .ph） -------
-// 链路：task/create -> vod/preupload -> 单次 PUT 整文件 -> vod/reportupload
-//       -> item/list 查商品 -> task/edit 写标题/商品 -> task/post 发布
+// 链路：item/list 查商品（前置校验） -> task/create -> vod/preupload -> 单次 PUT 整文件
+//       -> vod/reportupload -> task/edit 写标题/商品 -> task/post 发布
 // 与跨境不同：无分片/merge，无 solutions 域名，biz=201，region=PH。
 async function uploadOnePh(row, creds, site, log, signal) {
   const S = SITES[site];
@@ -21,6 +22,13 @@ async function uploadOnePh(row, creds, site, log, signal) {
   const filePath = row.path;
   const rowErr = validateUploadRow(row);
   if (rowErr) throw new Error(rowErr);
+
+  // 商品前置校验①：未配置商品编码 → 直接跳过，不上传（前端状态列显示「失败，商品为空」）
+  const product = String(row.product || '').trim();
+  if (!product) {
+    log('item', '未配置商品编码，跳过上传');
+    throw skipError('未配置商品编码，已跳过上传');
+  }
 
   // MMS 上传接口（preupload/reportupload）不带 Cookie：带上会返回跨区 uploaddomain 导致 400
   const mmsH = {
@@ -38,6 +46,32 @@ async function uploadOnePh(row, creds, site, log, signal) {
   const fsize = hashes.size;
   const wholeMd5hex = hashes.md5;
   const payloadSha256 = hashes.sha256;
+
+  // 商品前置校验②：配置了商品但查不到 → 跳过上传（原逻辑在上传完成后才查询，现提前到上传前，避免白传大文件）
+  let itemId = null;
+  let productItem = null;
+  log('item', `查询商品编码: ${product}`);
+  // itemName 只按商品名称模糊匹配；纯数字的商品编码需走 itemId 参数精确查询
+  const isCode = /^\d+$/.test(product);
+  const qs = isCode
+    ? `page=1&pageSize=10&itemId=${encodeURIComponent(product)}`
+    : `page=1&pageSize=10&itemName=${encodeURIComponent(product)}`;
+  const il = await call({
+    method: 'GET',
+    url: `${S.creator}/publish/pc/api/item/list?${qs}`,
+    headers: jsonH,
+    signal,
+  });
+  const items = (il.json && il.json.data && il.json.data.items) || [];
+  const hit = isCode ? items.find((it) => String(it.itemId) === product) : items[0];
+  if (hit) {
+    itemId = hit.itemId;
+    productItem = hit;
+    log('item', `匹配到 item_id=${itemId}`);
+  } else {
+    log('item', `未找到商品，响应: ${il.text.slice(0, 300)}`);
+    throw skipError(`未找到商品编码 ${product} 对应的商品，已跳过上传`);
+  }
 
   // 1. task/create 创建发布任务
   log('task', '创建发布任务(task/create)...');
@@ -164,41 +198,12 @@ async function uploadOnePh(row, creds, site, log, signal) {
   });
   log('report', `响应: ${repResp.text.slice(0, 200)}`);
 
-  // 5. item/list 查商品（可选关联）
-  let itemId = null;
-  let productItem = null;
-  if (row.product) {
-    log('item', `查询商品编码: ${row.product}`);
-    // itemName 只按商品名称模糊匹配；纯数字的商品编码需走 itemId 参数精确查询
-    const isCode = /^\d+$/.test(String(row.product).trim());
-    const qs = isCode
-      ? `page=1&pageSize=10&itemId=${encodeURIComponent(String(row.product).trim())}`
-      : `page=1&pageSize=10&itemName=${encodeURIComponent(row.product)}`;
-    const il = await call({
-      method: 'GET',
-      url: `${S.creator}/publish/pc/api/item/list?${qs}`,
-      headers: jsonH,
-      signal,
-    });
-    const items = (il.json && il.json.data && il.json.data.items) || [];
-    const hit = isCode ? items.find((it) => String(it.itemId) === String(row.product).trim()) : items[0];
-    if (hit) {
-      itemId = hit.itemId;
-      productItem = hit;
-      log('item', `匹配到 item_id=${itemId}`);
-    } else {
-      log('item', `未匹配到商品，响应: ${il.text.slice(0, 300)}`);
-    }
-  } else {
-    log('item', '未提供商品编码，仅上传视频不关联商品');
-  }
-
-  // 6. 本地探测视频元信息
+  // 5. 本地探测视频元信息
   const meta = probeVideoFile(filePath);
   if (!meta.width || !meta.height || !meta.duration) log('edit', '警告: 未能完整解析视频宽高/时长，将提交解析值');
   log('edit', `视频元信息: ${meta.width}x${meta.height}, ${meta.duration}ms`);
 
-  // 7. task/edit 写入标题/商品/元信息
+  // 6. task/edit 写入标题/商品/元信息
   const editBody = {
     taskList: [{
       taskId,

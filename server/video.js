@@ -2,7 +2,8 @@
 /**
  * Shopee 视频批量上传模块（CommonJS）
  * 由合并服务 main.js 引入，通过 register({ get, post }) 注册路由。
- * 接口流程：preupload -> 分片 upload -> mergeFiles -> reportupload -> item/list -> video/create
+ * 接口流程：item/list 商品前置校验（商品为空/找不到 → 跳过该行）-> preupload -> 分片 upload
+ * -> mergeFiles -> reportupload -> video/create
  * 凭证由浏览器扩展推送至 /api/creds，保存到本目录 video-session.json。
  *
  * 本文件只负责「路由注册」，链路编排拆分到 video/ 子模块：

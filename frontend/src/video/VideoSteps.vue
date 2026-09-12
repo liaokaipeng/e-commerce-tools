@@ -4,6 +4,7 @@
 import { computed, ref } from 'vue';
 import { UploadFilled } from '@element-plus/icons-vue';
 import { regionLabel } from '../region-utils.js';
+import { STATUS_TEXT } from './useVideoTable.js';
 
 const props = defineProps({
   isPh: { type: Boolean, default: false },
@@ -53,10 +54,11 @@ const visibleShopOptions = computed(() => {
   });
 });
 
-const STATUS_TAG = { wait: 'info', run: 'warning', ok: 'success', err: 'danger' };
-const STATUS_TEXT = { run: '上传中', ok: '成功', err: '失败' };
+// 状态列：初始为空（不渲染标签）；no-product = 后端判定「商品为空」跳过上传。
+// 文案 STATUS_TEXT 共享自 useVideoTable.js（导出结果表格用同一份）
+const STATUS_TAG = { run: 'warning', ok: 'success', err: 'danger', 'no-product': 'danger' };
 const statusTag = (t) => STATUS_TAG[t] || 'info';
-const statusText = (t) => STATUS_TEXT[t] || '等待';
+const statusText = (t) => STATUS_TEXT[t] || '';
 </script>
 
 <template>
@@ -129,7 +131,8 @@ const statusText = (t) => STATUS_TEXT[t] || '等待';
       <div class="el-upload__text">把表格文件拖到这里，或 <em>点击选择文件</em></div>
       <template #tip>
         <div class="el-upload__tip">
-          表头需包含：<b>视频路径</b>、<b>视频说明</b>、<b>商品编码</b>；如列名不同，可在下方手动映射。
+          表头需包含：<b>视频路径</b>、<b>视频说明</b>、<b>商品编码</b>；如列名不同，可在下方手动映射。<br />
+          商品编码为空、或按编码查不到商品时，该行将<b>跳过上传</b>并标记「失败，商品为空」。
         </div>
       </template>
     </el-upload>
@@ -167,11 +170,11 @@ const statusText = (t) => STATUS_TEXT[t] || '等待';
         <el-table-column type="index" label="#" width="50" />
         <el-table-column prop="path" label="视频路径" min-width="200" show-overflow-tooltip />
         <el-table-column prop="caption" label="视频说明" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="product" label="商品编码" min-width="120" />
-        <el-table-column label="状态" width="100">
+        <el-table-column prop="product" label="商品编码" min-width="90" />
+        <el-table-column label="状态" width="150">
           <template #default="{ row }">
             <el-tag v-if="row.error" type="danger" size="small" :title="row.error">{{ row.error }}</el-tag>
-            <el-tag v-else :type="statusTag(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
+            <el-tag v-else-if="row.status" :type="statusTag(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
       </el-table>

@@ -297,6 +297,13 @@ function validateUploadRow(row) {
   return '';
 }
 
+/** 构造「跳过该行不上传」的错误：processJob 捕获后会在 row-error 事件带 skip 标记，前端状态列显示「失败，商品为空」 */
+function skipError(message) {
+  const e = new Error(message);
+  e.skip = true;
+  return e;
+}
+
 module.exports = {
   md5hex,
   etagOf,
@@ -312,5 +319,6 @@ module.exports = {
   probeVideoFile,
   findMoovInTail,
   validateUploadRow,
+  skipError,
   CAPTION_MAX_LENGTH,
 };

@@ -76,7 +76,8 @@ async function processJob(jobId, rows, creds, uploadOne) {
         return;
       }
       done++;
-      broadcast(jobId, { type: 'row-error', index: i, error: e.message });
+      // e.skip=true 表示「跳过该行不上传」（如商品编码为空/找不到商品），前端据此把状态列标成「失败，商品为空」
+      broadcast(jobId, { type: 'row-error', index: i, error: e.message, skip: e.skip === true });
     }
   }
   broadcast(jobId, { type: 'finished', total, done });
