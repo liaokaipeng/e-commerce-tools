@@ -492,8 +492,8 @@ async function run() {
 
     // 按店铺 SPU 配置：归一化 + 汇总
     t('normalizeSpuMap 归一化并丢弃非法项', (() => {
-      const m = hotlistingCancel.normalizeSpuMap({ 557630453: '  42555837160\n123 ', abc: '1', '557630454': '   ', '557630455': 12345 });
-      return Object.keys(m).length === 2 && m['557630453'] === '42555837160\n123' && m['557630455'] === '12345';
+      const m = hotlistingCancel.normalizeSpuMap({ 100000001: '  42555837160\n123 ', abc: '1', '100000002': '   ', '100000003': 12345 });
+      return Object.keys(m).length === 2 && m['100000001'] === '42555837160\n123' && m['100000003'] === '12345';
     })());
     t('normalizeSpuMap 非对象输入返回空对象', Object.keys(hotlistingCancel.normalizeSpuMap(null)).length === 0 && Object.keys(hotlistingCancel.normalizeSpuMap('x')).length === 0);
     t('resolvePerShopSpus 请求体为完整状态（清空也生效）', (() => {
@@ -599,12 +599,12 @@ async function run() {
     })());
 
     const u = buildShopeeUrl('/api/mkt/buybox/update_enroll', {
-      shopId: '557630453', region: 'ph', spcCds: 'abc123',
+      shopId: '100000001', region: 'ph', spcCds: 'abc123',
       business: { page_number: 1, page_size: 45, empty: '', nil: null },
     });
     t('buildShopeeUrl 拼接 HOST + 路径 + 公共参数',
       u.startsWith(`${HOST}/api/mkt/buybox/update_enroll?`) && u.includes('SPC_CDS_VER=2')
-      && u.includes('SPC_CDS=abc123') && u.includes('cnsc_shop_id=557630453') && u.includes('cbsc_shop_region=ph'), u);
+      && u.includes('SPC_CDS=abc123') && u.includes('cnsc_shop_id=100000001') && u.includes('cbsc_shop_region=ph'), u);
     t('buildShopeeUrl 带业务参数且跳过空值',
       u.includes('page_number=1') && u.includes('page_size=45') && !u.includes('empty=') && !u.includes('nil='), u);
     t('buildShopeeUrl 无 region 时不产出 cbsc_shop_region',

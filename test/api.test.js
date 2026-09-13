@@ -252,14 +252,14 @@ async function run() {
       // 模拟视频上传扩展推送凭证（按站点批量；扩展对所有站点统一推 { shops: {...} }，见 extension/background.js push）
       const r = await req('POST', '/api/creds', {
         sites: {
-          cn: { shops: { '557630453': { auth: 'NTAwMDcyMjU6dGVzdA==', cookie: 'video_upload_session_id=1; SPC_F=2' } } },
+          cn: { shops: { '100000001': { auth: 'NTAwMDcyMjU6dGVzdA==', cookie: 'video_upload_session_id=1; SPC_F=2' } } },
           ph: { shops: { '888': { auth: 'NTAwMDcyMjU6cGhwZXN0', cookie: 'x'.repeat(100), userid: '12345' } } },
         },
       });
       t('POST /api/creds（扩展推送）返回 ok', r.status === 200 && JSON.parse(r.text).ok === true, r.text);
       const g = await req('GET', '/api/creds');
       const j = JSON.parse(g.text);
-      t('POST /api/creds 后按店铺可读回', j.sites.cn.shops['557630453'] && j.sites.cn.shops['557630453'].auth.startsWith('NTAw'), g.text);
+      t('POST /api/creds 后按店铺可读回', j.sites.cn.shops['100000001'] && j.sites.cn.shops['100000001'].auth.startsWith('NTAw'), g.text);
       t('扩展 shops 格式的 ph 凭证归一化为扁平存储', j.sites.ph && j.sites.ph.auth === 'NTAwMDcyMjU6cGhwZXN0' && String(j.sites.ph.shopId) === '888' && j.sites.ph.userid === '12345', g.text);
     }
     {
@@ -268,7 +268,7 @@ async function run() {
       t('POST /api/creds 跨境缺 shopId 返回 400', r.status === 400, `status=${r.status} ${r.text}`);
       const g = await req('GET', '/api/creds');
       const j = JSON.parse(g.text);
-      t('被拒绝的推送不破坏已有跨境店铺凭证', !!(j.sites.cn && j.sites.cn.shops && j.sites.cn.shops['557630453']), g.text);
+      t('被拒绝的推送不破坏已有跨境店铺凭证', !!(j.sites.cn && j.sites.cn.shops && j.sites.cn.shops['100000001']), g.text);
     }
     {
       const r = await req('POST', '/api/start', { site: 'cn', rows: [] });
@@ -498,7 +498,7 @@ async function run() {
       // 造数据：先推送视频凭证，确保「清空后为空」断言有意义
       const seed = await req('POST', '/api/creds', {
         sites: {
-          cn: { shops: { '557630453': { auth: 'NTAwMDcyMjU6dGVzdA==', cookie: 'video_upload_session_id=1; SPC_F=2' } } },
+          cn: { shops: { '100000001': { auth: 'NTAwMDcyMjU6dGVzdA==', cookie: 'video_upload_session_id=1; SPC_F=2' } } },
           ph: { shops: { '888': { auth: 'NTAwMDcyMjU6cGhwZXN0', cookie: 'x'.repeat(100), userid: '12345' } } },
         },
       });
