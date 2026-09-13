@@ -17,16 +17,18 @@ import MonitorDrawers from './MonitorDrawers.vue';
 const {
   overview, alerts, trend, now,
   selectedShop, selectedMetric, filterLevel,
-  projectMode, soundOn, rotateOn, sseOk, flashIds,
-  rulesDrawer, ruleEdits, savingRules,
+  projectMode, soundOn, rotateOn, sseOk, flashIds, initialLoading,
+  trendDays, trendCompare,
+  rulesDrawer, ruleEdits, savingRules, ruleSuggestions, loadingSuggestions,
   shopsDrawer, shopConfig, savingShops, shopSearch,
   detailDrawer, detailAlert,
-  sortedShops, normalCount, reAuthCount,
+  sortedShops, normalCount, reAuthCount, topAlertByShop,
   openTopAlerts, openCount, tickerText, metricChips,
   selectedShopObj, selectedFail, shownShopConfig, monitoredCount,
-  selectShop, selectMetric, openRules, saveRules,
+  selectShop, selectMetric, setTrendDays, toggleTrendCompare,
+  openRules, saveRules, applySuggestion,
   openShopsConfig, setAllMonitored, saveShopsConfig,
-  saveCurrencyMode, manualCollect, alertAction, goOpenapi, openAlertDetail,
+  saveCurrencyMode, manualCollect, alertAction, batchAlertAction, goOpenapi, openAlertDetail,
 } = useMonitor();</script>
 
 <template>
@@ -48,7 +50,21 @@ const {
       @reauth="goOpenapi"
     />
 
-    <div v-if="!overview.configured || !overview.shops.length" class="empty">
+    <!-- 首次加载骨架屏：避免「空态一闪」造成误判 -->
+    <div v-if="initialLoading" class="boot">
+      <div class="boot-col">
+        <div v-for="i in 4" :key="'a' + i" class="sk sk-card"></div>
+      </div>
+      <div class="boot-col">
+        <div class="sk sk-chart"></div>
+        <div class="sk sk-matrix"></div>
+      </div>
+      <div class="boot-col">
+        <div v-for="i in 5" :key="'b' + i" class="sk sk-card"></div>
+      </div>
+    </div>
+
+    <div v-else-if="!overview.configured || !overview.shops.length" class="empty">
       <el-empty :image-size="110">
         <template #description>
           <template v-if="!overview.configured">
@@ -74,7 +90,12 @@ const {
     <!-- ===== 主体三栏 ===== -->
     <main v-else class="grid">
       <!-- 左：店铺健康墙 -->
-      <ShopWall :shops="sortedShops" :selected-shop="selectedShop" @select="selectShop" />
+      <ShopWall
+        :shops="sortedShops"
+        :selected-shop="selectedShop"
+        :top-alert="topAlertByShop"
+        @select="selectShop"
+      />
 
       <!-- 中：趋势 + 矩阵 -->
       <CenterPanels
@@ -85,8 +106,12 @@ const {
         :metric-chips="metricChips"
         :selected-fail="selectedFail"
         :trend="trend"
+        :trend-days="trendDays"
+        :trend-compare="trendCompare"
         @select-shop="selectShop"
         @select-metric="selectMetric"
+        @select-days="setTrendDays"
+        @toggle-compare="toggleTrendCompare"
       />
 
       <!-- 右：告警流 -->
@@ -96,8 +121,10 @@ const {
         :open-count="openCount"
         :shops="overview.shops"
         :flash-ids="flashIds"
+        :now="now"
         @action="alertAction"
         @detail="openAlertDetail"
+        @batch-action="batchAlertAction"
       />
     </main>
 
@@ -112,6 +139,8 @@ const {
       v-model:detailDrawer="detailDrawer"
       :rule-edits="ruleEdits"
       :saving-rules="savingRules"
+      :rule-suggestions="ruleSuggestions"
+      :loading-suggestions="loadingSuggestions"
       :shop-config="shopConfig"
       :saving-shops="savingShops"
       :shown-shop-config="shownShopConfig"
@@ -121,6 +150,7 @@ const {
       @save-rules="saveRules"
       @save-shops="saveShopsConfig"
       @set-all="setAllMonitored"
+      @apply-suggestion="applySuggestion"
     />
   </div>
 </template>

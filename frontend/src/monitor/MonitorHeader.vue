@@ -48,7 +48,7 @@ const emit = defineEmits(['currency-change', 'manual-collect', 'open-shops', 'op
       <span class="ctl" title="投屏/展示模式"><el-switch v-model="projectMode" size="small" />投影</span>
       <span class="ctl" title="P0 告警声音提醒"><el-switch v-model="soundOn" size="small" />声音</span>
       <span class="ctl" title="投影模式下每 20 秒轮换店铺"><el-switch v-model="rotateOn" size="small" />轮播</span>
-      <el-button size="small" title="立即采集所选店铺（未选择时全部店铺）" @click="emit('manual-collect')">立即采集</el-button>
+      <el-button size="small" title="立即采集全部已启用监控的店铺" @click="emit('manual-collect')">立即采集</el-button>
       <el-button size="small" title="勾选哪些已授权店铺需要监控（未勾选的不采集、不进大屏）" @click="emit('open-shops')">监控店铺</el-button>
       <el-button size="small" @click="emit('open-rules')">告警规则</el-button>
     </div>

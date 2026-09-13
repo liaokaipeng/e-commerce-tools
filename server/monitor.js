@@ -58,6 +58,72 @@ function shopView(shopId, name) {
   };
 }
 
+// ============ 阈值分位数建议（只读快照，不落盘、不自动应用） ============
+// 用途：默认阈值常与店铺实际量级不匹配（如「扣分记录数」恒为 1 却默认 p1=1 → 常驻 P1；
+// 大店广告花费远超默认阈值 → 每轮必 P0）。这里按监控店铺的历史样本算分位数给「建议值」，
+// 并给出「当前阈值历史命中率」，帮助判断阈值是否过于敏感；是否采纳完全由用户在规则面板决定。
+const SUGGEST_DAYS_DEFAULT = 30;
+const SUGGEST_MIN_SAMPLES = 20;
+
+/** 按指标单位取整建议值（百分比/评分/倍数保留 2 位，金额与计数取整） */
+function roundByUnit(v, unit) {
+  if (typeof v !== 'number' || !isFinite(v)) return null;
+  if (unit === '%' || unit === '分' || unit === '倍') return Math.round(v * 100) / 100;
+  return Math.round(v);
+}
+
+/** 升序数组的最近秩分位数（p 取 0~1） */
+function percentile(sorted, p) {
+  if (!sorted.length) return null;
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * p)));
+  return sorted[idx];
+}
+
+/** 逐规则计算历史样本（金额类先换算成人民币，与阈值比较口径一致），返回 { suggest, hitRate, flat } */
+function buildRuleSuggestions(days) {
+  const sched = scheduler.status();
+  const monitored = sched.shops.filter((s) => s.monitored && !s.authBroken);
+  const meta = store.getMeta();
+  const rulesById = store.getRulesById();
+  const out = {};
+  for (const rule of store.getRules()) {
+    if (rule.domain === 'system' || rule.type !== 'threshold') continue;
+    const metric = rule.metric;
+    const m = METRICS[metric] || {};
+    const dir = m.direction || 'up';
+    const unit = m.unit || '';
+    const money = unit === '元';
+    const samples = [];
+    for (const s of monitored) {
+      const cur = String((meta.shops && meta.shops[s.shopId] && meta.shops[s.shopId].currency) || 'CNY');
+      for (const p of store.readTrend(s.shopId, metric, days)) {
+        if (typeof p.v !== 'number' || !isFinite(p.v)) continue;
+        samples.push(money ? toRmb(p.v, cur) : p.v);
+      }
+    }
+    samples.sort((a, b) => a - b);
+    const n = samples.length;
+    // 当前阈值历史命中率（值落进任一触发级别即算命中；100% = 阈值过于敏感）
+    let hit = 0;
+    for (const v of samples) if (levelOf(metric, v, rulesById).level) hit += 1;
+    const hitRate = n ? Math.round((hit / n) * 1000) / 10 : null;
+    let suggest = null;
+    let flat = false;
+    if (n >= SUGGEST_MIN_SAMPLES) {
+      // up（越大越差）：P75/P90/P97；down（越小越差）：P25/P10/P03
+      const raw = dir === 'up'
+        ? { p2: percentile(samples, 0.75), p1: percentile(samples, 0.9), p0: percentile(samples, 0.97) }
+        : { p2: percentile(samples, 0.25), p1: percentile(samples, 0.1), p0: percentile(samples, 0.03) };
+      suggest = { p2: roundByUnit(raw.p2, unit), p1: roundByUnit(raw.p1, unit), p0: roundByUnit(raw.p0, unit) };
+      flat = suggest.p2 === suggest.p0;
+      // up 方向建议落到 0 会把「值恒为 0」变成恒触发，视为样本不足，不给建议
+      if (dir === 'up' && !(suggest.p2 > 0)) suggest = null;
+    }
+    out[rule.id] = { metric, unit, direction: dir, samples: n, hitRate, flat, suggest };
+  }
+  return { days, shops: monitored.length, suggest: out };
+}
+
 // ============ 路由注册 ============
 function register({ get, post }) {
   // 大屏总览：店铺列表（仅启用监控的店铺；含告警计数/最高级别/矩阵定级/授权状态）+ 全局统计
@@ -101,21 +167,31 @@ function register({ get, post }) {
     sendJson(res, 200, { ok: true, alerts });
   });
 
-  // 告警操作：确认 / 关闭
+  // 告警删除：单条 { id } 或批量 { ids: [] }（大屏唯一的人工操作）。
+  // 删除即从内存与落盘移除；下一轮采集若仍异常会重新触发（计数重新起算）。
   post('/api/monitor/alert-action', jsonAction('/api/monitor/alert-action', (body, req, res) => {
-    const id = String(body.id || '').trim();
     const action = String(body.action || '').trim();
-    if (!id) throw new Error('缺少告警 id');
-    const a = action === 'ack' ? engine.ackAlert(id) : action === 'close' ? engine.closeAlert(id) : null;
-    if (!a) throw new Error(action ? '无效的操作：' + action : '告警不存在');
-    sendJson(res, 200, { ok: true, alert: a });
+    if (action !== 'delete') throw new Error(action ? '无效的操作：' + action : '缺少操作 action');
+    const ids = Array.isArray(body.ids)
+      ? body.ids.map((x) => String(x || '').trim()).filter(Boolean)
+      : [String(body.id || '').trim()].filter(Boolean);
+    if (!ids.length) throw new Error('缺少告警 id');
+    const alerts = [];
+    for (const id of ids) {
+      const a = engine.deleteAlert(id);
+      if (a) alerts.push(a);
+    }
+    if (!alerts.length) throw new Error('告警不存在');
+    sendJson(res, 200, { ok: true, alert: alerts[0], alerts, count: alerts.length });
   }));
 
-  // 指标趋势（?shopId=&metric=&days=7）：采样点 + 阈值（画参考线用）；金额指标按模式换算展示
+  // 指标趋势（?shopId=&metric=&days=7&compare=1）：采样点 + 阈值（画参考线用）；金额指标按模式换算展示。
+  // compare=1 时额外返回上一周期（更早 days 天）采样点，供大屏画环比对比线。
   get('/api/monitor/trend', (req, res, url) => {
     const shopId = String(url.searchParams.get('shopId') || '').trim();
     const metric = String(url.searchParams.get('metric') || '').trim();
-    const days = Number(url.searchParams.get('days')) || 7;
+    const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days')) || 7));
+    const compare = url.searchParams.get('compare') === '1';
     if (!shopId || !metric) {
       sendJson(res, 400, { ok: false, message: '缺少 shopId 或 metric' });
       return;
@@ -127,11 +203,14 @@ function register({ get, post }) {
     const currency = String(shopMeta.currency || 'CNY');
     const mode = store.getCurrencyMode();
     let points = store.readTrend(shopId, metric, days);
+    let prevPoints = compare ? store.readTrend(shopId, metric, days, days) : [];
     let thresholds = (rule && rule.thresholds) || null;
     let unit = (m || {}).unit || '';
     if (isMoneyMetric(metric)) {
       if (mode === 'rmb') {
-        points = points.map((p) => ({ at: p.at, v: roundMoney(toRmb(p.v, currency)) }));
+        const toRmbPoints = (arr) => arr.map((p) => ({ at: p.at, v: roundMoney(toRmb(p.v, currency)) }));
+        points = toRmbPoints(points);
+        prevPoints = toRmbPoints(prevPoints);
       } else {
         // 当地货币展示：阈值参考线同步换算成当地金额（阈值口径固定人民币）
         unit = symbolOf(currency);
@@ -149,6 +228,7 @@ function register({ get, post }) {
       metric: Object.assign({}, m || {}, { id: metric, unit }),
       thresholds,
       points,
+      prevPoints,
     });
   });
 
@@ -162,6 +242,13 @@ function register({ get, post }) {
     engine.broadcast('rules', { at: Date.now() });
     sendJson(res, 200, { ok: true, rules });
   }));
+
+  // 阈值建议（?days=30）：按监控店铺历史样本算分位数建议 + 当前阈值历史命中率。
+  // 只读快照、不落盘、不自动应用；用户可在规则面板「采用」后再手动保存。
+  get('/api/monitor/rule-suggestions', (req, res, url) => {
+    const days = Math.min(90, Math.max(7, Number(url.searchParams.get('days')) || SUGGEST_DAYS_DEFAULT));
+    sendJson(res, 200, Object.assign({ ok: true }, buildRuleSuggestions(days)));
+  });
 
   // 监控店铺配置：GET 返回全部已授权店铺及其监控状态（含未监控的，供配置面板勾选）；
   // POST 保存排除名单 { excludedShopIds: [] }（未列出的已授权店铺默认监控）。

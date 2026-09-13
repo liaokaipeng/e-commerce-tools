@@ -5,6 +5,8 @@
 export const LEVEL_COLOR = { P0: '#FF3B30', P1: '#FF9500', P2: '#FFD60A' };
 export const LEVEL_NAME = { P0: '紧急', P1: '重要', P2: '提醒' };
 export const OK_COLOR = '#30D158';
+/** 已恢复 / 已关闭告警的中性色（避免模板里散落硬编码色值） */
+export const RECOVERED_COLOR = '#5b6272';
 
 // 多店对比矩阵展示的指标与顺序
 export const MATRIX_METRICS = [
@@ -16,6 +18,8 @@ export const MATRIX_METRICS = [
 ];
 
 export const DOMAIN_LABEL = { order: '订单', product: '商品', health: '健康', ads: '广告', funds: '资金', aftersale: '售后' };
+/** 矩阵分组表头的域顺序（与 MATRIX_METRICS 的分段一致） */
+export const DOMAIN_ORDER = ['order', 'product', 'health', 'ads', 'funds', 'aftersale'];
 
 // 指标 id 前缀 → 采集域（与调度任务域一致，用于定位「哪个域采集失败」）
 const METRIC_DOMAIN = [
@@ -74,4 +78,15 @@ export function fmtTime(ms) {
   const p = (n) => String(n).padStart(2, '0');
   const today = new Date().toDateString() === d.toDateString();
   return (today ? '' : `${p(d.getMonth() + 1)}-${p(d.getDate())} `) + `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 持续时长（毫秒 → 「12m」「3h20m」「2d4h」），用于告警「已持续」展示 */
+export function fmtDuration(ms) {
+  if (!ms || ms < 0) return '';
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return `${Math.max(1, min)}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h${min % 60 ? (min % 60) + 'm' : ''}`;
+  const d = Math.floor(h / 24);
+  return `${d}d${h % 24 ? (h % 24) + 'h' : ''}`;
 }

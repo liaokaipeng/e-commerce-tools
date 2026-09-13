@@ -1,8 +1,9 @@
 <script setup>
 // 中栏：趋势折线图（自持 ECharts 实例与 window resize 监听）+ 多店指标对比矩阵。
+// 趋势支持 1/7/30 天时间窗与「上一周期」环比对比线；矩阵按采集域分组表头，命中告警的单元格加重底色 + 加粗。
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { echarts, buildTrendOption } from './trend-chart.js';
-import { LEVEL_COLOR, DOMAIN_LABEL, shopName, failInfo, cellTitle } from './constants.js';
+import { DOMAIN_LABEL, shopName, failInfo, cellTitle, domainOf } from './constants.js';
 
 const props = defineProps({
   shops: { type: Array, default: () => [] },
@@ -12,9 +13,13 @@ const props = defineProps({
   metricChips: { type: Array, default: () => [] },
   selectedFail: { type: Object, default: null },
   trend: { type: Object, required: true },
+  trendDays: { type: Number, default: 7 },
+  trendCompare: { type: Boolean, default: true },
 });
 
-const emit = defineEmits(['select-shop', 'select-metric']);
+const emit = defineEmits(['select-shop', 'select-metric', 'select-days', 'toggle-compare']);
+
+const RANGE_OPTIONS = [1, 7, 30];
 
 // ---------- 对比矩阵（Element Plus 表格；店铺列 fixed 锁定，横向滚动不隐藏） ----------
 // el-table 按列取数，故把每店的 matrix 数组摊平为 __cells: { [metricId]: { v, level } }，
@@ -25,9 +30,24 @@ const matrixRows = computed(() => props.shops.map((s) => {
   return Object.assign({}, s, { __cells: cells });
 }));
 
+/** 指标按采集域分组（保持 MATRIX_METRICS 顺序），用于两级表头 */
+const metricGroups = computed(() => {
+  const groups = [];
+  for (const c of props.metricChips) {
+    const dom = domainOf(c.id) || 'other';
+    let g = groups.find((x) => x.dom === dom);
+    if (!g) { g = { dom, label: DOMAIN_LABEL[dom] || dom, chips: [] }; groups.push(g); }
+    g.chips.push(c);
+  }
+  return groups;
+});
+
 const colKey = (column) => (column && (column.columnKey || column.property)) || '';
 const isShopCol = (column) => colKey(column) === 'shop';
 const cellOf = (row, key) => (row.__cells ? row.__cells[key] : null);
+
+// 命中级别的单元格底色（比原实现更实，配白字保证对比度；加粗作为「非纯颜色」的第二重提示）
+const CELL_TINT = { P0: 'rgba(255,59,48,.30)', P1: 'rgba(255,149,0,.30)', P2: 'rgba(255,214,10,.26)' };
 
 function cellValue(row, key) {
   const c = cellOf(row, key);
@@ -39,13 +59,19 @@ function cellStyle({ row, column }) {
   const c = cellOf(row, colKey(column));
   const level = c && c.level;
   return {
-    background: level ? LEVEL_COLOR[level] + '33' : 'rgba(255,255,255,0.03)',
-    color: level ? LEVEL_COLOR[level] : '#9aa3b5',
+    background: level ? CELL_TINT[level] : 'rgba(255,255,255,0.03)',
+    color: level ? '#ffffff' : 'var(--d-text-3)',
   };
 }
 
 function cellClass({ row, column }) {
-  return isShopCol(column) ? '' : (failInfo(row, colKey(column)) ? 'cell-fail' : '');
+  if (isShopCol(column)) return '';
+  const key = colKey(column);
+  const c = cellOf(row, key);
+  const cls = [];
+  if (c && c.level) cls.push('cell-hot');
+  if (failInfo(row, key)) cls.push('cell-fail');
+  return cls.join(' ');
 }
 
 function rowClass({ row }) {
@@ -81,7 +107,7 @@ function onWinResize() {
 }
 
 watch(
-  () => props.trend.points,
+  () => [props.trend.points, props.trend.prev],
   async () => {
     await nextTick();
     renderChart();
@@ -121,14 +147,25 @@ onUnmounted(() => {
             @click="emit('select-metric', c.id)"
           >{{ c.title }}</button>
         </div>
+        <div class="tp-range">
+          <button
+            v-for="d in RANGE_OPTIONS"
+            :key="d"
+            :class="{ active: trendDays === d }"
+            @click="emit('select-days', d)"
+          >{{ d }}天</button>
+          <label class="tp-cmp" title="叠加显示上一个同长度周期，便于看环比">
+            <el-switch :model-value="trendCompare" size="small" @change="(v) => emit('toggle-compare', v)" />环比
+          </label>
+        </div>
       </div>
-      <div v-if="!selectedShopObj" class="chart-empty">选择一家店铺查看 7 天趋势曲线</div>
+      <div v-if="!selectedShopObj" class="chart-empty">选择一家店铺查看趋势曲线</div>
       <div v-else-if="trend.points.length" ref="chartEl" class="chart"></div>
       <div v-else class="chart-empty">暂无「{{ trend.metric.title }}」采样数据，等待采集（订单 10 分钟 / 商品 30 分钟 / 健康·广告·资金·售后 60 分钟）</div>
     </div>
 
     <div class="panel matrix-panel">
-      <h3>多店指标对比矩阵 <small>底色 = 该店该指标当前告警级别 · 红框 ✗ = 该域最近采集失败 · 点击单元格看趋势</small></h3>
+      <h3>多店指标对比矩阵 <small>底色加深 + 加粗 = 该指标已触发告警 · 红框 ✗ = 该域最近采集失败 · 点击单元格看趋势</small></h3>
       <div class="matrix-wrap">
         <el-table
           :data="matrixRows"
@@ -153,18 +190,26 @@ onUnmounted(() => {
             </template>
           </el-table-column>
           <el-table-column
-            v-for="c in metricChips"
-            :key="c.id"
-            :column-key="c.id"
-            :label="c.title"
-            min-width="76"
+            v-for="g in metricGroups"
+            :key="g.dom"
+            :label="g.label"
+            align="center"
+            label-class-name="dom-head"
           >
-            <template #header>
-              <span :title="c.title + (c.unit ? '（' + c.unit + '）' : '')">{{ c.title }}</span>
-            </template>
-            <template #default="{ row }">
-              <span class="m-val" :title="metricTip(row, c.id)">{{ cellValue(row, c.id) }}</span>
-            </template>
+            <el-table-column
+              v-for="c in g.chips"
+              :key="c.id"
+              :column-key="c.id"
+              :label="c.title"
+              min-width="76"
+            >
+              <template #header>
+                <span :title="c.title + (c.unit ? '（' + c.unit + '）' : '')">{{ c.title }}</span>
+              </template>
+              <template #default="{ row }">
+                <span class="m-val" :title="metricTip(row, c.id)">{{ cellValue(row, c.id) }}</span>
+              </template>
+            </el-table-column>
           </el-table-column>
         </el-table>
       </div>

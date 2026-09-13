@@ -1,10 +1,12 @@
 // 趋势折线图：ECharts 按需注册 + option 构造（纯函数，无 Vue 依赖）。
-// 图形要求：面积填充 + 三级阈值虚线 + 末点按当前告警级别着色 + 仅显示首/中/尾时间标签。
+// 图形要求：面积填充 + 三级阈值虚线 + 末点按当前告警级别着色 + 可选「上一周期」对比虚线。
+// 用 time 轴承载两条序列：把上一周期按末点对齐平移到当前周期，便于看环比。
 import * as echarts from 'echarts/core';
 import { LineChart } from 'echarts/charts';
 import {
   GridComponent,
   TooltipComponent,
+  LegendComponent,
   MarkLineComponent,
   MarkPointComponent,
   AxisPointerComponent,
@@ -12,11 +14,12 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import { LEVEL_COLOR, OK_COLOR } from './constants.js';
 
-// 按需注册：折线图 + 网格 + tooltip + 阈值线/末点标注 + 轴指针 + Canvas 渲染
+// 按需注册：折线图 + 网格 + tooltip + 图例 + 阈值线/末点标注 + 轴指针 + Canvas 渲染
 echarts.use([
   LineChart,
   GridComponent,
   TooltipComponent,
+  LegendComponent,
   MarkLineComponent,
   MarkPointComponent,
   AxisPointerComponent,
@@ -24,6 +27,8 @@ echarts.use([
 ]);
 
 export { echarts };
+
+const PREV_COLOR = '#7d86a0';
 
 /** 指标值命中的告警级别（未配置阈值或值缺失返回 null） */
 function levelOfValue(metric, th, v) {
@@ -60,14 +65,17 @@ function fmtAxisVal(v) {
   return String(Number(n.toFixed(3)));
 }
 
-/** 构造折线图 option（trend = { metric, thresholds, points }） */
+/** 构造折线图 option（trend = { metric, thresholds, points, prev }） */
 export function buildTrendOption(trend) {
   const pts = trend.points || [];
+  const prev = trend.prev || [];
   const th = trend.thresholds || {};
   const thVals = Object.values(th).filter((x) => typeof x === 'number');
   const vals = pts.map((p) => p.v);
-  let min = Math.min(...vals, ...thVals);
-  let max = Math.max(...vals, ...thVals);
+  const prevVals = prev.map((p) => p.v);
+  let min = Math.min(...vals, ...prevVals, ...thVals);
+  let max = Math.max(...vals, ...prevVals, ...thVals);
+  if (!isFinite(min) || !isFinite(max)) { min = 0; max = 1; }
   if (min === max) { min -= 1; max += 1; }
   const span = max - min;
   min -= span * 0.12; max += span * 0.12;
@@ -77,8 +85,7 @@ export function buildTrendOption(trend) {
 
   const p2 = (n) => String(n).padStart(2, '0');
   const fmtTick = (at) => {
-    // 类目轴的类别值是字符串（数字时间戳被转成 "1786864001032"），
-    // 必须先 Number() 再 new Date，否则得到 Invalid Date（横轴全是 NaN）
+    // time 轴的刻度值是毫秒数；category 轴旧数据是字符串时间戳，统一先 Number 再 Date
     const d = new Date(Number(at));
     if (Number.isNaN(d.getTime())) return '';
     return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
@@ -99,11 +106,56 @@ export function buildTrendOption(trend) {
   const lv = levelOfValue(trend.metric, th, last.v);
   const lastColor = lv ? (LEVEL_COLOR[lv] || '#ffffff') : OK_COLOR;
   const lastLabel = `${last.v}${(trend.metric && trend.metric.unit) || ''}${lv ? '（' + lv + '）' : ''}`;
-  const mid = Math.floor((pts.length - 1) / 2);
+
+  // 上一周期按「末点对齐」平移到当前周期（比较「现在 vs 上一周期同一进度」）
+  const lastPrev = prev[prev.length - 1];
+  const shift = (lastPrev && lastPrev.at) ? (last.at - lastPrev.at) : 0;
+  const prevData = prev.map((p) => [p.at + shift, p.v]);
+
+  const series = [
+    {
+      type: 'line',
+      name: (trend.metric && trend.metric.title) || '值',
+      data: pts.map((p) => [p.at, p.v]),
+      symbol: 'circle',
+      symbolSize: 5,
+      lineStyle: { color: '#5a6ce0', width: 2 },
+      itemStyle: { color: '#5a6ce0' },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(74, 91, 216, 0.25)' },
+          { offset: 1, color: 'rgba(74, 91, 216, 0)' },
+        ]),
+      },
+      markLine: markLines.length ? { symbol: 'none', silent: true, data: markLines } : undefined,
+      markPoint: {
+        symbol: 'circle',
+        symbolSize: 9,
+        itemStyle: { color: lastColor },
+        label: { color: '#eef1f8', fontSize: 10, fontWeight: 600, position: 'top', distance: 6 },
+        data: [{ coord: [last.at, last.v], value: lastLabel }],
+      },
+    },
+  ];
+  if (prevData.length) {
+    series.push({
+      type: 'line',
+      name: '上一周期',
+      data: prevData,
+      symbol: 'none',
+      lineStyle: { color: PREV_COLOR, width: 1.4, type: 'dashed' },
+      itemStyle: { color: PREV_COLOR },
+      z: 1,
+    });
+  }
 
   return {
     animationDuration: 200,
-    grid: { left: 52, right: 16, top: 18, bottom: 26 },
+    color: ['#5a6ce0', PREV_COLOR],
+    grid: { left: 52, right: 16, top: 30, bottom: 26 },
+    legend: prevData.length
+      ? { top: 4, right: 12, itemWidth: 14, itemHeight: 8, textStyle: { color: '#9aa3ba', fontSize: 10 } }
+      : undefined,
     tooltip: {
       trigger: 'axis',
       backgroundColor: '#171b2e',
@@ -115,25 +167,20 @@ export function buildTrendOption(trend) {
         const unit = (trend.metric && trend.metric.unit) || '';
         const head = fmtTick(arr[0] && arr[0].axisValue);
         const lines = arr.map((p) => {
-          const v = p.value === null || p.value === undefined ? '—' : `${p.value}${unit}`;
+          const raw = Array.isArray(p.value) ? p.value[1] : p.value;
+          const v = raw === null || raw === undefined ? '—' : `${raw}${unit}`;
           return `${p.marker}${p.seriesName}：${v}`;
         });
         return [head, ...lines].join('<br/>');
       },
     },
     xAxis: {
-      type: 'category',
+      type: 'time',
       boundaryGap: false,
-      data: pts.map((p) => p.at),
       axisLine: { lineStyle: { color: '#1e2440' } },
       axisTick: { show: false },
-      axisLabel: {
-        color: '#6d7690',
-        fontSize: 9,
-        formatter: (v) => fmtTick(v),
-        // 与旧版一致：仅显示首 / 中 / 尾三个时间标签
-        interval: (idx) => idx === 0 || idx === pts.length - 1 || idx === mid,
-      },
+      axisLabel: { color: '#6d7690', fontSize: 9, formatter: (v) => fmtTick(v), hideOverlap: true },
+      splitLine: { show: false },
     },
     yAxis: {
       type: 'value',
@@ -143,30 +190,6 @@ export function buildTrendOption(trend) {
       axisLabel: { color: '#6d7690', fontSize: 9, formatter: (v) => fmtAxisVal(v) },
       splitLine: { lineStyle: { color: '#1e2440' } },
     },
-    series: [
-      {
-        type: 'line',
-        name: (trend.metric && trend.metric.title) || '值',
-        data: vals,
-        symbol: 'circle',
-        symbolSize: 5,
-        lineStyle: { color: '#5a6ce0', width: 2 },
-        itemStyle: { color: '#5a6ce0' },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(74, 91, 216, 0.25)' },
-            { offset: 1, color: 'rgba(74, 91, 216, 0)' },
-          ]),
-        },
-        markLine: markLines.length ? { symbol: 'none', silent: true, data: markLines } : undefined,
-        markPoint: {
-          symbol: 'circle',
-          symbolSize: 9,
-          itemStyle: { color: lastColor },
-          label: { color: '#eef1f8', fontSize: 10, fontWeight: 600, position: 'top', distance: 6 },
-          data: [{ coord: [pts.length - 1, last.v], value: lastLabel }],
-        },
-      },
-    ],
+    series,
   };
 }

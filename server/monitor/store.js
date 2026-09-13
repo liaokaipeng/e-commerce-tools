@@ -188,14 +188,21 @@ function appendSample(shopId, metric, v, at) {
   }
 }
 
-/** 读取最近 days 天（含今天）的采样点，按时间升序 */
-function readTrend(shopId, metric, days) {
+/**
+ * 读取采样点，按时间升序。
+ * @param {number} days 窗口天数（含今天）
+ * @param {number} [offsetDays] 窗口后移天数：0=最近窗口，days=上一周期窗口（环比对比用）
+ */
+function readTrend(shopId, metric, days, offsetDays) {
   const dir = path.join(SNAPSHOT_DIR, String(shopId), String(metric));
   const points = [];
   try {
     if (!fs.existsSync(dir)) return points;
     const names = fs.readdirSync(dir).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort();
-    const keep = names.slice(-Math.max(1, days || 7));
+    const win = Math.max(1, days || 7);
+    const off = Math.max(0, offsetDays || 0);
+    // offsetDays=0 取最近 win 天；否则取「更早的 win 天」（避免与当前窗口重叠）
+    const keep = off ? names.slice(-(win + off), -off) : names.slice(-win);
     for (const f of keep) {
       const arr = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
       if (Array.isArray(arr)) for (const p of arr) if (p && typeof p.v === 'number') points.push({ at: p.at, v: p.v });

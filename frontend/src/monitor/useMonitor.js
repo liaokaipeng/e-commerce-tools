@@ -28,7 +28,10 @@ export function useMonitor() {
   });
   const alerts = ref([]);
   const rules = ref([]);
-  const trend = reactive({ metric: { id: '', title: '', unit: '' }, thresholds: null, points: [] });
+  const trend = reactive({ metric: { id: '', title: '', unit: '' }, thresholds: null, points: [], prev: [] });
+  // 趋势时间窗（1/7/30 天）与环比对比线开关
+  const trendDays = ref(7);
+  const trendCompare = ref(true);
   const selectedShop = ref('');
   const selectedMetric = ref('order.pending_24h');
   const filterLevel = ref('');
@@ -36,9 +39,12 @@ export function useMonitor() {
   const soundOn = ref(true);
   const rotateOn = ref(true);
   const sseOk = ref(false);
+  const initialLoading = ref(true);
   const flashIds = reactive(new Set());
   const rulesDrawer = ref(false);
   const ruleEdits = ref([]);
+  const ruleSuggestions = ref({});
+  const loadingSuggestions = ref(false);
   const savingRules = ref(false);
   const shopsDrawer = ref(false);
   const shopConfig = ref([]);
@@ -80,6 +86,20 @@ export function useMonitor() {
   const openTopAlerts = computed(() => alerts.value.filter((a) => a.status === 'open' && (a.level === 'P0' || a.level === 'P1')));
 
   const openCount = computed(() => alerts.value.filter((a) => a.status !== 'recovered').length);
+
+  /** 每店最高优先级的未关闭告警（店铺墙「最高告警」摘要用） */
+  const topAlertByShop = computed(() => {
+    const m = {};
+    for (const a of alerts.value) {
+      if (a.status !== 'open' && a.status !== 'ack') continue;
+      const cur = m[a.shopId];
+      if (!cur || levelRank(a.level) > levelRank(cur.level)
+        || (levelRank(a.level) === levelRank(cur.level) && a.updatedAt > cur.updatedAt)) {
+        m[a.shopId] = a;
+      }
+    }
+    return m;
+  });
 
   const tickerText = computed(() => openTopAlerts.value
     .map((a) => `【${a.level}】${shopName(overview.shops.find((s) => s.shopId === a.shopId))} ${a.title}：${a.message}`)
@@ -186,14 +206,17 @@ export function useMonitor() {
 
   async function loadTrend(shopId, metric) {
     trend.points = [];
+    trend.prev = [];
     if (!shopId || !metric) return;
     try {
-      const r = await fetch(`/api/monitor/trend?shopId=${encodeURIComponent(shopId)}&metric=${encodeURIComponent(metric)}&days=7`);
+      const q = `days=${trendDays.value}${trendCompare.value ? '&compare=1' : ''}`;
+      const r = await fetch(`/api/monitor/trend?shopId=${encodeURIComponent(shopId)}&metric=${encodeURIComponent(metric)}&${q}`);
       const j = await r.json();
       if (j && j.ok) {
         trend.metric = j.metric || trend.metric;
         trend.thresholds = j.thresholds;
         trend.points = j.points || [];
+        trend.prev = j.prevPoints || [];
       }
     } catch { /* 忽略 */ }
   }
@@ -206,9 +229,12 @@ export function useMonitor() {
   function upsertAlert(a) {
     if (!a) return;
     const i = alerts.value.findIndex((x) => x.id === a.id);
-    if (a.status === 'closed') {
+    // 删除（change=delete）与历史遗留的「已关闭」都从列表移除
+    if (a.change === 'delete' || a.status === 'closed') {
       if (i >= 0) alerts.value.splice(i, 1);
-    } else if (i >= 0) alerts.value.splice(i, 1, a);
+      return;
+    }
+    if (i >= 0) alerts.value.splice(i, 1, a);
     else alerts.value.unshift(a);
     alerts.value.sort((x, y) => levelRank(y.level) - levelRank(x.level) || y.updatedAt - x.updatedAt);
   }
@@ -222,8 +248,31 @@ export function useMonitor() {
       });
       const j = await r.json();
       if (r.ok && j.ok) {
-        upsertAlert(j.alert);
-        showToast(action === 'ack' ? '已确认' : '已关闭', 'success');
+        upsertAlert(j.alert); // 响应里的告警带 change:'delete'，upsertAlert 会从列表移除
+        showToast(action === 'delete' ? '已删除该告警' : '操作已完成', 'success');
+        refreshSoon(); // 总览计数（P0/P1/P2 徽标、店铺墙）同步刷新，SSE 断开时也能及时更新
+      } else showToast(j.message || '操作失败', 'error');
+    } catch (e) {
+      showToast('本地服务异常：' + e.message, 'error');
+    }
+  }
+
+  /** 批量确认 / 关闭（告警流多选操作；后端支持 { ids } 形态） */
+  async function batchAlertAction(ids, action) {
+    const list = (ids || []).filter(Boolean);
+    if (!list.length) return;
+    try {
+      const r = await fetch('/api/monitor/alert-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: list, action }),
+      });
+      const j = await r.json();
+      if (r.ok && j.ok) {
+        // 响应里的每条告警都带 change:'delete'，upsertAlert 逐条从列表移除
+        for (const a of (j.alerts || [j.alert])) if (a) upsertAlert(a);
+        showToast(`已删除 ${j.count || list.length} 条告警`, 'success');
+        refreshSoon(); // 总览计数同步刷新（SSE 断开时也能及时更新）
       } else showToast(j.message || '操作失败', 'error');
     } catch (e) {
       showToast('本地服务异常：' + e.message, 'error');
@@ -235,7 +284,7 @@ export function useMonitor() {
       const r = await fetch('/api/monitor/collect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopId: selectedShop.value || '' }),
+        body: JSON.stringify({}),
       });
       const j = await r.json();
       showToast(r.ok && j.ok ? j.message || '已触发采集' : j.message || '触发失败', r.ok && j.ok ? 'success' : 'error');
@@ -277,6 +326,18 @@ export function useMonitor() {
     loadTrend(selectedShop.value, metric);
   }
 
+  /** 切换趋势时间窗（1/7/30 天）并重新拉取 */
+  function setTrendDays(d) {
+    trendDays.value = d;
+    loadTrend(selectedShop.value, selectedMetric.value);
+  }
+
+  /** 切换环比对比线开关并重新拉取 */
+  function toggleTrendCompare(v) {
+    trendCompare.value = v;
+    loadTrend(selectedShop.value, selectedMetric.value);
+  }
+
   // ---------- 规则面板 ----------
   function openRules() {
     ruleEdits.value = rules.value.map((r) => ({
@@ -289,6 +350,31 @@ export function useMonitor() {
       p0: r.thresholds && typeof r.thresholds.p0 === 'number' ? r.thresholds.p0 : null,
     }));
     rulesDrawer.value = true;
+    loadRuleSuggestions();
+  }
+
+  /** 拉取阈值分位数建议（只读快照，不落盘、不自动应用） */
+  async function loadRuleSuggestions() {
+    loadingSuggestions.value = true;
+    try {
+      const r = await fetch('/api/monitor/rule-suggestions?days=30');
+      const j = await r.json();
+      if (j && j.ok) ruleSuggestions.value = j.suggest || {};
+    } catch { /* 忽略：建议不可用不影响手动编辑 */ } finally {
+      loadingSuggestions.value = false;
+    }
+  }
+
+  /** 把某条规则的历史建议填入编辑行（仅填输入框，仍需用户点「保存」才生效） */
+  function applySuggestion(id) {
+    const s = ruleSuggestions.value[id];
+    if (!s || !s.suggest) return;
+    const row = ruleEdits.value.find((e) => e.id === id);
+    if (!row) return;
+    row.p2 = s.suggest.p2;
+    row.p1 = s.suggest.p1;
+    row.p0 = s.suggest.p0;
+    showToast('已填入历史建议值，请确认后点「保存」生效', 'info');
   }
 
   async function saveRules() {
@@ -472,6 +558,7 @@ export function useMonitor() {
     await loadOverview();
     await loadAlerts();
     await loadRules();
+    initialLoading.value = false;
     const firstAlert = sortedShops.value.find((s) => s.alerts.maxLevel) || sortedShops.value[0];
     if (firstAlert) selectShop(firstAlert.shopId);
     connectSse();
@@ -509,17 +596,19 @@ export function useMonitor() {
     // 状态
     overview, rules, trend, now,
     selectedShop, selectedMetric, filterLevel,
-    projectMode, soundOn, rotateOn, sseOk, flashIds,
-    rulesDrawer, ruleEdits, savingRules,
+    projectMode, soundOn, rotateOn, sseOk, flashIds, initialLoading,
+    trendDays, trendCompare,
+    rulesDrawer, ruleEdits, savingRules, ruleSuggestions, loadingSuggestions,
     shopsDrawer, shopConfig, savingShops, shopSearch,
     detailDrawer, detailAlert,
     // 派生
     alerts: shownAlerts, sortedShops, normalCount, reAuthCount,
-    openTopAlerts, openCount, tickerText, metricChips,
+    openTopAlerts, openCount, tickerText, metricChips, topAlertByShop,
     selectedShopObj, selectedFail, shownShopConfig, monitoredCount,
     // 动作
-    selectShop, selectMetric, openRules, saveRules,
+    selectShop, selectMetric, setTrendDays, toggleTrendCompare,
+    openRules, saveRules, applySuggestion,
     openShopsConfig, setAllMonitored, saveShopsConfig,
-    saveCurrencyMode, manualCollect, alertAction, goOpenapi, openAlertDetail,
+    saveCurrencyMode, manualCollect, alertAction, batchAlertAction, goOpenapi, openAlertDetail,
   };
 }

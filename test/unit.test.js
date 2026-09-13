@@ -1095,6 +1095,21 @@ async function run() {
     engine.ingest('T1', 'order', { 'order.pending_24h': 4 }, now + 360000);
     list = engine.getAlerts({ shopId: 'T1', status: 'open' });
     t('引擎：关闭后再次触发重新打开且 seq+1', list.length === 1 && list[0].seq === seqBefore + 1);
+    // 删除：彻底移除（默认列表与 closed 历史都查不到），重复删除幂等，删除后再触发按新记录重建
+    const delId = list[0].id;
+    const removed = engine.deleteAlert(delId);
+    t('引擎：删除返回被删告警且各处均不再包含',
+      !!removed && removed.id === delId
+      && engine.getAlerts({ shopId: 'T1' }).filter((a) => a.id === delId).length === 0
+      && engine.getAlerts({ shopId: 'T1', status: 'closed' }).filter((a) => a.id === delId).length === 0,
+      JSON.stringify(removed));
+    // 返回值必须带 change:'delete'（与 SSE 事件形态一致）：HTTP 响应回发起页面后
+    // 前端 upsertAlert 据此移除；不带会把已删告警塞回列表（「删除后闪回」bug）
+    t('引擎：删除返回值带 change:delete（供前端响应路径移除）', !!removed && removed.change === 'delete', JSON.stringify(removed));
+    t('引擎：重复删除返回 null（幂等）', engine.deleteAlert(delId) === null);
+    engine.ingest('T1', 'order', { 'order.pending_24h': 4 }, now + 420000);
+    const recreated = engine.getAlerts({ shopId: 'T1' }).filter((a) => a.id === delId);
+    t('引擎：删除后再次触发按新记录重建（seq 重置为 1）', recreated.length === 1 && recreated[0].seq === 1 && recreated[0].status === 'open', JSON.stringify(recreated[0]));
   }
 
   // ===== 监控：告警消息明细（ingest 第 5 参 details） =====
@@ -1254,6 +1269,12 @@ async function run() {
     const pts = monitorStore.readTrend('S1', 'order.pending_24h', 7);
     t('快照：写入后可读回且按时间升序', pts.length === 2 && pts[0].v === 5 && pts[1].v === 8, JSON.stringify(pts));
     t('快照：不存在的店铺/指标返回空', monitorStore.readTrend('S1', 'nope.x', 7).length === 0);
+    // offsetDays：offset=days 取「上一周期」窗口（大屏环比对比线用）
+    monitorStore.appendSample('S2', 'order.pending_24h', 9, now);
+    monitorStore.appendSample('S2', 'order.pending_24h', 3, now - 8 * 24 * 3600 * 1000);
+    const curWin = monitorStore.readTrend('S2', 'order.pending_24h', 1, 0);
+    const prevWin = monitorStore.readTrend('S2', 'order.pending_24h', 1, 1);
+    t('快照：readTrend offsetDays 取上一周期窗口', curWin.length === 1 && curWin[0].v === 9 && prevWin.length === 1 && prevWin[0].v === 3, JSON.stringify({ curWin, prevWin }));
     let threw = false;
     try { monitorStore.setRuleOverrides({ 'unknown.rule': { enabled: false } }); } catch { threw = true; }
     t('规则覆盖：未知规则 id 报错', threw);

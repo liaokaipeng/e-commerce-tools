@@ -329,6 +329,22 @@ function closeAlert(id) {
   return Object.assign({}, a);
 }
 
+/**
+ * 人工删除告警：从内存与落盘移除（区别于 closeAlert 的「终端态保留」）。
+ * 大屏上以「删除」为唯一人工操作；删除后下一轮采集若仍异常会重新触发（计数重新起算）。
+ * 已不存在时返回 null（幂等）。
+ */
+function deleteAlert(id) {
+  const i = alerts.findIndex((x) => x.id === id);
+  if (i < 0) return null;
+  const [a] = alerts.splice(i, 1);
+  alertsDirty = true;
+  broadcast('alert', Object.assign({}, a, { change: 'delete' }));
+  // 返回值同样带 change:'delete'（与 SSE 事件形态一致）：路由把它随响应发回发起页面，
+  // 前端 upsertAlert 据此移除；不带的话响应回填会把刚删除的告警塞回列表（「闪回」bug）
+  return Object.assign({}, a, { change: 'delete' });
+}
+
 /** 清空全部告警（内存 + 落盘 + 广播 reset），供缓存清理调用；注意原地清空（_test 持有同一数组引用） */
 function clearAllAlerts() {
   alerts.splice(0, alerts.length);
@@ -407,6 +423,7 @@ module.exports = {
   systemOk,
   ackAlert,
   closeAlert,
+  deleteAlert,
   closeShopAlerts,
   clearAllAlerts,
   getAlerts,
