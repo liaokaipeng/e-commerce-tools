@@ -7,54 +7,45 @@ const {
   streamHashes,
   decryptVodToken,
   awsSigV4,
-  probeVideoFile,
-  validateUploadRow,
-  skipError,
 } = require('../lib/video-utils');
+const {
+  assertRowValid,
+  resolveProduct,
+  isNumericCode,
+  itemsOf,
+  assertItemListOk,
+  logItemMatch,
+  throwProductNotFound,
+  pickService,
+  preuploadRequest,
+  reportuploadRequest,
+  assertReportUpload,
+  probeAndLog,
+} = require('./steps');
 
-// ------- 单个视频的完整上传（本土菲律宾 .ph） -------
-// 链路：item/list 查商品（前置校验） -> task/create -> vod/preupload -> 单次 PUT 整文件
-//       -> vod/reportupload -> task/edit 写标题/商品 -> task/post 发布
-// 与跨境不同：无分片/merge，无 solutions 域名，biz=201，region=PH。
-async function uploadOnePh(row, creds, site, log, signal) {
-  const S = SITES[site];
-  const cookie = creds.cookie || '';
-  const filePath = row.path;
-  const rowErr = validateUploadRow(row);
-  if (rowErr) throw new Error(rowErr);
-
-  // 商品前置校验①：未配置商品编码 → 直接跳过，不上传（前端状态列显示「失败，商品为空」）
-  const product = String(row.product || '').trim();
-  if (!product) {
-    log('item', '未配置商品编码，跳过上传');
-    throw skipError('未配置商品编码，已跳过上传');
-  }
-
-  // MMS 上传接口（preupload/reportupload）不带 Cookie：带上会返回跨区 uploaddomain 导致 400。
-  // 且必须 useJar:false——请求不显式带 Cookie 时，Cookie 罐里该 host 的残留 set-cookie 会被
-  // 「jar 补齐」逻辑整条带上，同样触发 400（表现为间歇性，preupload 响应下发过 cookie 即发作）
-  const mmsH = {
+// MMS 上传接口（preupload/reportupload）不带 Cookie：带上会返回跨区 uploaddomain 导致 400。
+// 且必须 useJar:false——请求不显式带 Cookie 时，Cookie 罐里该 host 的残留 set-cookie 会被
+// 「jar 补齐」逻辑整条带上，同样触发 400（表现为间歇性，preupload 响应下发过 cookie 即发作）
+function mmsHeaders(S) {
+  return {
     'content-type': 'application/json',
     accept: 'application/json, text/plain, */*',
     origin: S.origin,
     referer: S.origin + '/',
     'user-agent': UA,
   };
-  // creator.shopee.ph 业务接口（task/create、item/list、task/edit、task/post）带 Cookie
-  const jsonH = Object.assign({ cookie }, mmsH);
+}
 
-  log('read', `读取文件: ${filePath}`);
-  const hashes = await streamHashes(filePath);
-  const fsize = hashes.size;
-  const wholeMd5hex = hashes.md5;
-  const payloadSha256 = hashes.sha256;
+// creator.shopee.ph 业务接口（task/create、item/list、task/edit、task/post）带 Cookie
+function jsonHeaders(S, cookie) {
+  return Object.assign({ cookie }, mmsHeaders(S));
+}
 
-  // 商品前置校验②：配置了商品但查不到 → 跳过上传（原逻辑在上传完成后才查询，现提前到上传前，避免白传大文件）
-  let itemId = null;
-  let productItem = null;
+// 商品前置校验②：配置了商品但查不到 → 跳过上传（原逻辑在上传完成后才查询，现提前到上传前，避免白传大文件）
+async function findProductItem({ product, S, jsonH, log, signal }) {
   log('item', `查询商品编码: ${product}`);
   // itemName 只按商品名称模糊匹配；纯数字的商品编码需走 itemId 参数精确查询
-  const isCode = /^\d+$/.test(product);
+  const isCode = isNumericCode(product);
   const qs = isCode
     ? `page=1&pageSize=10&itemId=${encodeURIComponent(product)}`
     : `page=1&pageSize=10&itemName=${encodeURIComponent(product)}`;
@@ -66,44 +57,45 @@ async function uploadOnePh(row, creds, site, log, signal) {
   });
   // Cookie 失效时 creator 常返回 302/HTML 登录页（或网关错误页），items 为空——
   // 若不区分会误报「商品不存在」跳过上传；登录态问题是硬失败，不能当 skip 处理
-  if (il.status !== 200 || !il.json) {
-    throw new Error(`商品查询失败(HTTP ${il.status})，很可能是 creator 登录态已失效。请重新登录 creator.shopee.ph 后让扩展重新抓取 Cookie 再试。响应: ${il.text.slice(0, 200)}`);
-  }
-  const items = (il.json && il.json.data && il.json.data.items) || [];
+  assertItemListOk(
+    il,
+    (r) => `商品查询失败(HTTP ${r.status})，很可能是 creator 登录态已失效。请重新登录 creator.shopee.ph 后让扩展重新抓取 Cookie 再试。响应: ${r.text.slice(0, 200)}`
+  );
+  const items = itemsOf(il);
   const hit = isCode ? items.find((it) => String(it.itemId) === product) : items[0];
   if (hit) {
-    itemId = hit.itemId;
-    productItem = hit;
-    log('item', `匹配到 item_id=${itemId}`);
-  } else {
-    log('item', `未找到商品，响应: ${il.text.slice(0, 300)}`);
-    throw skipError(`未找到商品编码 ${product} 对应的商品，已跳过上传`);
+    logItemMatch(log, hit.itemId);
+    return { itemId: hit.itemId, productItem: hit };
   }
+  throwProductNotFound(product, log, il.text);
+}
 
+async function createTask({ S, jsonH, signal, log }) {
   // 1. task/create 创建发布任务
   log('task', '创建发布任务(task/create)...');
   const tc = await call({ method: 'POST', url: `${S.creator}/publish/pc/api/task/create`, headers: jsonH, body: '{}', signal });
   const tcData = (tc.json && tc.json.data) || {};
   const taskId = tcData.taskId;
   if (!taskId) throw new Error(`task/create 未返回 taskId。响应: ${tc.text.slice(0, 300)}`);
+  return taskId;
+}
 
-  // 2. vod/preupload 申请上传，拿 vid / uploaddomain / token
+// 2. vod/preupload 申请上传，拿 vid / uploaddomain / token
+async function applyUpload({ S, mmsH, creds, signal, log }) {
   log('preupload', '申请上传(vod/preupload)...');
-  const preResp = await call({
-    method: 'POST',
+  const preResp = await preuploadRequest({
     url: `${S.mms}/uploadapi/api/v1/vod/preupload`,
-    signal,
-    useJar: false, // MMS 接口不带 Cookie（含 jar 罐，见 mmsH 注释）
     headers: Object.assign({ 'content-type': 'application/json;charset=UTF-8' }, mmsH),
-    body: JSON.stringify({
+    payload: {
       biz: S.biz,
       ver: 2,
       mediatype: 1,
       reportdata: { sdkversion: S.sdkversion, appversion: S.sdkversion, ostype: S.ostype, userid: creds.userid || '', reporttime: Date.now() },
-    }),
+    },
+    signal,
   });
   const preData = (preResp.json && preResp.json.data) || {};
-  const pre0 = (preData.services || []).find((s) => s.serviceid === 'shopeeuss') || preData.services[0] || {};
+  const pre0 = pickService(preData);
   const vid = preData.vid;
   // access_key / token 均为 AES 加密，需按前端 SDK 逻辑解密后使用
   const accessKey = pre0.access_key ? decryptVodToken(pre0.access_key, S.biz) : '';
@@ -116,13 +108,17 @@ async function uploadOnePh(row, creds, site, log, signal) {
   }
   // 只打印非敏感的关键字段（vid / 域名 / 存储桶），凭证本身不入日志
   log('preupload', `vid=${vid} uploaddomain=${uploaddomain} bucket=${pre0.bucket || '(空)'} urlformat=${urlformat || '(空)'}`);
-  // 3. 单次 PUT 上传整个文件（S3/COS 风格，AWS SigV4 签名）
+  return { vid, accessKey, secretKey, token, uploaddomain, urlformat, bucket: pre0.bucket || '' };
+}
+
+// 3. 单次 PUT 上传整个文件（S3/COS 风格，AWS SigV4 签名）
+async function putObject({ S, filePath, fsize, vid, accessKey, secretKey, uploaddomain, urlformat, bucket, payloadSha256, signal, log }) {
   // 对象键：urlformat 是下载 CDN 地址（含 api/v4/xxx/mms 路由前缀），不是存储键；
   // 需用 preupload 返回的 bucket + keyformat 拼出真实对象键（如 /mms/{vid}.mp4）。
   const uploadUrl = urlformat ? urlformat.replace('{vid}', vid).replace('{extend}', 'mp4') : '';
   const fileKey = vid + '.mp4';
-  const bucket = (pre0.bucket || '').replace(/^\/+/, '').replace(/\/+$/, '');
-  const objectKey = bucket ? `/${bucket}/${fileKey}` : `/${fileKey}`;
+  const bucketKey = (bucket || '').replace(/^\/+/, '').replace(/\/+$/, '');
+  const objectKey = bucketKey ? `/${bucketKey}/${fileKey}` : `/${fileKey}`;
   const upUrl = new URL(uploaddomain);
   const upHost = upUrl.hostname;
   log('upload', `上传文件到 ${uploaddomain}${objectKey}?x-id=PutObject (urlformat=${uploadUrl}) ...`);
@@ -183,19 +179,16 @@ async function uploadOnePh(row, creds, site, log, signal) {
     throw new Error(`文件上传失败(HTTP ${putResp.status})。响应: ${putResp.text.slice(0, 300)}`);
   }
   log('upload', `上传完成，${fsize} bytes`);
+  return uploadUrl;
+}
 
-  // 4. vod/reportupload 上报
-  const extendid = vid;
-  const videourl = uploadUrl;
+// 4. vod/reportupload 上报
+async function reportResult({ S, mmsH, creds, vid, uploaddomain, extendid, fsize, wholeMd5hex, videourl, signal, log }) {
   log('report', '上报上传结果(vod/reportupload)...');
-  const repResp = await call({
-    method: 'POST',
+  const repResp = await reportuploadRequest({
     url: `${S.mms}/uploadapi/api/v1/vod/reportupload`,
-    signal,
-    idempotent: false, // 写操作：不重放（详见 request.js call 的说明）
-    useJar: false, // MMS 接口不带 Cookie（含 jar 罐，见 mmsH 注释）
     headers: mmsH,
-    body: JSON.stringify({
+    payload: {
       vid,
       mid: '',
       serviceid: 'shopeeuss',
@@ -209,23 +202,16 @@ async function uploadOnePh(row, creds, site, log, signal) {
       code: 0,
       reportdata: { cost: 0, sdkversion: S.sdkversion, ostype: S.ostype, reporttime: Date.now(), userid: creds.userid || '' },
       fileinfos: { mediatype: 1 },
-    }),
+    },
+    signal,
   });
   log('report', `响应: ${repResp.text.slice(0, 200)}`);
   // 上报失败若继续 task/edit/post，后续报错（视频不存在等）会掩盖真实原因，这里先校验
-  if (repResp.status !== 200) {
-    throw new Error(`reportupload 失败(HTTP ${repResp.status})。响应: ${repResp.text.slice(0, 300)}`);
-  }
-  if (repResp.json && typeof repResp.json.code === 'number' && repResp.json.code !== 0) {
-    throw new Error(`reportupload 业务失败(code=${repResp.json.code})。响应: ${repResp.text.slice(0, 300)}`);
-  }
+  assertReportUpload(repResp);
+}
 
-  // 5. 本地探测视频元信息
-  const meta = probeVideoFile(filePath);
-  if (!meta.width || !meta.height || !meta.duration) log('edit', '警告: 未能完整解析视频宽高/时长，将提交解析值');
-  log('edit', `视频元信息: ${meta.width}x${meta.height}, ${meta.duration}ms`);
-
-  // 6. task/edit 写入标题/商品/元信息
+// 6. task/edit 写入标题/商品/元信息
+async function editTask({ S, jsonH, taskId, vid, row, productItem, meta, signal, log }) {
   const editBody = {
     taskList: [{
       taskId,
@@ -248,8 +234,10 @@ async function uploadOnePh(row, creds, site, log, signal) {
     throw new Error(`task/edit 失败(${editResp.status})。响应: ${editResp.text.slice(0, 500)}`);
   }
   log('edit', '写入成功');
+}
 
-  // 8. task/post 发布
+// 8. task/post 发布
+async function postTask({ S, jsonH, taskId, signal, log }) {
   log('post', '发布(task/post)...');
   const postResp = await call({ method: 'POST', url: `${S.creator}/publish/pc/api/task/post`, headers: jsonH, body: JSON.stringify({ taskIdList: [taskId] }), signal, idempotent: false });
   const postTask = ((postResp.json && postResp.json.data && postResp.json.data.taskList) || [])[0] || {};
@@ -257,7 +245,44 @@ async function uploadOnePh(row, creds, site, log, signal) {
     throw new Error(`task/post 失败(${postResp.status})。响应: ${postResp.text.slice(0, 500)}`);
   }
   log('post', '发布成功');
-  return { vid, taskId, itemId, response: postResp.text.slice(0, 300) };
+  return postResp.text.slice(0, 300);
+}
+
+// ------- 单个视频的完整上传（本土菲律宾 .ph） -------
+// 链路：item/list 查商品（前置校验） -> task/create -> vod/preupload -> 单次 PUT 整文件
+//       -> vod/reportupload -> task/edit 写标题/商品 -> task/post 发布
+// 与跨境不同：无分片/merge，无 solutions 域名，biz=201，region=PH。
+async function uploadOnePh(row, creds, site, log, signal) {
+  const S = SITES[site];
+  const cookie = creds.cookie || '';
+  const filePath = row.path;
+  assertRowValid(row);
+  const product = resolveProduct(row, log);
+
+  const mmsH = mmsHeaders(S);
+  const jsonH = jsonHeaders(S, cookie);
+
+  log('read', `读取文件: ${filePath}`);
+  const hashes = await streamHashes(filePath);
+  const fsize = hashes.size;
+  const wholeMd5hex = hashes.md5;
+  const payloadSha256 = hashes.sha256;
+
+  const { itemId, productItem } = await findProductItem({ product, S, jsonH, log, signal });
+
+  const taskId = await createTask({ S, jsonH, signal, log });
+  const { vid, accessKey, secretKey, uploaddomain, urlformat, bucket } = await applyUpload({ S, mmsH, creds, signal, log });
+  const videourl = await putObject({
+    S, filePath, fsize, vid, accessKey, secretKey, uploaddomain, urlformat, bucket, payloadSha256, signal, log,
+  });
+
+  const extendid = vid;
+  await reportResult({ S, mmsH, creds, vid, uploaddomain, extendid, fsize, wholeMd5hex, videourl, signal, log });
+
+  const meta = probeAndLog(filePath, 'edit', log);
+  await editTask({ S, jsonH, taskId, vid, row, productItem, meta, signal, log });
+  const response = await postTask({ S, jsonH, taskId, signal, log });
+  return { vid, taskId, itemId, response };
 }
 
 module.exports = { uploadOnePh };

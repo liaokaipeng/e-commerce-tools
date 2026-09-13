@@ -13,15 +13,18 @@
  *   engine.js     告警生命周期（去重/升级/恢复/确认关闭）+ SSE 广播
  *   scheduler.js  巡检调度（每店串行、跨店并发限流、手动触发）
  *   view.js       单店视图投影（shopView）
+ *   view/         路由级视图与副作用编排（overview / trend / config）
  *   suggest.js    阈值分位数建议（buildRuleSuggestions）
+ * 本文件只保留 require / register / 参数校验 / sendJson 与启动编排。
  */
 const { sendJson, sse, jsonAction } = require('./lib/http-utils');
-const { METRICS, isMoneyMetric } = require('./monitor/constants');
-const { toRmb, fromRmb, roundMoney, symbolOf, ensureRates } = require('./monitor/currency');
 const store = require('./monitor/store');
 const engine = require('./monitor/engine');
 const scheduler = require('./monitor/scheduler');
 const { shopView } = require('./monitor/view');
+const { buildOverview } = require('./monitor/view/overview');
+const { buildTrendPayload } = require('./monitor/view/trend');
+const configView = require('./monitor/view/config');
 const { buildRuleSuggestions, SUGGEST_DAYS_DEFAULT } = require('./monitor/suggest');
 const openapiStore = require('./openapi/store');
 
@@ -29,26 +32,7 @@ const openapiStore = require('./openapi/store');
 function register({ get, post }) {
   // 大屏总览：店铺列表（仅启用监控的店铺；含告警计数/最高级别/矩阵定级/授权状态）+ 全局统计
   get('/api/monitor/overview', (req, res) => {
-    const openapiStatus = openapiStore.status();
-    const sched = scheduler.status();
-    const monitoredSet = new Set(sched.shops.filter((s) => s.monitored).map((s) => s.shopId));
-    const sum = engine.summary(monitoredSet);
-    const shops = sched.shops.filter((s) => s.monitored).map((s) => {
-      const alerts = sum.byShop[s.shopId] || { P0: 0, P1: 0, P2: 0, maxLevel: null };
-      return Object.assign(shopView(s.shopId, s.name), { alerts, authBroken: !!s.authBroken });
-    });
-    sendJson(res, 200, {
-      ok: true,
-      configured: openapiStatus.configured,
-      scheduler: { running: sched.running, active: sched.active, lastTickAt: sched.lastTickAt, presenceActive: sched.presenceActive },
-      totals: sum.totals,
-      reAuthCount: shops.filter((s) => s.authBroken).length,
-      excludedCount: sched.shops.length - shops.length,
-      currencyMode: store.getCurrencyMode(),
-      metrics: METRICS,
-      shops,
-      at: Date.now(),
-    });
+    sendJson(res, 200, buildOverview());
   });
 
   // 告警列表（?level=&shopId=&status=&limit=，默认不含 closed；未启用监控店铺的告警不展示）
@@ -89,48 +73,16 @@ function register({ get, post }) {
   // 指标趋势（?shopId=&metric=&days=7&compare=1）：采样点 + 阈值（画参考线用）；金额指标按模式换算展示。
   // compare=1 时额外返回上一周期（更早 days 天）采样点，供大屏画环比对比线。
   get('/api/monitor/trend', (req, res, url) => {
-    const shopId = String(url.searchParams.get('shopId') || '').trim();
-    const metric = String(url.searchParams.get('metric') || '').trim();
-    const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days')) || 7));
-    const compare = url.searchParams.get('compare') === '1';
+    const q = url.searchParams;
+    const shopId = String(q.get('shopId') || '').trim();
+    const metric = String(q.get('metric') || '').trim();
     if (!shopId || !metric) {
       sendJson(res, 400, { ok: false, message: '缺少 shopId 或 metric' });
       return;
     }
-    const m = METRICS[metric];
-    const rule = store.getRulesById()[metric];
-    const meta = store.getMeta();
-    const shopMeta = (meta.shops && meta.shops[shopId]) || {};
-    const currency = String(shopMeta.currency || 'CNY');
-    const mode = store.getCurrencyMode();
-    let points = store.readTrend(shopId, metric, days);
-    let prevPoints = compare ? store.readTrend(shopId, metric, days, days) : [];
-    let thresholds = (rule && rule.thresholds) || null;
-    let unit = (m || {}).unit || '';
-    if (isMoneyMetric(metric)) {
-      if (mode === 'rmb') {
-        const toRmbPoints = (arr) => arr.map((p) => ({ at: p.at, v: roundMoney(toRmb(p.v, currency)) }));
-        points = toRmbPoints(points);
-        prevPoints = toRmbPoints(prevPoints);
-      } else {
-        // 当地货币展示：阈值参考线同步换算成当地金额（阈值口径固定人民币）
-        unit = symbolOf(currency);
-        if (thresholds) {
-          const th = {};
-          for (const [k, v] of Object.entries(thresholds)) {
-            if (typeof v === 'number') th[k] = roundMoney(fromRmb(v, currency));
-          }
-          thresholds = th;
-        }
-      }
-    }
-    sendJson(res, 200, {
-      ok: true,
-      metric: Object.assign({}, m || {}, { id: metric, unit }),
-      thresholds,
-      points,
-      prevPoints,
-    });
+    const days = Math.min(90, Math.max(1, Number(q.get('days')) || 7));
+    const compare = q.get('compare') === '1';
+    sendJson(res, 200, buildTrendPayload(shopId, metric, days, compare));
   });
 
   // 规则：GET 返回合并后的生效规则；POST 保存用户覆盖（{ overrides: { [id]: { enabled, thresholds } } }）
@@ -154,41 +106,22 @@ function register({ get, post }) {
   // 监控店铺配置：GET 返回全部已授权店铺及其监控状态（含未监控的，供配置面板勾选）；
   // POST 保存排除名单 { excludedShopIds: [] }（未列出的已授权店铺默认监控）。
   get('/api/monitor/shops-config', (req, res) => {
-    const openapiStatus = openapiStore.status();
-    const excluded = store.getExcludedShopIds();
-    const shops = scheduler.status().shops.map((s) => ({
-      shopId: s.shopId,
-      name: s.name || '',
-      authBroken: !!s.authBroken,
-      monitored: !excluded.has(s.shopId),
-    }));
-    sendJson(res, 200, { ok: true, configured: openapiStatus.configured, shops });
+    sendJson(res, 200, configView.buildShopsConfig());
   });
 
   post('/api/monitor/shops-config', jsonAction('/api/monitor/shops-config', (body, req, res) => {
     if (!body || !Array.isArray(body.excludedShopIds)) throw new Error('excludedShopIds 必须是数组');
-    const before = store.getExcludedShopIds();
-    const after = store.setExcludedShopIds(body.excludedShopIds);
-    // 新排除的店铺：关闭其未关闭告警（不再占用大屏统计）；重新勾选后采集触发会重新打开
-    for (const id of after) {
-      if (!before.has(id)) engine.closeShopAlerts(id);
-    }
-    scheduler.notifyConfigChanged();
-    engine.broadcast('config', { at: Date.now() });
-    sendJson(res, 200, { ok: true, excludedShopIds: [...after], message: '监控店铺配置已保存' });
+    sendJson(res, 200, configView.saveShopsConfig(body.excludedShopIds));
   }));
 
   // 金额单位模式：GET 读取全局设置；POST 保存 { mode: 'local' | 'rmb' }（默认 local 当地货币）。
   // 规则面板的金额阈值始终按人民币配置与比较，模式只影响大屏金额展示（矩阵/趋势/告警消息）。
   get('/api/monitor/currency-config', (req, res) => {
-    sendJson(res, 200, { ok: true, mode: store.getCurrencyMode() });
+    sendJson(res, 200, configView.buildCurrencyConfig());
   });
 
   post('/api/monitor/currency-config', jsonAction('/api/monitor/currency-config', (body, req, res) => {
-    const mode = store.setCurrencyMode(String(body && body.mode || ''));
-    if (openapiStore.status().shops.length) ensureRates(); // 有店铺时顺带刷新汇率（异步，不阻塞响应）
-    engine.broadcast('config', { at: Date.now() });
-    sendJson(res, 200, { ok: true, mode, message: mode === 'rmb' ? '金额展示已切换为人民币（阈值仍按人民币比较）' : '金额展示已切换为当地货币（阈值仍按人民币比较）' });
+    sendJson(res, 200, configView.saveCurrencyConfig(body && body.mode));
   }));
 
   // 手动采集（body { shopId? }，缺省全部店铺；立即入队）

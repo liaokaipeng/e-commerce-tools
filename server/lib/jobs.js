@@ -9,7 +9,7 @@
  * 被取消则抛 CancelledError）→ 执行体结束时 finish 收尾。
  * 除显式取消外，「SSE 客户端断开」也视为取消：本地单人工具里用户关掉页面即代表不想继续。
  */
-const { sendJson, readRouteBody } = require('./http-utils');
+const { sendJson, readRouteBody, sse } = require('./http-utils');
 
 const TTL_MS = 30 * 60 * 1000;   // 任务最长存活时间（防执行体异常后残留）
 const SWEEP_MS = 60 * 1000;      // 僵尸任务巡检间隔
@@ -172,9 +172,97 @@ function safeEnd(res) {
   try { if (!res.writableEnded) res.end(); } catch { /* 连接已断开，忽略 */ }
 }
 
+/**
+ * 批量任务执行骨架（SSE）：把「校验通过之后」的批量执行收敛到一处，供
+ * 取消竞价 / 取消 Hot Listing / 批量刷新 token 复用，避免三处各写一份近乎同构的
+ * 「SSE 建立 + 客户端断开即取消 + 逐单元 checkpoint + CancelledError 归并 + 收尾」骨架。
+ *
+ * 对所有调用方一致的职责：
+ *   1. 建立 SSE 响应并监听客户端断开（断开即视为取消）；
+ *   2. 建任务并下发首事件 start（带 jobId，前端据此发暂停 / 继续 / 取消）；
+ *   3. 逐单元 checkpoint（暂停挂起 / 取消抛 CancelledError），把 CancelledError 归并为
+ *      cancelledByUser，已处理部分照常汇总，不再继续后续单元；
+ *   4. 收尾：先释放（release，默认 finish）再下发收尾事件（cancelled 或 summary），结束响应；
+ *   5. 执行体异常兜底为 fatal（文案前缀由调用方给出）。
+ *
+ * 调用方只注入差异：prepare（执行前准备，如加载凭证）、units（按店 / 按组）、
+ * startPayload（start 事件附加字段）、beforeLoop（循环前动作，如下发 skipped）、
+ * onUnit（单单元执行体，自行 emit 单元事件并记录结果）、finalEvent（收尾事件）、
+ * fatalPrefix（兜底文案前缀）、onCreate / release（建任务回调与收尾释放，如单飞互斥）。
+ *
+ * @param {object} opts
+ * @param {object} opts.res http.ServerResponse（SSE）
+ * @param {() => (object|Promise<object>)} [opts.prepare] 执行前准备；抛错则释放 + fatal(e.message) + 结束返回（不下发 jobId）
+ * @param {Array} opts.units 单元列表（店铺 / 分组）
+ * @param {object} [opts.startPayload] 追加到 start 事件的字段（jobId 由执行器下发）
+ * @param {(ctx: object) => (void|Promise<void>)} [opts.beforeLoop] 循环前动作（如下发 skipped 事件）
+ * @param {(unit: any, ctx: object) => Promise<void>} opts.onUnit 单元执行体（自行 emit 单元事件并记录结果）
+ * @param {(state: {cancelledByUser: boolean, ctx: object}) => object} opts.finalEvent 收尾事件（cancelled 或 summary）
+ * @param {string} [opts.fatalPrefix] 兜底 fatal 文案前缀
+ * @param {(jobId: string) => void} [opts.onCreate] 建任务后立即回调（如登记单飞互斥）
+ * @param {(jobId: string) => void} [opts.release] 收尾释放（默认 jobs.finish）
+ * @returns {string} jobId
+ */
+function runShopBatch(opts) {
+  const {
+    res, prepare, units, startPayload, beforeLoop, onUnit, finalEvent,
+    fatalPrefix = '', onCreate, release,
+  } = opts;
+  const emit = sse(res);
+  // SSE 客户端断开（用户关掉页面）即视为取消，任务在下个门控点退出
+  let clientGone = false;
+  if (typeof res.on === 'function') res.on('close', () => { clientGone = true; });
+  const jobId = create();
+  if (onCreate) onCreate(jobId);
+  const done = () => { if (release) release(jobId); else finish(jobId); };
+
+  (async () => {
+    let ctx = {};
+    if (prepare) {
+      try {
+        ctx = (await prepare()) || {};
+      } catch (e) {
+        done();
+        emit({ type: 'fatal', msg: e.message });
+        res.end();
+        return;
+      }
+    }
+    ctx = Object.assign({}, ctx, {
+      emit,
+      jobId,
+      isAborted: () => clientGone,
+      checkpoint: () => checkpoint(jobId, () => clientGone),
+    });
+    // 先下发 jobId，前端据此发暂停 / 继续 / 取消指令
+    emit(Object.assign({ type: 'start', jobId }, startPayload || {}));
+
+    let cancelledByUser = false;
+    try {
+      if (beforeLoop) await beforeLoop(ctx);
+      for (const unit of units) {
+        await checkpoint(jobId, () => clientGone);
+        await onUnit(unit, ctx);
+      }
+    } catch (e) {
+      if (!(e instanceof CancelledError)) throw e;
+      cancelledByUser = true;
+    }
+
+    done();
+    emit(finalEvent({ cancelledByUser, ctx }));
+    try { res.end(); } catch { /* ignore */ }
+  })().catch((e) => {
+    done();
+    try { emit({ type: 'fatal', msg: `${fatalPrefix}${e.message}` }); res.end(); } catch { /* ignore */ }
+  });
+
+  return jobId;
+}
+
 module.exports = {
   create, get, has, setPaused, cancel, cancelReason, checkpoint, finish, size, CancelledError,
-  registerControlRoutes, safeEnd,
+  registerControlRoutes, safeEnd, runShopBatch,
   _ttlMs: TTL_MS,
   _test: { sweepJobs },
 };

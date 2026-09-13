@@ -2,6 +2,7 @@
 // 通用翻页收集：不同接口的翻页语义（cursor / page_no）收敛在此，供各域采集器复用。
 const { callOpenApi } = require('../../openapi/client');
 const { MAX_PAGES, PAGE_SIZE } = require('./constants');
+const { totalOf } = require('./parse/common');
 
 /**
  * cursor 翻页收集列表（more + next_cursor 语义，订单/首公里/评论通用）。
@@ -29,18 +30,26 @@ async function collectByCursor(shopId, path, params, listKey, opts) {
 /**
  * page_no 翻页收集列表（more + 满页判断，资金/售后通用）。
  * @param {number} [startPage] 起始页：1=页码语义（payout/escrow），0=offset 语义（wallet/returns）
+ * @returns {Promise<{ items: Array, total: number|null }>} total 取首页响应总数（无则 null）
  */
-async function collectByPage(shopId, path, params, listKey, startPage) {
-  const out = [];
+async function collectByPageDetailed(shopId, path, params, listKey, startPage) {
+  const items = [];
+  let total = null;
   const start = startPage == null ? 1 : startPage;
   for (let i = 0; i < MAX_PAGES; i++) {
     const j = await callOpenApi(path, Object.assign({}, params, { page_no: start + i }), { shopId, method: 'GET' });
     const resp = (j && j.response) || {};
+    if (i === 0) total = totalOf(j);
     const list = Array.isArray(resp[listKey]) ? resp[listKey] : [];
-    out.push(...list);
+    items.push(...list);
     if (!resp.more || list.length < PAGE_SIZE) break;
   }
-  return out;
+  return { items, total };
 }
 
-module.exports = { collectByCursor, collectByPage };
+/** page_no 翻页收集列表（仅返回条目数组） */
+async function collectByPage(shopId, path, params, listKey, startPage) {
+  return (await collectByPageDetailed(shopId, path, params, listKey, startPage)).items;
+}
+
+module.exports = { collectByCursor, collectByPage, collectByPageDetailed };

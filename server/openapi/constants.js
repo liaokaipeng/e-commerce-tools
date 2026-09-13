@@ -43,6 +43,13 @@ const ACCESS_EXPIRE_MARGIN = 60;
 // 店铺列表「即将过期」阈值（秒）
 const EXPIRING_SOON_SEC = 30 * 60;
 
+// 手动刷新冷却（毫秒）：距上次成功刷新不足该时长、且当前 access_token 仍有效时，手动/批量刷新
+// 直接复用当前 token，不再向网关发 access_token/get。官方语义是「旧 refresh_token 用一次即作废」，
+// 连续点击会让网关拒绝刚被轮换的凭证，而拒绝文案会被 isAuthDead 判成「凭证死透」，进而把共享
+// token 组整组标成「需重新授权」。自动续期与认证失败重试**不走**冷却（见 ensureFresh 的 cooldown 选项），
+// 否则坏 token 会被反复复用、白跑一遍就标失效。
+const REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
+
 module.exports = {
   ENV_HOSTS,
   ENVS,
@@ -51,4 +58,5 @@ module.exports = {
   LOCAL_REDIRECT_HOSTS,
   ACCESS_EXPIRE_MARGIN,
   EXPIRING_SOON_SEC,
+  REFRESH_COOLDOWN_MS,
 };

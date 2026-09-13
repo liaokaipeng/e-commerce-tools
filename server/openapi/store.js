@@ -3,32 +3,29 @@
 // 结构：app = { partnerId, partnerKey, env }；shops 按环境分区，避免沙箱/生产 token 混用：
 //   shops[env][shopId] = { shopId, merchantId, accessToken, refreshToken, accessExpireAt, updatedAt }
 // 对外输出一律打码（maskToken），与仓库「凭证不入库、日志不完整打印」约定一致。
-const fs = require('fs');
 const path = require('path');
 const { ENVS, ACCESS_EXPIRE_MARGIN, EXPIRING_SOON_SEC } = require('./constants');
 const { maskToken, nowSec } = require('../lib/openapi-utils');
+const { readJson, writeJson } = require('../lib/json-file');
 
 const SESSION_FILE = process.env.OPENAPI_SESSION_FILE || path.join(__dirname, '..', 'data', 'openapi-session.json');
 
 let store = { app: null, shops: {} };
 
 function loadFile() {
-  try {
-    if (!fs.existsSync(SESSION_FILE)) return;
-    const raw = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-    if (raw && typeof raw === 'object') {
-      store.app = raw.app && typeof raw.app === 'object' ? raw.app : null;
-      store.shops = raw.shops && typeof raw.shops === 'object' ? raw.shops : {};
-    }
-  } catch (e) {
-    console.warn('读取开放平台凭证文件失败:', e.message);
+  // 文件不存在属正常（首次使用），静默忽略；其余读取/解析错误才告警
+  const raw = readJson(SESSION_FILE, null, (e) => {
+    if (e.code !== 'ENOENT') console.warn('读取开放平台凭证文件失败:', e.message);
+  });
+  if (raw && typeof raw === 'object') {
+    store.app = raw.app && typeof raw.app === 'object' ? raw.app : null;
+    store.shops = raw.shops && typeof raw.shops === 'object' ? raw.shops : {};
   }
 }
 
 function saveFile() {
   try {
-    fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
-    fs.writeFileSync(SESSION_FILE, JSON.stringify(store, null, 2));
+    writeJson(SESSION_FILE, store);
   } catch (e) {
     console.warn('保存开放平台凭证文件失败:', e.message);
   }

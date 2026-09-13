@@ -6,7 +6,7 @@
 //                         订单年龄按 order_sn 的 YYMMDD 前缀估算（无精确时间）
 //   first_mile.get_unbind_order_list  返回 response.order_list + more/next_cursor
 const { collectByCursor } = require('./paging');
-const { detail, orderSnDate, snDateText } = require('./parse');
+const { detail, snDateText, orderAgeBuckets, orderAgeGroups } = require('./parse');
 const { PAGE_SIZE, ORDER_WINDOW_DAYS } = require('./constants');
 
 /** cursor 翻页收集订单列表（order_sn 列表） */
@@ -28,18 +28,11 @@ async function collectOrderDomain(shopId) {
   const now = Date.now();
   try {
     const orders = await collectOrdersByStatus(shopId, 'READY_TO_SHIP');
-    const today0 = new Date(now);
-    today0.setHours(0, 0, 0, 0);
-    const todaySns = [];
-    const olderSns = [];
-    for (const o of orders || []) {
-      const sn = o && o.order_sn;
-      const d = orderSnDate(sn);
-      if (!d) continue;
-      (d.getTime() >= today0.getTime() ? todaySns : olderSns).push(sn);
-    }
-    metrics['order.pending_12_24h'] = todaySns.length;
-    metrics['order.pending_24h'] = olderSns.length;
+    // 分桶/计数统一走 parse（单号日期按天估算，避免本处与 parse 各写一份）
+    const buckets = orderAgeBuckets(orders, now);
+    const { today: todaySns, older: olderSns } = orderAgeGroups(orders, now);
+    metrics['order.pending_12_24h'] = buckets.pending_12_24h;
+    metrics['order.pending_24h'] = buckets.pending_24h;
     details['order.pending_12_24h'] = detail('', todaySns.map((sn) => ({
       id: sn, title: sn, sub: `${snDateText(sn) || '今日'} 创建·待发货`,
     })));

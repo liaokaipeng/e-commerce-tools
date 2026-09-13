@@ -58,10 +58,8 @@ async function collectAftersaleDomain(shopId) {
     }, 'return', 0);
     const s = returnSummary(returns, nowMs);
     metrics['aftersale.returns_24h'] = s.count;
-    const recent = returns.filter((r) => {
-      const ct = r && r.create_time != null ? Number(r.create_time) * 1000 : NaN;
-      return isFinite(ct) && ct <= nowMs && nowMs - ct <= AFTERSALE_WINDOW_MS;
-    });
+    // 24h 窗口过滤复用 returnSummary 的结果（不再在本处重复实现窗口判断）
+    const recent = s.items || [];
     if (s.detail || recent.length) {
       details['aftersale.returns_24h'] = detail('原因分布 ' + s.detail, recent.map((r) => {
         const o = r || {};

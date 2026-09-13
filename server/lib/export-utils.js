@@ -6,6 +6,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { pad2 } = require('./date-utils');
 
 /** 默认保存目录：用户「下载」目录（未填写目录时用，避免把导出文件写进程序目录） */
 function defaultOutDir() {
@@ -25,9 +26,8 @@ function ensureDir(dir) {
 
 /** 本地时间戳文本 YYYY-MM-DD_HHmmss（导出文件名用，避免同名覆盖） */
 function timestampText(date = new Date()) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`
-    + `_${p(date.getHours())}${p(date.getMinutes())}${p(date.getSeconds())}`;
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+    + `_${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`;
 }
 
 /** 统一 Excel 表头样式：首行加粗居中 + 冻结首行 */

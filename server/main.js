@@ -13,10 +13,9 @@
 // main.js 只负责「路由注册 + 静态服务 + 服务启动」，业务路由与 SSE 由各模块 register 提供。
 const http = require('http');
 const path = require('path');
-const fs = require('fs');
-const { sendJson, serveStatic, readJsonBodySoft, createDispatcher } = require('./lib/http-utils');
+const { sendJson, serveStatic, createDispatcher } = require('./lib/http-utils');
+const { isAllowedOrigin, applyCors } = require('./lib/cors');
 const version = require('./lib/version');
-const settings = require('./lib/settings');
 const tiktok = require('./tiktok');
 const bidding = require('./bidding');
 const biddingCancel = require('./bidding-cancel');
@@ -26,6 +25,8 @@ const openapi = require('./openapi');
 const monitor = require('./monitor');
 const cache = require('./cache');
 const update = require('./update');
+const routesSettings = require('./routes/settings');
+const routesBrowse = require('./routes/browse');
 
 const { LISTEN_PORT: PORT, CALLBACK_PORT } = require('./lib/config');
 // 前端为 Vite 构建产物（frontend/dist），由 main.js 托管
@@ -52,94 +53,12 @@ openapi.register({ get, post });
 monitor.register({ get, post });
 cache.register({ get, post });
 update.register({ get, post });
-
-// ============ 工具默认目录（settings.json 持久化） ============
-// GET  /api/settings            读取各工具默认目录
-// POST /api/settings            设置某工具默认目录 { tool, dir }
-get('/api/settings', (req, res) => {
-  sendJson(res, 200, {
-    ok: true,
-    defaults: {
-      tiktok: settings.getDefault('tiktok'),
-      bidding: settings.getDefault('bidding'),
-    },
-  });
-});
-
-post('/api/settings', async (req, res) => {
-  try {
-    const { tool, dir } = await readJsonBodySoft(req, '/api/settings');
-    if (tool !== 'tiktok' && tool !== 'bidding') {
-      sendJson(res, 400, { ok: false, message: '无效的工具' });
-      return;
-    }
-    const d = String(dir || '').trim();
-    if (!d) {
-      sendJson(res, 400, { ok: false, message: '目录不能为空' });
-      return;
-    }
-    settings.setDefault(tool, d);
-    sendJson(res, 200, { ok: true, dir: d });
-  } catch (e) {
-    sendJson(res, 400, { ok: false, message: e.message });
-  }
-});
-
-// ============ 目录浏览（文件夹选择对话框用） ============
-// GET /api/browse?path=<绝对路径>  列出该目录的子文件夹；path 为空时在 Windows 列出盘符
-const isWin = process.platform === 'win32';
-
-function listDirs(p) {
-  return fs.readdirSync(p, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => ({ name: e.name, path: path.join(p, e.name) }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function listDrives() {
-  const drives = [];
-  for (let i = 65; i <= 90; i++) {
-    const letter = String.fromCharCode(i);
-    try { fs.statSync(letter + ':\\'); drives.push({ name: letter + ':', path: letter + ':\\' }); }
-    catch { /* 该盘符不存在 */ }
-  }
-  return drives;
-}
-
-get('/api/browse', (req, res, url) => {
-  try {
-    const p = (url.searchParams.get('path') || '').trim();
-    if (!p) {
-      sendJson(res, 200, {
-        ok: true,
-        current: null,
-        parent: null,
-        dirs: isWin ? listDrives() : listDirs('/'),
-      });
-      return;
-    }
-    if (!fs.statSync(p).isDirectory()) {
-      sendJson(res, 400, { ok: false, message: '不是目录：' + p });
-      return;
-    }
-    sendJson(res, 200, {
-      ok: true,
-      current: p,
-      parent: path.dirname(p) === p ? null : path.dirname(p),
-      dirs: listDirs(p),
-    });
-  } catch (e) {
-    sendJson(res, 400, { ok: false, message: e.message });
-  }
-});
+// 工具默认目录设置（/api/settings）与目录浏览（/api/browse）分别由 routes/ 下单一职责模块注册
+routesSettings.register({ get, post });
+routesBrowse.register({ get, post });
 
 // ============ HTTP 服务 ============
-// CORS 白名单：本工具只面向本机使用，除下列来源外一律拒绝跨源请求。
-//   - http(s)://127.0.0.1|localhost[:任意端口]  本地页面 / Vite 开发服务器（5173）
-//   - chrome-extension:// | moz-extension://    浏览器扩展（推送 Cookie / 凭证）
-function isAllowedOrigin(origin) {
-  return /^(https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?|(chrome|moz|ms-browser)-extension:\/\/[a-z0-9]+)$/i.test(origin);
-}
+// CORS 白名单判定与请求头处理见 lib/cors.js（本机来源放行、外部来源 403）。
 
 // 路由分发统一经 createDispatcher 包裹：处理器内未捕获的同步/异步异常兜底为 500，
 // 不再让请求连接挂起（SSE 等已写响应头的连接不二次响应）。
@@ -153,23 +72,9 @@ const dispatch = createDispatcher(routes, (e, method, pathname) => {
 const isMain = require.main === module;
 
 const server = http.createServer((req, res) => {
-  // CORS：仅允许本机来源（浏览器扩展推送 + 本地页面跨端口调试）。
-  // 收紧到白名单后，外部网页无法再向 127.0.0.1:8765 的写接口发跨源请求（防伪造凭证 CSRF 面）。
-  // 扩展自身请求不带 Origin（或为 chrome-extension://）——无 Origin 时不写 CORS 头，
-  // 同源与扩展侧均不受影响；非白名单来源直接回 403。
-  const origin = req.headers.origin || '';
-  if (origin && !isAllowedOrigin(origin)) {
-    res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: false, message: '来源不被允许' }));
-    return;
-  }
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+  // CORS：仅允许本机来源（白名单判定与响应头处理见 lib/cors.js）。
+  // 无 Origin（扩展 / 同源）不写 CORS 头；非白名单来源直接回 403。
+  if (applyCors(req, res)) return;
 
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const urlPath = url.pathname;

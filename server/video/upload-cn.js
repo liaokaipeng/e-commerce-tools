@@ -7,34 +7,23 @@ const {
   etagFromSha1Hex,
   streamHashes,
   findItemIds,
-  probeVideoFile,
-  validateUploadRow,
-  skipError,
 } = require('../lib/video-utils');
+const {
+  assertRowValid,
+  resolveProduct,
+  isNumericCode,
+  itemsOf,
+  assertItemListOk,
+  logItemMatch,
+  throwProductNotFound,
+  pickService,
+  preuploadRequest,
+  reportuploadRequest,
+  assertReportUpload,
+  probeAndLog,
+} = require('./steps');
 
-// ------- 跨境 .cn 上传流程各步骤 -------
-async function preupload(signal) {
-  const resp = await call({
-    method: 'POST',
-    url: `${MMS}/uploadapi/api/v1/vod/preupload`,
-    signal,
-    useJar: false, // MMS 凭证接口不带 Cookie：显式与 jar 罐都不要，罐里残留的 set-cookie 会被带上污染请求
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json, text/plain, */*',
-      origin: SOLUTIONS,
-      referer: `${SOLUTIONS}/`,
-      'user-agent': UA,
-    },
-    body: JSON.stringify({
-      biz: BIZ,
-      ver: 2,
-      mediatype: 1,
-      reportdata: { sdkversion: CN.sdkversion, appversion: CN.appversion, ostype: CN.ostype, reporttime: Date.now() },
-    }),
-  });
-  return resp;
-}
+// ------- 跨境 .cn 专属请求（分片上传 / merge / solutions 业务接口） -------
 
 async function uploadChunk(chunk, etag, auth, signal) {
   const resp = await call({
@@ -76,13 +65,10 @@ async function mergeFiles(fids, auth, fileEtag, signal) {
   return resp;
 }
 
-async function reportUpload({ vid, extendid, fsize, md5hexval, videourl }, signal) {
-  const resp = await call({
-    method: 'POST',
-    url: `${MMS}/uploadapi/api/v1/vod/reportupload`,
-    signal,
-    idempotent: false, // 写操作：不重放（详见 request.js call 的说明）
-    useJar: false, // MMS 凭证接口不带 Cookie（含 jar 罐，见 preupload 注释）
+// preupload：MMS 凭证接口不带 Cookie（显式与 jar 罐都不要，罐里残留的 set-cookie 会被带上污染请求）
+async function preupload(signal) {
+  return preuploadRequest({
+    url: `${MMS}/uploadapi/api/v1/vod/preupload`,
     headers: {
       'content-type': 'application/json',
       accept: 'application/json, text/plain, */*',
@@ -90,7 +76,28 @@ async function reportUpload({ vid, extendid, fsize, md5hexval, videourl }, signa
       referer: `${SOLUTIONS}/`,
       'user-agent': UA,
     },
-    body: JSON.stringify({
+    payload: {
+      biz: BIZ,
+      ver: 2,
+      mediatype: 1,
+      reportdata: { sdkversion: CN.sdkversion, appversion: CN.appversion, ostype: CN.ostype, reporttime: Date.now() },
+    },
+    signal,
+  });
+}
+
+// reportupload：写操作不重放；MMS 凭证接口不带 Cookie（含 jar 罐，见 preupload 注释）
+async function reportUpload({ vid, extendid, fsize, md5hexval, videourl }, signal) {
+  return reportuploadRequest({
+    url: `${MMS}/uploadapi/api/v1/vod/reportupload`,
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json, text/plain, */*',
+      origin: SOLUTIONS,
+      referer: `${SOLUTIONS}/`,
+      'user-agent': UA,
+    },
+    payload: {
       vid,
       mid: '',
       serviceid: CN.serviceid,
@@ -104,9 +111,9 @@ async function reportUpload({ vid, extendid, fsize, md5hexval, videourl }, signa
       updomain: UPLOAD,
       reportdata: { cost: 0, sdkversion: CN.sdkversion, ostype: CN.ostype, reporttime: Date.now() },
       fileinfos: { mediatype: 1 },
-    }),
+    },
+    signal,
   });
-  return resp;
 }
 
 async function itemList(keyword, cookie, shopId, signal) {
@@ -158,53 +165,26 @@ async function videoCreate({ cookie, shopId, vid, videourl, caption, itemId, vid
   return resp;
 }
 
-// ------- 单个视频的完整上传（跨境 .cn） -------
-async function uploadOneCn(row, creds, log, signal) {
-  let { auth, cookie, shopId } = creds;
-  const filePath = row.path;
-  const rowErr = validateUploadRow(row);
-  if (rowErr) throw new Error(rowErr);
-
-  // 商品前置校验①：未配置商品编码 → 直接跳过，不上传（前端状态列显示「失败，商品为空」）。
-  // 放在流式哈希之前：没必要为注定跳过的行先读完整个大文件
-  const product = String(row.product || '').trim();
-  if (!product) {
-    log('item', '未配置商品编码，跳过上传');
-    throw skipError('未配置商品编码，已跳过上传');
-  }
-
-  // 注意：「先流式哈希、后解析凭证」的顺序不能调（测试依赖首行哈希耗时让 cancel 稳定到达）
-  log('read', `读取文件: ${filePath}`);
-  const hashes = await streamHashes(filePath);
-  const fsize = hashes.size;
-  const wholeMd5hex = hashes.md5;
-  const wholeEtag = etagFromSha1Hex(hashes.sha1);
-  const videoSizeKB = Math.round(fsize / 1024);
-
-  // 前端已按所选店铺断言凭证，这里兜底：缺 shopId 会让 video/create 提交 Number(undefined)=NaN
-  if (!shopId) {
-    throw new Error('缺少店铺 ID（shopId），跨境上传需先选择要发布视频的店铺，请在大厅选择店铺后重试。');
-  }
-  // 凭证统一由 resolveCnAuth 解析：优先本地已抓凭证中有效期最长的（账号级通用）→ 兜底 Cookie 换取 → 报错引导手动上传
-  auth = await resolveCnAuth({ auth, cookie, shopId }, log, signal);
-
-  // 商品前置校验②：配置了商品但查不到 → 跳过上传（原逻辑在上传完成后才查询，现提前到上传前，避免白传大文件）
-  let itemId = null;
+// ------- 跨境 .cn 上传流程各步骤 -------
+// 商品前置校验②：配置了商品但查不到 → 跳过上传（原逻辑在上传完成后才查询，现提前到上传前，避免白传大文件）
+async function findItemId({ product, cookie, shopId, log, signal }) {
   log('item', `查询商品编码: ${product}`);
-  const isCode = /^\d+$/.test(product);
+  const isCode = isNumericCode(product);
   const il = await itemList(product, cookie, shopId, signal);
   // Cookie 失效时 solutions 常返回 302/HTML 登录页（或网关错误页），items 为空——
   // 若不区分会误报「商品不存在」跳过上传；登录态问题是硬失败，不能当 skip 处理
-  if (il.status !== 200 || !il.json) {
-    throw new Error(`商品查询失败(HTTP ${il.status})，很可能是登录态已失效。请重新登录卖家中心，让扩展抓取最新 Cookie 后再试。响应: ${il.text.slice(0, 200)}`);
-  }
-  const items = (il.json && il.json.data && il.json.data.items) || [];
+  assertItemListOk(
+    il,
+    (r) => `商品查询失败(HTTP ${r.status})，很可能是登录态已失效。请重新登录卖家中心，让扩展抓取最新 Cookie 后再试。响应: ${r.text.slice(0, 200)}`
+  );
+  const items = itemsOf(il);
   const hit = isCode
     ? items.find((it) => String(it.item_id ?? it.itemId) === product)
     : items[0];
+  let itemId = null;
   if (hit) {
     itemId = hit.item_id ?? hit.itemId;
-    log('item', `匹配到 item_id=${itemId}`);
+    logItemMatch(log, itemId);
   } else {
     const ids = findItemIds(il.json || {});
     if (ids.length) {
@@ -213,10 +193,12 @@ async function uploadOneCn(row, creds, log, signal) {
     }
   }
   if (!itemId) {
-    log('item', `未找到商品，响应: ${il.text.slice(0, 300)}`);
-    throw skipError(`未找到商品编码 ${product} 对应的商品，已跳过上传`);
+    throwProductNotFound(product, log, il.text);
   }
+  return itemId;
+}
 
+async function applyUpload({ signal, log }) {
   log('preupload', '申请上传...');
   const pre = await preupload(signal);
   const preData = (pre.json && (pre.json.data || pre.json)) || {};
@@ -224,12 +206,14 @@ async function uploadOneCn(row, creds, log, signal) {
   if (!vid) {
     throw new Error(`preupload 未返回 vid。响应: ${pre.text.slice(0, 500)}`);
   }
-  const services = preData.services || [];
-  const svc = services.find((s) => s.serviceid === 'shopeeuss') || services[0] || {};
+  const svc = pickService(preData);
   const downDomain = (svc.domain || '').replace(/\/+$/, '');
   const bucket = svc.bucket || String(BIZ);
   log('preupload', `vid=${vid} downDomain=${downDomain || '(空)'} bucket=${bucket}`);
+  return { vid, downDomain, bucket };
+}
 
+async function uploadChunks({ filePath, fsize, auth, signal, log }) {
   const totalChunks = Math.max(1, Math.ceil(fsize / CHUNK_SIZE));
   const fids = [];
   for (let i = 0; i < totalChunks; i++) {
@@ -252,7 +236,10 @@ async function uploadOneCn(row, creds, log, signal) {
     fids.push(fid);
   }
   log('upload', `分片上传完成，共 ${fids.length} 片`);
+  return fids;
+}
 
+async function mergeChunks({ fids, auth, wholeEtag, downDomain, bucket, signal, log }) {
   log('merge', '合并分片...');
   const merge = await mergeFiles(fids, auth, wholeEtag, signal);
   const mergeData = (merge.json && (merge.json.data || merge.json)) || {};
@@ -267,28 +254,26 @@ async function uploadOneCn(row, creds, log, signal) {
     videourl = `${downDomain}/${bucket}/${extendid}.mp4`;
   }
   log('merge', `fid=${mergeFid} videourl=${videourl}`);
+  return { extendid, videourl };
+}
 
+async function reportResult({ vid, extendid, fsize, wholeMd5hex, videourl, signal, log }) {
   log('report', '上报上传结果...');
   const rep = await reportUpload({ vid, extendid: extendid || '', fsize, md5hexval: wholeMd5hex, videourl }, signal);
   log('report', `响应: ${rep.text.slice(0, 300)}`);
   // 上报失败若继续 video/create，后续报错会掩盖真实原因，这里先校验
-  if (rep.status !== 200) {
-    throw new Error(`reportupload 失败(HTTP ${rep.status})。响应: ${rep.text.slice(0, 300)}`);
-  }
-  if (rep.json && typeof rep.json.code === 'number' && rep.json.code !== 0) {
-    throw new Error(`reportupload 业务失败(code=${rep.json.code})。响应: ${rep.text.slice(0, 300)}`);
-  }
+  assertReportUpload(rep);
+}
 
+async function createAndPublish({ cookie, shopId, vid, videourl, caption, itemId, videoSizeKB, filePath, signal, log }) {
   log('create', '创建视频并发布...');
-  const meta = probeVideoFile(filePath);
-  if (!meta.width || !meta.height || !meta.duration) log('create', '警告: 未能完整解析视频宽高/时长，将提交解析值');
-  log('create', `视频元信息: ${meta.width}x${meta.height}, ${meta.duration}ms`);
+  const meta = probeAndLog(filePath, 'create', log);
   const vc = await videoCreate({
     cookie,
     shopId,
     vid,
     videourl,
-    caption: row.caption,
+    caption,
     itemId,
     videoSizeKB,
     width: meta.width,
@@ -310,7 +295,40 @@ async function uploadOneCn(row, creds, log, signal) {
     throw new Error(`video/create 业务失败 (errorCode=${createCode}): ${vc.text.slice(0, 500)}`);
   }
   log('create', `发布成功${postId ? `（post_id=${postId}）` : ''}`);
-  return { vid, videourl, itemId, postId, response: vc.text.slice(0, 300) };
+  return { postId, response: vc.text.slice(0, 300) };
+}
+
+// ------- 单个视频的完整上传（跨境 .cn） -------
+async function uploadOneCn(row, creds, log, signal) {
+  let { auth, cookie, shopId } = creds;
+  const filePath = row.path;
+  assertRowValid(row);
+  const product = resolveProduct(row, log);
+
+  // 注意：「先流式哈希、后解析凭证」的顺序不能调（测试依赖首行哈希耗时让 cancel 稳定到达）
+  log('read', `读取文件: ${filePath}`);
+  const hashes = await streamHashes(filePath);
+  const fsize = hashes.size;
+  const wholeMd5hex = hashes.md5;
+  const wholeEtag = etagFromSha1Hex(hashes.sha1);
+  const videoSizeKB = Math.round(fsize / 1024);
+
+  // 前端已按所选店铺断言凭证，这里兜底：缺 shopId 会让 video/create 提交 Number(undefined)=NaN
+  if (!shopId) {
+    throw new Error('缺少店铺 ID（shopId），跨境上传需先选择要发布视频的店铺，请在大厅选择店铺后重试。');
+  }
+  // 凭证统一由 resolveCnAuth 解析：优先本地已抓凭证中有效期最长的（账号级通用）→ 兜底 Cookie 换取 → 报错引导手动上传
+  auth = await resolveCnAuth({ auth, cookie, shopId }, log, signal);
+
+  const itemId = await findItemId({ product, cookie, shopId, log, signal });
+  const { vid, downDomain, bucket } = await applyUpload({ signal, log });
+  const fids = await uploadChunks({ filePath, fsize, auth, signal, log });
+  const { extendid, videourl } = await mergeChunks({ fids, auth, wholeEtag, downDomain, bucket, signal, log });
+  await reportResult({ vid, extendid, fsize, wholeMd5hex, videourl, signal, log });
+  const { postId, response } = await createAndPublish({
+    cookie, shopId, vid, videourl, caption: row.caption, itemId, videoSizeKB, filePath, signal, log,
+  });
+  return { vid, videourl, itemId, postId, response };
 }
 
 module.exports = { uploadOneCn };

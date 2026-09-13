@@ -6,12 +6,13 @@
 //   product.get_model_list     item_id → response.model[].stock_info_v2.summary_info.total_available_stock
 //   account_health.get_listings_with_issues  返回 response.listing_list + total_count
 const { callOpenApi } = require('../../openapi/client');
+const { collectByPageDetailed } = require('./paging');
 const { collectItemIds } = require('./catalog');
 const {
-  detail, listOf, totalOf, itemStockState, itemStockTotal, violationBreakdown,
+  detail, listOf, itemStockState, itemStockTotal, violationBreakdown,
 } = require('./parse');
 const {
-  PAGE_SIZE, MAX_PAGES, ITEMS_PER_SCAN, LOW_STOCK_LINE, VIOLATION_REASON_NAMES,
+  PAGE_SIZE, ITEMS_PER_SCAN, LOW_STOCK_LINE, VIOLATION_REASON_NAMES,
 } = require('./constants');
 
 async function collectProductDomain(shopId) {
@@ -58,22 +59,11 @@ async function collectProductDomain(shopId) {
       errors.push('库存：' + e.message);
     }
   }
-  // 3) 问题商品数（账户健康模块的问题 listing 清单；翻页收集明细按 reason 聚合进告警消息）
+  // 3) 问题商品数（账户健康模块的问题 listing 清单；翻页统一走 paging.collectByPageDetailed，总数取响应 total_count）
   try {
-    let total = null;
-    const items = [];
-    for (let page = 1; page <= MAX_PAGES; page++) {
-      const j = await callOpenApi('/api/v2/account_health/get_listings_with_issues', {
-        page_no: page,
-        page_size: PAGE_SIZE,
-      }, { shopId, method: 'GET' });
-      const resp = (j && j.response) || {};
-      if (total == null) total = totalOf(j);
-      const list = Array.isArray(resp.listing_list) ? resp.listing_list : [];
-      items.push(...list);
-      if (total != null && items.length >= total) break;
-      if (list.length < PAGE_SIZE) break;
-    }
+    const { items, total } = await collectByPageDetailed(shopId, '/api/v2/account_health/get_listings_with_issues', {
+      page_size: PAGE_SIZE,
+    }, 'listing_list', 1);
     metrics['product.violations'] = total != null ? total : items.length;
     const breakdown = violationBreakdown(items);
     if (breakdown || items.length) {
