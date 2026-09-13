@@ -15,6 +15,7 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const { sendJson, serveStatic, readJsonBodySoft, createDispatcher } = require('./lib/http-utils');
+const version = require('./lib/version');
 const settings = require('./lib/settings');
 const tiktok = require('./tiktok');
 const bidding = require('./bidding');
@@ -24,6 +25,7 @@ const video = require('./video');
 const openapi = require('./openapi');
 const monitor = require('./monitor');
 const cache = require('./cache');
+const update = require('./update');
 
 const { LISTEN_PORT: PORT, CALLBACK_PORT } = require('./lib/config');
 // 前端为 Vite 构建产物（frontend/dist），由 main.js 托管
@@ -49,6 +51,7 @@ video.register({ get, post });
 openapi.register({ get, post });
 monitor.register({ get, post });
 cache.register({ get, post });
+update.register({ get, post });
 
 // ============ 工具默认目录（settings.json 持久化） ============
 // GET  /api/settings            读取各工具默认目录
@@ -195,6 +198,7 @@ if (isMain) {
   server.listen(PORT, '127.0.0.1', () => {
     console.log('==============================================');
     console.log('  工具合集（Shopee：竞价导出 / 取消竞价 / 取消Hot Listing / 视频上传；TikTok：视频下载）');
+    console.log('  版本 v' + version.currentVersion());
     console.log('  请打开浏览器访问: http://127.0.0.1:' + PORT);
     console.log('==============================================');
     console.log('  - TikTok 下载     此页面即可直接使用');
@@ -203,6 +207,9 @@ if (isMain) {
     console.log('  - 开放平台：录入 App 后生成授权链接登录（回调 redirect 后台与本工具填一致，默认 https://example.com/，授权后粘贴回调链接完成）');
     console.log('  - 监控大屏：开放平台授权店铺后自动巡检采集，/monitor/ 查看三级告警大屏');
     console.log('  扩展安装：edge://extensions → 开发人员模式 → 加载解压缩的扩展');
+
+    // 启动后自动检查更新（清单未配置时不产生定时器）
+    update.startAutoCheck();
   });
 }
 

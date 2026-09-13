@@ -1,0 +1,7 @@
+{
+  "_说明": "manifestUrl 留空 = 关闭更新检查；填 GitHub 清单地址即可启用。本机若需指向其它镜像，改这里会被后续更新覆盖，请改服务器数据目录下的 update-config.json",
+  "_地址格式": "https://raw.githubusercontent.com/<用户名>/<仓库>/<分支>/update.json",
+  "enabled": true,
+  "intervalHours": 6,
+  "manifestUrl": ""
+}

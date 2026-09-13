@@ -17,6 +17,10 @@ settings.json
 # 运行时生成的凭证/设置文件统一放在 server/data/
 server/data/
 
+# 打包产物（build/*.zip）与更新前的数据备份（backup/data-<时间戳>）
+/build/
+/backup/
+
 # 研究用临时工具（Playwright 抓包等，含登录态与抓包数据，整体不入库）
 research/
 
