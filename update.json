@@ -1,8 +1,8 @@
 {
-  "version": "1.1.1",
-  "builtAt": "2026-09-13T14:44:41.212Z",
-  "commit": "03c0307",
-  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.1.1/kp_tools-v1.1.1.zip",
-  "sha256": "4aa128e2fd0ee4665533735a6b1b5e48773ba0e4bda99b11f2dc527a96721a97",
-  "notes": "监控大屏优化：告警回稳后直接从告警流移除，不再保留「已恢复」记录（列表更简洁、触发计数更准）；同步精简采集与前端代码，行为与数据口径不变。"
+  "version": "1.1.2",
+  "builtAt": "2026-09-13T16:22:06.186Z",
+  "commit": "742a7bd",
+  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.1.2/kp_tools-v1.1.2.zip",
+  "sha256": "cf4ef25a437de77363bb222b211a000adea299b2fa79d2460d513c4714733f42",
+  "notes": "内部重构：按单一职责拆分前后端模块与测试用例（后端按子系统、前端按页面/共享层/子组件、测试按主题拆分），消除重复的同名文件夹。功能、接口与数据口径完全不变，UI 与使用方式无任何变化。"
 }
