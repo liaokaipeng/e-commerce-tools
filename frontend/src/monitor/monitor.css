@@ -257,14 +257,32 @@ html.dark {
   color: var(--d-text-4); font-size: var(--d-fs-xs); padding: 20px; text-align: center;
 }
 .matrix-panel { flex: 1; }
-.matrix-wrap { overflow: auto; padding: var(--d-sp-2) var(--d-gap); }
-.matrix { border-collapse: collapse; width: 100%; font-size: var(--d-fs-xs); }
-.matrix th, .matrix td { border: 1px solid var(--d-surface-3); padding: 4px var(--d-sp-2); text-align: center; white-space: nowrap; }
-.matrix th { background: var(--d-surface-2); color: var(--d-text-3); font-weight: 400; font-size: var(--d-fs-2xs); }
-.matrix .rowhead { background: var(--d-surface-2); color: var(--d-text-2); text-align: left; max-width: 150px; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
-.matrix tr.selected td { outline: 1px solid var(--d-select); outline-offset: -1px; }
-.matrix td.cell { cursor: pointer; font-variant-numeric: tabular-nums; }
-.matrix td.cell:hover { filter: brightness(1.5); }
+.matrix-wrap { flex: 1; min-height: 0; padding: var(--d-sp-2) var(--d-gap); }
+/* 用 Element Plus 表格承载矩阵：把表格令牌对齐监控暗色主题，店铺列用 fixed 锁定（横向滚动不隐藏） */
+.matrix {
+  font-size: var(--d-fs-xs);
+  --el-table-border-color: var(--d-surface-3);
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: var(--d-surface-2);
+  --el-table-header-text-color: var(--d-text-3);
+  --el-table-text-color: var(--d-text-2);
+  --el-table-row-hover-bg-color: rgba(255, 255, 255, 0.06);
+}
+.matrix.el-table { background: transparent; }
+.matrix .el-table__cell { white-space: nowrap; }
+.matrix .el-table__cell .cell { font-size: inherit; padding: 0 var(--d-sp-2); color: inherit; }
+.matrix .el-table__body .el-table__cell .cell { text-align: center; }
+.matrix thead th.el-table__cell { font-weight: 400; font-size: var(--d-fs-2xs); }
+.matrix .el-table__body td.el-table__cell { cursor: pointer; }
+.matrix .m-val { font-variant-numeric: tabular-nums; }
+/* 店铺列（fixed）：左对齐、可点 */
+.matrix .rowhead .cell { text-align: left; font-weight: 600; color: var(--d-text-2); cursor: pointer; }
+/* 店铺列是 sticky 固定列，必须给不透明底色，否则横向滚动时下方单元格会透出 */
+.matrix .el-table__body td.rowhead { background: var(--d-surface); }
+.matrix .el-table__body tr:hover > td.rowhead { background: var(--d-surface-3); }
+/* 选中行（主表与 fixed 表随之高亮） */
+.matrix tr.row-selected > td.el-table__cell { box-shadow: inset 0 0 0 1px var(--d-select); }
 /* 采集失败标记：红色内框 + 右上角 ✗ */
 .matrix td.cell-fail { position: relative; box-shadow: inset 0 0 0 1px rgba(255, 59, 48, 0.65); }
 .matrix td.cell-fail::after {
