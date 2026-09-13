@@ -16,6 +16,7 @@
 | [docs/监控大屏实现.md](docs/监控大屏实现.md) | 监控按需采集调度、六域采集口径、金额换算、告警引擎与存储 |
 | [docs/监控大屏.md](docs/监控大屏.md) | 监控大屏的使用者说明（完整口径、指标表、告警怎么读） |
 | [docs/开发指南.md](docs/开发指南.md) | 快速开始、新增工具步骤、**测试与调试（含测试假失败的坑）的唯一权威** |
+| [docs/GitHub提交与发布指南.md](docs/GitHub提交与发布指南.md) | 提交代码、发布 Release 与 `update.json` 清单的流程与坑（发布方视角） |
 | [新手入门指南.md](新手入门指南.md) | 最终用户操作，**必须自包含**（见约束 9） |
 | [shopee_api_doc/README.md](shopee_api_doc/README.md) | Shopee 开放平台官方文档整站目录与抓取方式 |
 
@@ -28,7 +29,7 @@
 5. **凭证不入库**，日志不完整打印 Cookie/Authorization。
 6. **中文优先**，文档/注释/用户文案用中文，代码标识符可英文。
 7. 改入口/端口/结构时，同步更新 `启动.bat`、`docs/架构.md`、`AGENTS.md`，及涉及的具体链路文档 / `docs/开发指南.md`。
-8. 不主动新增文档文件，用现有 8 份（见文档地图；用户明确要求新增文档时除外）；Shopee 开放平台接口资料统一放 `shopee_api_doc/`（刷新方式见其 README）。
+8. 不主动新增文档文件，用现有 9 份（见文档地图；用户明确要求新增文档时除外）；Shopee 开放平台接口资料统一放 `shopee_api_doc/`（刷新方式见其 README）。
 9. **`新手入门指南.md` 必须自包含**：面向最终用户，**不得链接其它文档**，使用者要看的操作步骤、前提与常见问题都要写在这一个文件里。
 10. **同一事实只写一处**：细则归上表列出的负责文档，其它文档只写红线与指针；**不要在本文件复述细则**（复述过的必然随实现漂移）。唯一例外是 `新手入门指南.md`（约束 9）——它内联的用户可见口径（如监控阈值、告警级别）变化时，需与负责文档手工同步两处。
 
@@ -37,7 +38,7 @@
 - 后端一律 **CommonJS**（`require`/`module.exports`）；前端 **Vue3 SFC**。改代码时保持文件原有风格，不混用。
 - **后端不新增运行时依赖**（现仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`）；前端现为 `vue` / `element-plus` / `vite` / `echarts`（监控大屏折线图，按需引入）。
 - **共享层必须复用，不许各写一份**：会话/请求层 `lib/shopee-session.js`、JSON body `lib/http-utils.js`、端口 `lib/config.js`、长任务 `lib/jobs.js`、重试 `lib/retry.js`、导出落盘 `lib/export-utils.js`、统一出站 `lib/http.js`；前端对应 `bootstrap.js` / `composables/` / `components/` / `styles/base.css`。**各函数语义与「为什么不能绕过」见 [docs/架构.md](docs/架构.md) §3–§4，改前先读那一节。**
-- **样式一律取设计令牌，不写死颜色与尺寸**：浅色取 `styles/base.css` 的 `:root`，深色取 `monitor/monitor.css` 的 `--d-*`。两个硬约束：深色令牌必须挂 `html`（挂 `.dash` / `.sidebar` 会让 teleport 到 `body` 的抽屉 / Tooltip 取不到值）；ECharts 文字色硬编码在 `monitor/trend-chart.js`，改深色文字层级要同步它。
+- **样式一律取设计令牌，不写死颜色与尺寸**：浅色取 `styles/base.css` 的 `:root`，深色取 `monitor/monitor.css` 的 `--d-*`；两个硬约束（深色令牌必须挂 `html`、ECharts 文字色在 `monitor/trend-chart.js`）见 [docs/架构.md](docs/架构.md) §4。
 - **CORS 是本机白名单**（`main.js` 的 `isAllowedOrigin`），**不要退回 `Access-Control-Allow-Origin: *`**。
 - 改前端 `src` 后必须 `vite build` 重建 `frontend/dist`（gitignored 产物）；新增共享模块后逐个确认调用方已 `require`（`grep -n "require('./lib/xxx')" server/*.js`），遗忘表现为路由 500。
 
