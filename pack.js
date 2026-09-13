@@ -13,6 +13,7 @@
  *   - 清单里的 url 必须指向**永久地址**（建议 GitHub Release 资产），地址模板见下方 DOWNLOAD_URL_TEMPLATE。
  *   - 压缩用系统自带 tar（Windows 10 1803+ 内置 bsdtar）：它写出的 zip 条目分隔符是 `/`，
  *     非 Windows 侧解压不会出现反斜杠文件名（.NET 的 Compress-Archive / ZipFile 会有这个问题）。
+ *     但必须显式列出顶层条目（见 main 里的说明），传 `.` 会产生 `./` 前缀导致资源管理器显示为空。
  */
 const fs = require('fs');
 const os = require('os');
@@ -90,10 +91,13 @@ function main() {
   );
 
   // 3) 压缩：tar -a 按扩展名选 zip 格式
+  //    注意：必须显式列出顶层条目，不能传 `.`——bsdtar 会把条目名写成 `./server/...`，
+  //    Windows 资源管理器打开这种 zip 会显示为空（7-Zip 等第三方工具不受影响）。
   fs.rmSync(BUILD_DIR, { recursive: true, force: true });
   fs.mkdirSync(BUILD_DIR, { recursive: true });
   const zipFile = path.join(BUILD_DIR, zipName);
-  const r = spawnSync(tarPath(), ['-a', '-c', '-f', zipFile, '-C', staging, '.'], {
+  const topItems = fs.readdirSync(staging);
+  const r = spawnSync(tarPath(), ['-a', '-c', '-f', zipFile, '-C', staging, ...topItems], {
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
   });
