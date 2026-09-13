@@ -71,6 +71,6 @@
 
 ## 测试
 
-`node test/test.js`（或 `npm test`）：单元（`test/unit.test.js`）+ 开放平台刷新链路（`test/openapi-refresh.test.js`，离线 mock 网关）+ 接口冒烟（`test/api.test.js`，临时端口 8865），**不访问真实站点**；session 凭证文件测试前备份、结束后原样恢复。
+`node test/test.js`（或 `npm test`）：单元（`test/unit.test.js` 编排 `test/unit/` 按主题拆分）+ 开放平台刷新链路（`test/openapi-refresh.test.js`，离线 mock 网关）+ 接口冒烟（`test/api.test.js`，临时端口 8865），**不访问真实站点**；session 凭证文件测试前备份、结束后原样恢复。
 
 **测试假失败的三个坑（数据目录隔离 / 金额断言先钉汇率 / mock 网关类测试清 `require.cache`）最容易误改代码**，动手前先读 [docs/开发指南.md](docs/开发指南.md) §4 的对应说明；运行方式与新增用例同样见该节。定位后端 500 用 `KP_TEST_SERVER_LOG=1 node test/test.js`。

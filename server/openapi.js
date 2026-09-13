@@ -1,224 +1,32 @@
 /**
  * Shopee 开放平台 API 登录模块（CommonJS）
- * 由合并服务 main.js 引入，通过 register({ get, post }) 注册路由。
+ * 由合并服务 main.js 引入，通过 register({ get, post }) 注册路由（本文件只注册路由）。
  * 流程：录入 App（partner_id/partner_key）→ 生成授权链接 → 卖家浏览器授权
  *      → 跳回 /openapi/callback → 换取 access_token/refresh_token → 本地持久化。
  * 后续功能模块统一经 openapi/client.js 的 callOpenApi 调用官方接口，无需重复实现签名与刷新。
+ *
+ * 链路拆分到 openapi/ 子模块：
+ *   constants.js     常量（API 路径 / 默认 redirect / 本机回调域名白名单）
+ *   store.js         App 与店铺 token 持久化
+ *   client.js        签名调用 / token 刷新（含分组续期）
+ *   refresh-all.js   批量刷新编排（SSE + 暂停/取消）
+ *   redirect.js      授权回调地址校验
+ *   stores-view.js   已授权店铺列表（选择店铺数据源）
+ *   callback-page.js 授权回调内联页
+ *   notify.js        授权变化通知监控调度器
  */
 'use strict';
 const { sendJson, jsonAction } = require('./lib/http-utils');
-const { CALLBACK_PORT } = require('./lib/config');
-const { DEFAULT_REDIRECT, LOCAL_REDIRECT_HOSTS, API_PATH } = require('./openapi/constants');
+const { DEFAULT_REDIRECT } = require('./openapi/constants');
 const { nowSec, maskToken } = require('./lib/openapi-utils');
 const store = require('./openapi/store');
 const client = require('./openapi/client');
 // 批量刷新 token 链路（分组编排 + SSE + 暂停/取消）拆在子模块，这里只注册路由
 const refreshAll = require('./openapi/refresh-all');
-
-/**
- * 校验授权回调地址，返回 { url, mode }：
- * - auto：http + 本机可达域名（白名单，解析到 127.0.0.1）+ 回调端口（CALLBACK_PORT，默认 8765）+ /openapi/callback，授权后自动跳回本工具换 token。
- * - manual：任意 http/https 域名（官方后台强制要求域名时用）：授权后浏览器跳到该地址，
- *   用户把地址栏里的完整回调链接（含 code/shop_id）复制回本工具「手动完成授权」粘贴；
- *   也可以在该域名上放一个转发页自动跳回本机（见前端「有域名」折叠说明）。
- * 注意：官方后台对 redirect 做域名校验，不接受 127.0.0.1 / localhost 时请用白名单里的通配域名。
- */
-function validateRedirect(redirect) {
-  let u;
-  try {
-    u = new URL(String(redirect || ''));
-  } catch (e) {
-    throw new Error('redirect 不是合法地址');
-  }
-  const host = u.hostname.toLowerCase();
-  const local =
-    u.protocol === 'http:' &&
-    u.port === String(CALLBACK_PORT) &&
-    u.pathname === '/openapi/callback' &&
-    !u.search &&
-    LOCAL_REDIRECT_HOSTS.includes(host);
-  const manual =
-    (u.protocol === 'http:' || u.protocol === 'https:') &&
-    !u.search && // 官方要求 redirect 不能带查询参数
-    !/^\d+\.\d+\.\d+\.\d+$/.test(host) && // 官方后台不接受 IP 字面量，手动模式同样拒绝
-    /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host);
-  if (!local && !manual) {
-    throw new Error(
-      `redirect 不合法：自动回调需为本机可达地址（http://<本机域名>:${CALLBACK_PORT}/openapi/callback，可用 ` +
-        LOCAL_REDIRECT_HOSTS.join(' / ') +
-        '）；或填你自己的 http/https 域名地址（不能带 ? 查询参数），授权后把跳转链接粘贴回本工具「手动完成授权」，或在你的域名放转发页实现全自动'
-    );
-  }
-  return { url: u.toString(), mode: local ? 'auto' : 'manual' };
-}
-
-/** 授权状态变化后通知监控大屏调度器立即刷新店铺列表（重新授权后无需等巡检周期，大屏当场恢复） */
-function notifyMonitorAuthChanged() {
-  try {
-    require('./monitor/scheduler').notifyAuthChanged();
-  } catch { /* 监控模块未加载时忽略 */ }
-}
-
-// ============ 已授权店铺列表（各工具「选择店铺」数据源） ============
-// 输出当前环境全部已授权店铺的 { category, id, name, region }（各工具「选择店铺」唯一数据源，含 region 国家筛选用）。
-// 店铺名/地区两级缓存：openapi-session.json(shopName/shopRegion) → 监控 meta.json(首次采集时补的名字)；
-// 两处都缺才调 get_shop_info 补拉（直接签名调用、不带自动刷新），失败只记失败时间戳、
-// 10 分钟内不重试——取名/取地区失败绝不把店铺标记为失效（不影响监控采集与授权状态）。
-const SHOP_NAME_RETRY_MS = 10 * 60 * 1000;
-const SHOP_NAME_CONCURRENCY = 5;
-let shopNameTask = null; // 单飞：并发请求共享同一次拉取，避免重复打网关
-
-/** 监控大屏缓存的店铺名（meta.json，首次采集时经 get_shop_info 补过） */
-function monitorNameMap() {
-  try {
-    const meta = require('./monitor/store').getMeta();
-    const out = {};
-    for (const [id, m] of Object.entries((meta && meta.shops) || {})) {
-      if (m && m.name) out[String(id)] = String(m.name);
-    }
-    return out;
-  } catch { return {}; } // 监控模块不可用时忽略
-}
-
-/** 直调 get_shop_info 补拉缺失的店铺名/地区（不走 callOpenApi：避免认证类失败触发刷新/标记失效） */
-async function fetchShopNames(env, shops) {
-  let cursor = 0;
-  const worker = async () => {
-    while (cursor < shops.length) {
-      const s = shops[cursor++];
-      const patch = {};
-      try {
-        const j = await client.signedCall({
-          env,
-          apiPath: API_PATH.getShopInfo,
-          accessToken: s.accessToken || '',
-          shopId: s.shopId,
-          method: 'GET',
-        });
-        // 载荷层口径与 client.pickPayload 统一（顶层 / response / data）
-        const p = client.pickPayload(j, ['shop_name', 'region', 'country', 'shop_region', 'shop_country']) || {};
-        let name = p.shop_name ? String(p.shop_name) : '';
-        let region = '';
-        // region 提取口径与监控采集（collectors.fetchShopInfo）一致
-        for (const k of ['region', 'country', 'shop_region', 'shop_country']) {
-          if (p[k] !== undefined && p[k] !== null && p[k] !== '') { region = String(p[k]).toUpperCase(); break; }
-        }
-        if (name.trim()) patch.shopName = name.trim();
-        else patch.shopNameFailedAt = Date.now();
-        if (region) patch.shopRegion = region;
-        else patch.shopRegionFailedAt = Date.now();
-      } catch (e) {
-        patch.shopNameFailedAt = Date.now();
-        patch.shopRegionFailedAt = Date.now();
-        console.warn(`获取店铺 ${s.shopId} 名称/地区失败: ${e.message}`);
-      }
-      store.setShop(env, s.shopId, patch);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(SHOP_NAME_CONCURRENCY, shops.length) }, worker));
-}
-
-/** 已授权店铺列表（首次调用会补拉缺失的店铺名/地区，耗时几秒；之后走缓存秒回） */
-async function authorizedStores() {
-  const app = store.getApp();
-  if (!app) return [];
-  const mNames = monitorNameMap();
-  const now = Date.now();
-  const pending = store
-    .getShopsRaw(app.env)
-    .filter((s) => {
-      if (s.invalid) return false;
-      const hasName = !!(s.shopName || mNames[s.shopId]);
-      const hasRegion = !!s.shopRegion;
-      if (hasName && hasRegion) return false;
-      const nameBlocked = s.shopNameFailedAt && now - s.shopNameFailedAt < SHOP_NAME_RETRY_MS;
-      const regionBlocked = s.shopRegionFailedAt && now - s.shopRegionFailedAt < SHOP_NAME_RETRY_MS;
-      // 名字/地区各自有 10 分钟失败冷却，两项都被冷却挡住时才跳过
-      if (!hasName && !hasRegion) return !(nameBlocked && regionBlocked);
-      if (!hasName) return !nameBlocked;
-      return !regionBlocked;
-    });
-  if (pending.length) {
-    if (!shopNameTask) {
-      shopNameTask = fetchShopNames(app.env, pending).finally(() => {
-        shopNameTask = null;
-      });
-    }
-    await shopNameTask;
-  }
-  return store
-    .getShopsRaw(app.env)
-    // 失效店铺不作为可选目标（选中后调用必然失败）；其状态仍在 /api/openapi/status 与监控大屏展示
-    .filter((s) => !s.invalid)
-    .map((s) => ({
-      category: '开放平台已授权',
-      id: s.shopId,
-      name: s.shopName || mNames[s.shopId] || `店铺 ${s.shopId}`,
-      region: s.shopRegion || '',
-    }))
-    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-}
-
-// ============ 授权回调页（浏览器从官方授权页跳回这里） ============
-// 内联 HTML：读取 query 中的 code/shop_id/main_account_id，调 /api/openapi/auth-callback 换 token。
-function callbackPageHtml() {
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<title>开放平台授权回调</title>
-<style>
-  body { font-family: "Microsoft YaHei", sans-serif; background: #f4f6fb; display: flex; min-height: 100vh; align-items: center; justify-content: center; margin: 0; }
-  .card { background: #fff; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.08); padding: 32px 40px; max-width: 560px; text-align: center; }
-  h2 { margin: 0 0 12px; color: #23262f; }
-  p { color: #4a5064; line-height: 1.7; word-break: break-all; }
-  .ok h2 { color: #0a9d5c; } .fail h2 { color: #d64541; }
-  .spinner { display: inline-block; width: 28px; height: 28px; border: 3px solid #e0e3ee; border-top-color: #ee4d2d; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-</style>
-</head>
-<body>
-<div class="card" id="card">
-  <div class="spinner"></div>
-  <h2>正在完成店铺授权…</h2>
-  <p>正在用授权码换取访问令牌，请稍候。</p>
-</div>
-<script>
-  (async function () {
-    var card = document.getElementById('card');
-    var q = new URLSearchParams(location.search);
-    function show(ok, title, detail) {
-      card.className = 'card ' + (ok ? 'ok' : 'fail');
-      card.innerHTML = '<h2>' + title + '</h2><p>' + detail + '</p>';
-      setTimeout(function () { location.href = '/'; }, 4000);
-    }
-    var code = q.get('code');
-    var shopId = q.get('shop_id');
-    var mainId = q.get('main_account_id');
-    if (q.get('error')) { show(false, '授权被取消或失败', '官方授权页返回错误：' + q.get('error') + '。请回到「开放平台」页面重新生成授权链接。'); return; }
-    if (!code) { show(false, '回调参数不完整', '未收到 code。请回到「开放平台」页面重新生成授权链接并重新授权。'); return; }
-    if (!shopId && !mainId) { show(false, '回调参数不完整', '未收到 shop_id 或 main_account_id。请回到「开放平台」页面重新生成授权链接并重新授权。'); return; }
-    try {
-      var r = await fetch('/api/openapi/auth-callback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: code, shopId: shopId || '', mainAccountId: mainId || '' }),
-      });
-      var j = await r.json();
-      if (r.ok && j.ok) {
-        var cnt = (j.shopIds && j.shopIds.length) || 0;
-        show(true, '店铺授权成功', '已授权并保存 ' + cnt + ' 个店铺，即将返回工具首页。可在「开放平台」页面查看和管理 Token。');
-      } else {
-        show(false, '换取令牌失败', (j.message || '未知错误') + '。请回到「开放平台」页面重新生成授权链接。');
-      }
-    } catch (e) {
-      show(false, '本地服务异常', '调用本地服务失败：' + e.message + '。请确认 启动.bat 正在运行后重试。');
-    }
-  })();
-</script>
-</body>
-</html>`;
-}
+const { validateRedirect } = require('./openapi/redirect');
+const { authorizedStores } = require('./openapi/stores-view');
+const { callbackPageHtml } = require('./openapi/callback-page');
+const { notifyMonitorAuthChanged } = require('./openapi/notify');
 
 // ============ 路由注册 ============
 function register({ get, post }) {

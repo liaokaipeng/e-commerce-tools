@@ -24,7 +24,7 @@ const LEVEL_STYLE = {
 };
 const OK_COLOR = '#30D158';
 
-// 采集任务定义：调度器按 intervalMs 轮询执行（collectors.js 提供 collectDomain）
+// 采集任务定义：调度器按 intervalMs 轮询执行（collectors/ 提供 collectDomain）
 const JOBS = [
   { domain: 'order', intervalMs: 10 * 60 * 1000, title: '订单履约' },
   { domain: 'product', intervalMs: 30 * 60 * 1000, title: '商品库存' },
@@ -35,7 +35,7 @@ const JOBS = [
 ];
 
 // 指标目录：id -> { title, unit, direction }；direction=up 值越大越差，down 值越小越差
-// 注意：待发货订单列表无创建时间，按 order_sn 的 YYMMDD 前缀按天估算（见 collectors.orderAgeBuckets）
+// 注意：待发货订单列表无创建时间，按 order_sn 的 YYMMDD 前缀按天估算（见 collectors/parse.orderAgeBuckets）
 const METRICS = {
   'order.pending_12_24h': { title: '今日待发货', unit: '单', direction: 'up' },
   'order.pending_24h': { title: '昨日及更早待发货', unit: '单', direction: 'up' },

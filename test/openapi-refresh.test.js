@@ -77,6 +77,10 @@ for (const p of [
   '../server/openapi/client',
   '../server/openapi',
   '../server/openapi/refresh-all',
+  '../server/openapi/redirect',
+  '../server/openapi/stores-view',
+  '../server/openapi/callback-page',
+  '../server/openapi/notify',
 ]) {
   delete require.cache[require.resolve(p)];
 }
