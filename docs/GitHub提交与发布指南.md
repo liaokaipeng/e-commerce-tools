@@ -121,6 +121,7 @@ Invoke-RestMethod -Method Post -Uri $up -Headers $headers -ContentType 'applicat
 > - `body` 必须强转 `[string]`——PS 5.1 的 `ConvertTo-Json` 会把 `Get-Content` 的文件对象序列化进 body，GitHub 返回 422 `body is not a string`。
 > - 资产上传只能走创建响应里的 `upload_url`；自行拼 `api.github.com/repos/.../releases/<id>/assets` 一律 404。
 > - 正文按 UTF-8 字节发送，避免中文乱码。
+> - **别用 PowerShell 5.1 跑这个脚本**：PS 5.1 会把「UTF-8 无 BOM 的 `.ps1`」按本机 ANSI 解码，含中文注释时反引号行接续会失效、注释甚至可能吞掉下一行（表现为 422 `body is not a string` 或 `-Headers 不是命令`）。**建 Release / 上传资产一律用 Node 跑**（Node 内置 `fetch` 发字节；取凭据用 `spawnSync('git', ['credential','fill'], { input: 'protocol=https\nhost=github.com\n\n' })`，配 `GCM_INTERACTIVE=never`），见 §4。
 
 ### 3.5 更新清单 `update.json`（客户端自更新）
 
@@ -145,7 +146,8 @@ Invoke-RestMethod -Method Post -Uri $up -Headers $headers -ContentType 'applicat
 | 自动化里 `git push` / `credential fill` 弹窗挂起 | 先置 `$env:GCM_INTERACTIVE='never'` |
 | 管道给 `git credential fill` 喂 stdin 失败 | 改用**文件重定向 stdin**（`-RedirectStandardInput`） |
 | PowerShell 里写 `&&` 或 heredoc | 不支持；多行提交信息用 `git commit -F <文件>` |
-| Release 创建报 422 `body is not a string` | 把 `Get-Content` 结果强转 `[string]` 再交 `ConvertTo-Json` |
+| Release 创建报 422 `body is not a string` | 把 `Get-Content` 结果强转 `[string]` 再交 `ConvertTo-Json`；**若改用 Node 跑则不会遇到**（见下一行） |
+| 含中文注释的 `.ps1` 在 PS 5.1 里行接续失效 / 报 `-Headers 不是命令` | PS 5.1 按 ANSI 解码 UTF-8 无 BOM 脚本所致；**发布脚本（建 Release / 上传资产）改用 Node**：`fetch` 发字节 + `spawnSync('git',['credential','fill'],{input})` 取凭据 |
 | 上传 Release 资产 404 | 用创建响应的 `upload_url`，勿手拼 `api.github.com` 路径 |
 | 误把凭证 / 数据提交上去 | 靠 `.gitignore`（`server/data/`、`*-session.json`、`*.har` 等）；漏网先补规则 |
 | 远端落后导致推送被拒 | `git pull --rebase` 后再推；**禁 force push `main`** |
