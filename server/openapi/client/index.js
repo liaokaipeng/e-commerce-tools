@@ -25,16 +25,16 @@
 //   error_param: There is no partner_id in query）。
 // - 签名 base：无 token 时 = partner_id + api_path + timestamp；
 //   带 token 时 = partner_id + api_path + timestamp + access_token + shop_id。
-const { getAuthUrl, exchangeToken, getShopInfo } = require('./client/auth');
-const { refreshToken, refreshTokenWithMerchant } = require('./client/refresh');
-const { planRefresh } = require('./client/plan');
-const { saveRefreshResult, saveRefreshResultGroup } = require('./client/persist');
-const { ensureFresh, refreshShopNow } = require('./client/ensure');
-const { callOpenApi } = require('./client/call');
-const { signedCall } = require('./client/transport');
-const { pickPayload } = require('./client/parse');
-const { isAuthDead, isAuthRetryable } = require('./client/errors');
-const { REFRESH_COOLDOWN_MS } = require('./constants');
+const { getAuthUrl, exchangeToken, getShopInfo } = require('./auth');
+const { refreshToken, refreshTokenWithMerchant } = require('./refresh');
+const { planRefresh } = require('./plan');
+const { saveRefreshResult, saveRefreshResultGroup } = require('./persist');
+const { ensureFresh, refreshShopNow } = require('./ensure');
+const { callOpenApi } = require('./call');
+const { signedCall } = require('./transport');
+const { pickPayload } = require('./parse');
+const { isAuthDead, isAuthRetryable } = require('./errors');
+const { REFRESH_COOLDOWN_MS } = require('../constants');
 
 module.exports = {
   getAuthUrl,

@@ -5,9 +5,9 @@
 //   - 大屏金额展示全局可切换「当地货币（默认）/ 人民币」（config.json 的 currencyMode）；
 //   - 采集快照/告警 current 一律存「当地货币原始值」，展示与比较时按需换算。
 // 原单文件按职责拆到 currency/ 子目录（数据源与缓存 / 地区映射 / 换算与格式化），本入口聚合导出（对外 API 不变）。
-const rates = require('./currency/rates');
-const regions = require('./currency/regions');
-const convert = require('./currency/convert');
+const rates = require('./rates');
+const regions = require('./regions');
+const convert = require('./convert');
 
 module.exports = {
   STATIC_RMB_RATES: rates.STATIC_RMB_RATES,

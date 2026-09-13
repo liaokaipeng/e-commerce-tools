@@ -20,11 +20,11 @@
  *   download.js（流式下载）· manifest.js（清单拉取比对）· deps.js（依赖差异安装）
  *   apply.js（更新编排）· routes.js（路由注册）· schedule.js（启动后自动检查）
  */
-const { register } = require('./update/routes');
-const { startAutoCheck } = require('./update/schedule');
-const { checkNow } = require('./update/manifest');
-const { applyUpdate } = require('./update/apply');
-const { loadConfig } = require('./update/config');
-const { COPY_ITEMS } = require('./update/whitelist');
+const { register } = require('./routes');
+const { startAutoCheck } = require('./schedule');
+const { checkNow } = require('./manifest');
+const { applyUpdate } = require('./apply');
+const { loadConfig } = require('./config');
+const { COPY_ITEMS } = require('./whitelist');
 
 module.exports = { register, startAutoCheck, checkNow, applyUpdate, loadConfig, COPY_ITEMS };

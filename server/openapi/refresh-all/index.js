@@ -24,9 +24,9 @@
  *   refresh-all/run.js    handleRefreshAll：SSE 执行体 + 单飞互斥 + job 门控
  *   refresh-all/route.js  register：路由注册
  */
-const { register } = require('./refresh-all/route');
-const { planRefreshGroups } = require('./refresh-all/plan');
-const { summaryText } = require('./refresh-all/text');
+const { register } = require('./route');
+const { planRefreshGroups } = require('./plan');
+const { summaryText } = require('./text');
 
 module.exports = {
   register,

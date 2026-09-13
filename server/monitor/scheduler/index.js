@@ -18,10 +18,10 @@
 //   scheduler/tick.js     巡检触发
 //   scheduler/presence.js 在场心跳/授权与配置变化补采
 //   scheduler/control.js  启停 / 手动触发 / 状态投影
-const { state } = require('./scheduler/state');
-const control = require('./scheduler/control');
-const { tick } = require('./scheduler/tick');
-const presence = require('./scheduler/presence');
+const { state } = require('./state');
+const control = require('./control');
+const { tick } = require('./tick');
+const presence = require('./presence');
 
 module.exports = {
   start: control.start,

@@ -8,12 +8,12 @@
 //   engine/lifecycle.js 告警生命周期（ingest/maintain/systemFail/systemOk）
 //   engine/actions.js   人工操作 + 查询投影 + 容量淘汰 + 清空
 //   engine/persist.js   防抖落盘
-const state = require('./engine/state');
-const sse = require('./engine/sse');
-const render = require('./engine/render');
-const lifecycle = require('./engine/lifecycle');
-const actions = require('./engine/actions');
-const persist = require('./engine/persist');
+const state = require('./state');
+const sse = require('./sse');
+const render = require('./render');
+const lifecycle = require('./lifecycle');
+const actions = require('./actions');
+const persist = require('./persist');
 
 module.exports = {
   // 生命周期
