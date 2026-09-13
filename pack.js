@@ -29,7 +29,7 @@ const { COPY_ITEMS } = require('./server/update');
  * 默认按 GitHub Release 资产组织（仓库体积不会因二进制膨胀）。
  */
 const DOWNLOAD_URL_TEMPLATE =
-  'https://github.com/<用户名>/<仓库>/releases/download/v${version}/kp_tools-v${version}.zip';
+  'https://github.com/liaokaipeng/e-commerce-tools/releases/download/v${version}/kp_tools-v${version}.zip';
 
 const BUILD_DIR = path.join(ROOT, 'build');
 

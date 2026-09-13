@@ -3,5 +3,5 @@
   "_地址格式": "https://raw.githubusercontent.com/<用户名>/<仓库>/<分支>/update.json",
   "enabled": true,
   "intervalHours": 6,
-  "manifestUrl": ""
+  "manifestUrl": "https://raw.githubusercontent.com/liaokaipeng/e-commerce-tools/main/update.json"
 }
