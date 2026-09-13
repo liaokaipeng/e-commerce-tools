@@ -1,8 +1,8 @@
 {
-  "version": "1.1.0",
-  "builtAt": "2026-09-13T12:45:39.070Z",
-  "commit": "029ff01",
-  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.1.0/kp_tools-v1.1.0.zip",
-  "sha256": "b2b8aeeabffdb1abbc92c7b954b39d26fac12eb1f3691677cdf535b33e6f3274",
-  "notes": "监控大屏升级：告警流支持多选批量删除；规则面板新增「历史建议」（按最近 30 天样本给出分位数建议与当前阈值历史命中率，点「采用」后仍需保存生效）；趋势图新增环比对比线与时间范围切换（1/7/30 天）；「立即采集」改为采集全部已启用监控的店铺；另有首次加载骨架屏、店铺墙最高告警摘要、告警已持续时长等界面细节。"
+  "version": "1.1.1",
+  "builtAt": "2026-09-13T14:44:41.212Z",
+  "commit": "03c0307",
+  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.1.1/kp_tools-v1.1.1.zip",
+  "sha256": "4aa128e2fd0ee4665533735a6b1b5e48773ba0e4bda99b11f2dc527a96721a97",
+  "notes": "监控大屏优化：告警回稳后直接从告警流移除，不再保留「已恢复」记录（列表更简洁、触发计数更准）；同步精简采集与前端代码，行为与数据口径不变。"
 }
