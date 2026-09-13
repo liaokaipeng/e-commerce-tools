@@ -126,7 +126,7 @@ function main() {
   console.log(`  安装包    build/${zipName}  ${sizeMB} MB`);
   console.log(`  清单      update.json`);
   console.log(`  内容      ${staged.join('、')}`);
-  console.log('  不含      node_modules（首次由 启动.bat 自动安装）、server/data、研究/测试资产\n');
+  console.log('  不含      node_modules（首次由 启动.bat 自动安装）、server/data、docs/（开发文档）、研究/测试资产\n');
   console.log('下一步：');
   console.log(`  1. 把 update.json 提交并推送到仓库（客户端从这里读版本清单，地址要固定）`);
   console.log(`  2. 在 GitHub 建 Release（tag v${version}），把 build/${zipName} 作为资产上传`);

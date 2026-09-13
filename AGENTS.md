@@ -18,7 +18,7 @@
 | [docs/开发指南.md](docs/开发指南.md) | 快速开始、新增工具步骤、**测试与调试（含测试假失败的坑）的唯一权威** |
 | [docs/GitHub提交与发布指南.md](docs/GitHub提交与发布指南.md) | 提交代码、发布 Release 与 `update.json` 清单的流程与坑（发布方视角） |
 | [新手入门指南.md](新手入门指南.md) | 最终用户操作，**必须自包含**（见约束 9） |
-| [shopee_api_doc/README.md](shopee_api_doc/README.md) | Shopee 开放平台官方文档整站目录与抓取方式 |
+| [docs/shopee_api_doc/README.md](docs/shopee_api_doc/README.md) | Shopee 开放平台官方文档整站目录与抓取方式 |
 
 ## 关键约束（务必遵守）
 
@@ -29,7 +29,7 @@
 5. **凭证不入库**，日志不完整打印 Cookie/Authorization。
 6. **中文优先**，文档/注释/用户文案用中文，代码标识符可英文。
 7. 改入口/端口/结构时，同步更新 `启动.bat`、`docs/架构.md`、`AGENTS.md`，及涉及的具体链路文档 / `docs/开发指南.md`。
-8. 不主动新增文档文件，用现有 9 份（见文档地图；用户明确要求新增文档时除外）；Shopee 开放平台接口资料统一放 `shopee_api_doc/`（刷新方式见其 README）。
+8. 不主动新增文档文件，用现有 9 份（见文档地图；用户明确要求新增文档时除外）；Shopee 开放平台接口资料统一放 `docs/shopee_api_doc/`（刷新方式见其 README）。
 9. **`新手入门指南.md` 必须自包含**：面向最终用户，**不得链接其它文档**，使用者要看的操作步骤、前提与常见问题都要写在这一个文件里。
 10. **同一事实只写一处**：细则归上表列出的负责文档，其它文档只写红线与指针；**不要在本文件复述细则**（复述过的必然随实现漂移）。唯一例外是 `新手入门指南.md`（约束 9）——它内联的用户可见口径（如监控阈值、告警级别）变化时，需与负责文档手工同步两处。
 
@@ -48,7 +48,7 @@
 - **视频上传**：**写操作必须 `call({ idempotent:false })`**，否则失败重放会「重复合并 / 发两条视频」；大文件必须流式，不得整文件 `readFileSync`。详见 [docs/视频上传链路.md](docs/视频上传链路.md) §8。
 - **开放平台**：**刷新一律走 `ensureFresh` / `refreshShopNow`，绝不逐店遍历刷新**——单店刷新共享 token 组会作废组内其它店铺的 refresh_token，把整组拖成「需重新授权」；官方功能统一经 `callOpenApi`，不自行拼签名。详见 [docs/开放平台链路.md](docs/开放平台链路.md) §3。
 - **监控大屏**：金额阈值一律按人民币配置与比较；规则阈值「留空 = 该级别不触发」必须用 `null` 传递（前端空值转 `null`，否则默认阈值会「复活」）；系统自检告警同样受规则 `enabled` 约束。详见 [docs/监控大屏实现.md](docs/监控大屏实现.md) §4。
-- **开放平台接口报参数错误时**（error_param / 格式错 / Wrong sign / error_unknown）：网关报错文案经常是误导性的，**先查 `shopee_api_doc/` 核对参数名与必填项，再用最小参数组合逐变体验证**，不要按字面改——完整排查顺序见 [docs/开发指南.md](docs/开发指南.md) §5.1。
+- **开放平台接口报参数错误时**（error_param / 格式错 / Wrong sign / error_unknown）：网关报错文案经常是误导性的，**先查 `docs/shopee_api_doc/` 核对参数名与必填项，再用最小参数组合逐变体验证**，不要按字面改——完整排查顺序见 [docs/开发指南.md](docs/开发指南.md) §5.1。
 - **版本与自更新**：`server/data/`（真实店铺授权）**绝不能进发布包，也绝不能被一键更新覆盖**；更新只按 `server/update.js` 的 `COPY_ITEMS` 白名单覆盖，落盘后必须重启才生效。流程与约束见 [docs/架构.md](docs/架构.md) §1.3。
 
 ## 经验沉淀（踩坑即记）
@@ -71,6 +71,6 @@
 
 ## 测试
 
-`node test.js`（或 `npm test`）：单元（`test/unit.test.js`）+ 开放平台刷新链路（`test/openapi-refresh.test.js`，离线 mock 网关）+ 接口冒烟（`test/api.test.js`，临时端口 8865），**不访问真实站点**；session 凭证文件测试前备份、结束后原样恢复。
+`node test/test.js`（或 `npm test`）：单元（`test/unit.test.js`）+ 开放平台刷新链路（`test/openapi-refresh.test.js`，离线 mock 网关）+ 接口冒烟（`test/api.test.js`，临时端口 8865），**不访问真实站点**；session 凭证文件测试前备份、结束后原样恢复。
 
-**测试假失败的三个坑（数据目录隔离 / 金额断言先钉汇率 / mock 网关类测试清 `require.cache`）最容易误改代码**，动手前先读 [docs/开发指南.md](docs/开发指南.md) §4 的对应说明；运行方式与新增用例同样见该节。定位后端 500 用 `KP_TEST_SERVER_LOG=1 node test.js`。
+**测试假失败的三个坑（数据目录隔离 / 金额断言先钉汇率 / mock 网关类测试清 `require.cache`）最容易误改代码**，动手前先读 [docs/开发指南.md](docs/开发指南.md) §4 的对应说明；运行方式与新增用例同样见该节。定位后端 500 用 `KP_TEST_SERVER_LOG=1 node test/test.js`。

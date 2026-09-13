@@ -80,7 +80,7 @@ git push origin main
 npm run pack        # 产出 build/kp_tools-v<version>.zip + 根目录 update.json
 ```
 
-- 包内**不含 `node_modules`**（首次由 `启动.bat` 自动 `npm install`）与 **`server/data`**（真实店铺授权、Cookie 永不进包，也永不被更新覆盖）。
+- 包内**不含 `node_modules`**（首次由 `启动.bat` 自动 `npm install`）、**`server/data`**（真实店铺授权、Cookie 永不进包，也永不被更新覆盖）与 **`docs/`**（开发文档，不对外分发）。
 - zip 用系统自带 `tar -a` 生成（条目分隔符为 `/`，跨平台解压不会出现反斜杠文件名）。
   **tar 必须显式列出顶层条目、不能传 `.`**（`pack.js` 已内置正确写法）：传 `.` 时 bsdtar 会把条目名写成 `./server/...`，Windows 资源管理器（双击打开 / 右键解压）显示为**空白 zip**，而 7-Zip 等第三方工具正常——极易误判为「包是空的」。发布后务必按 §3.6 用系统解压抽验一次。
 - 打包脚本读 `package.json` 版本号，并对**最终 zip** 计算 `sha256` 写入 `update.json`——**先改版本号再打包**；`notes` 由打包脚本留空，发布方手工填写后提交。

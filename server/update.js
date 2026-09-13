@@ -39,12 +39,12 @@ const BACKUP_DIR = path.join(ROOT, 'backup');
 /**
  * 一键更新覆盖白名单（发布包与更新共用同一份，避免两处漂移）：
  * 只覆盖「程序」，不含任何用户数据。`server` 复制时额外跳过 `data` 子目录。
+ * `docs/`（开发指南与 `shopee_api_doc/` 官方文档目录）**属开发资料，既不进发布包也不下发给使用者**，故不列入。
  */
 const COPY_ITEMS = [
   'server',
   'frontend/dist',
   'extension',
-  'docs',
   '启动.bat',
   'package.json',
   'package-lock.json',

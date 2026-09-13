@@ -1,6 +1,6 @@
 'use strict';
 // 开放平台常量：环境 host / 接口路径 / 默认回调地址 / token 余量。
-// 官方资料：docs 目录 shopee_api_doc/（授权与鉴权：open.shopee.com/developer-guide/20）
+// 官方资料：docs/shopee_api_doc/（授权与鉴权：open.shopee.com/developer-guide/20）
 
 // 环境 -> 官方 API 网关 host（生产 / 沙箱）
 const ENV_HOSTS = {
