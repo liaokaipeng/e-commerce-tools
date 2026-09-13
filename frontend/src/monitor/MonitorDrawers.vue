@@ -40,7 +40,7 @@ const detailSearch = ref('');
 
 watch(() => props.detailAlert, () => { detailSearch.value = ''; });
 
-const STATUS_TEXT = { open: '触发中', ack: '已确认', recovered: '已恢复', closed: '已关闭' };
+const STATUS_TEXT = { open: '触发中', ack: '已确认', closed: '已关闭' };
 
 function shopNameOf(shopId) {
   if (!shopId) return '';
@@ -182,7 +182,6 @@ async function copyRows() {
         <span>累计触发 {{ detailAlert.count || 1 }} 次</span>
         <span>首次触发：{{ fmtTime(detailAlert.firstAt) }}</span>
         <span>最近触发：{{ fmtTime(detailAlert.lastAt) }}</span>
-        <span v-if="detailAlert.recoveredAt">恢复于：{{ fmtTime(detailAlert.recoveredAt) }}</span>
       </div>
       <div class="ad-msg">{{ detailAlert.message }}</div>
       <div v-if="detailAlert.suggest" class="ad-suggest">💡 {{ detailAlert.suggest }}</div>

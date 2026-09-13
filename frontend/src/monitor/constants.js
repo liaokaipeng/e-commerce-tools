@@ -5,8 +5,6 @@
 export const LEVEL_COLOR = { P0: '#FF3B30', P1: '#FF9500', P2: '#FFD60A' };
 export const LEVEL_NAME = { P0: '紧急', P1: '重要', P2: '提醒' };
 export const OK_COLOR = '#30D158';
-/** 已恢复 / 已关闭告警的中性色（避免模板里散落硬编码色值） */
-export const RECOVERED_COLOR = '#5b6272';
 
 // 多店对比矩阵展示的指标与顺序
 export const MATRIX_METRICS = [
@@ -18,8 +16,19 @@ export const MATRIX_METRICS = [
 ];
 
 export const DOMAIN_LABEL = { order: '订单', product: '商品', health: '健康', ads: '广告', funds: '资金', aftersale: '售后' };
-/** 矩阵分组表头的域顺序（与 MATRIX_METRICS 的分段一致） */
-export const DOMAIN_ORDER = ['order', 'product', 'health', 'ads', 'funds', 'aftersale'];
+
+/**
+ * 关键词过滤：空格分隔多关键词需同时命中，大小写不敏感；空查询返回原列表。
+ * @param {function} fields 从单项取出参与匹配的文本（如店名 + 店铺ID）
+ */
+export function filterByKeywords(list, query, fields) {
+  const kws = String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!kws.length) return list;
+  return list.filter((item) => {
+    const hay = fields(item).toLowerCase();
+    return kws.every((k) => hay.includes(k));
+  });
+}
 
 // 指标 id 前缀 → 采集域（与调度任务域一致，用于定位「哪个域采集失败」）
 const METRIC_DOMAIN = [

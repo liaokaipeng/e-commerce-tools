@@ -124,27 +124,77 @@ function orderAgeBuckets(orders, nowMs) {
   return { pending_12_24h: pToday, pending_24h: pOld };
 }
 
-/** cursor 翻页收集订单列表（order_sn 列表） */
-async function collectOrdersByStatus(shopId, orderStatus) {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const orders = [];
+/**
+ * cursor 翻页收集列表（more + next_cursor 语义，订单/首公里/评论通用）。
+ * @param {function} [opts.stopWhen] 收到某页列表后判断是否提前结束（如已翻过统计窗口）
+ * @param {number} [opts.maxPages] 本接口翻页上限（默认 MAX_PAGES）
+ */
+async function collectByCursor(shopId, path, params, listKey, opts) {
+  const out = [];
+  const cap = (opts && opts.maxPages) || MAX_PAGES;
+  const stopWhen = opts && opts.stopWhen;
   let cursor = '';
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const j = await callOpenApi('/api/v2/order/get_order_list', {
-      order_status: orderStatus,
-      time_range_field: orderStatus === 'IN_CANCEL' ? 'update_time' : 'create_time',
-      time_from: nowSec - ORDER_WINDOW_DAYS * 86400,
-      time_to: nowSec,
-      page_size: PAGE_SIZE,
-      cursor,
-    }, { shopId, method: 'GET' });
+  for (let page = 0; page < cap; page++) {
+    const j = await callOpenApi(path, Object.assign({}, params, { cursor }), { shopId, method: 'GET' });
     const resp = (j && j.response) || {};
-    orders.push(...(resp.order_list || []));
+    const list = Array.isArray(resp[listKey]) ? resp[listKey] : [];
+    out.push(...list);
+    if (stopWhen && stopWhen(list)) break;
     if (!resp.more) break;
     cursor = String(resp.next_cursor || '');
     if (!cursor) break;
   }
-  return orders;
+  return out;
+}
+
+/**
+ * page_no 翻页收集列表（more + 满页判断，资金/售后通用）。
+ * @param {number} [startPage] 起始页：1=页码语义（payout/escrow），0=offset 语义（wallet/returns）
+ */
+async function collectByPage(shopId, path, params, listKey, startPage) {
+  const out = [];
+  const start = startPage == null ? 1 : startPage;
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const j = await callOpenApi(path, Object.assign({}, params, { page_no: start + i }), { shopId, method: 'GET' });
+    const resp = (j && j.response) || {};
+    const list = Array.isArray(resp[listKey]) ? resp[listKey] : [];
+    out.push(...list);
+    if (!resp.more || list.length < PAGE_SIZE) break;
+  }
+  return out;
+}
+
+/** cursor 翻页收集订单列表（order_sn 列表） */
+function collectOrdersByStatus(shopId, orderStatus) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  return collectByCursor(shopId, '/api/v2/order/get_order_list', {
+    order_status: orderStatus,
+    time_range_field: orderStatus === 'IN_CANCEL' ? 'update_time' : 'create_time',
+    time_from: nowSec - ORDER_WINDOW_DAYS * 86400,
+    time_to: nowSec,
+    page_size: PAGE_SIZE,
+  }, 'order_list');
+}
+
+/** 拉取在售商品 ID 清单（更新时间窗内，offset/has_next_page 翻页；商品域与降级差评扫描共用） */
+async function collectItemIds(shopId) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const ids = [];
+  let offset = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const j = await callOpenApi('/api/v2/product/get_item_list', {
+      item_status: 'NORMAL',
+      update_time_from: nowSec - ITEM_SCAN_WINDOW_DAYS * 86400,
+      update_time_to: nowSec,
+      offset,
+      page_size: PAGE_SIZE,
+    }, { shopId, method: 'GET' });
+    const resp = (j && j.response) || {};
+    for (const it of resp.item || []) if (it && it.item_id) ids.push(String(it.item_id));
+    if (resp.has_next_page !== true) break;
+    offset = Number(resp.next_offset || 0);
+  }
+  return ids;
 }
 
 /** 型号库存（stock_info_v2.summary_info.total_available_stock / stock 字段兜底），无则 null */
@@ -489,19 +539,7 @@ async function collectOrderDomain(shopId) {
     errors.push('取消申请：' + e.message);
   }
   try {
-    const orders = [];
-    let cursor = '';
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const j = await callOpenApi('/api/v2/first_mile/get_unbind_order_list', {
-        page_size: PAGE_SIZE,
-        cursor,
-      }, { shopId, method: 'GET' });
-      const resp = (j && j.response) || {};
-      orders.push(...(resp.order_list || []));
-      if (!resp.more) break;
-      cursor = String(resp.next_cursor || '');
-      if (!cursor) break;
-    }
+    const orders = await collectByCursor(shopId, '/api/v2/first_mile/get_unbind_order_list', { page_size: PAGE_SIZE }, 'order_list');
     metrics['firstmile.unbound'] = orders.length;
     details['firstmile.unbound'] = detail('', orders
       .map((o) => o && o.order_sn).filter(Boolean)
@@ -517,28 +555,11 @@ async function collectProductDomain(shopId) {
   const metrics = {};
   const errors = [];
   const details = {};
-  const nowSec = Math.floor(Date.now() / 1000);
   // 1) 商品清单（item_status 必填 + 更新时间窗），收集 item_id；失败则不产出库存指标
-  const ids = [];
+  let ids = [];
   let listOk = false;
   try {
-    let offset = 0;
-    let hasNext = true;
-    for (let page = 0; page < MAX_PAGES && hasNext; page++) {
-      const j = await callOpenApi('/api/v2/product/get_item_list', {
-        item_status: 'NORMAL',
-        update_time_from: nowSec - ITEM_SCAN_WINDOW_DAYS * 86400,
-        update_time_to: nowSec,
-        offset,
-        page_size: PAGE_SIZE,
-      }, { shopId, method: 'GET' });
-      const resp = (j && j.response) || {};
-      const items = resp.item || [];
-      for (const it of items) if (it && it.item_id) ids.push(String(it.item_id));
-      hasNext = resp.has_next_page === true;
-      offset = Number(resp.next_offset || 0);
-      if (!hasNext) break;
-    }
+    ids = await collectItemIds(shopId);
     listOk = true;
   } catch (e) {
     errors.push('商品清单：' + e.message);
@@ -717,32 +738,26 @@ async function collectFundsDomain(shopId) {
   let anyOk = false;
   // 1) 打款明细（仅跨境；金额合计 → 近15天打款金额）
   try {
+    const list = await collectByPage(shopId, '/api/v2/payment/get_payout_detail', {
+      payout_time_from: nowSec - FUNDS_WINDOW_DAYS * 86400,
+      payout_time_to: nowSec,
+      page_size: PAGE_SIZE,
+    }, 'payout_list', 1);
     let total = 0;
     let got = false;
     const payoutRows = [];
-    for (let page = 1; page <= MAX_PAGES; page++) {
-      const j = await callOpenApi('/api/v2/payment/get_payout_detail', {
-        payout_time_from: nowSec - FUNDS_WINDOW_DAYS * 86400,
-        payout_time_to: nowSec,
-        page_size: PAGE_SIZE,
-        page_no: page,
-      }, { shopId, method: 'GET' });
-      const resp = (j && j.response) || {};
-      const list = Array.isArray(resp.payout_list) ? resp.payout_list : [];
-      for (const p of list) {
-        const info = (p && p.payout_info) || {};
-        const amt = Number(info.payout_amount);
-        if (isFinite(amt)) {
-          total += amt;
-          got = true;
-          payoutRows.push({
-            id: String(firstOf(info, ['payout_id', 'payout_sn']) || ''),
-            title: '金额 ' + round2(amt),
-            sub: fmtSec(firstOf(info, ['payout_time', 'create_time'])),
-          });
-        }
+    for (const p of list) {
+      const info = (p && p.payout_info) || {};
+      const amt = Number(info.payout_amount);
+      if (isFinite(amt)) {
+        total += amt;
+        got = true;
+        payoutRows.push({
+          id: String(firstOf(info, ['payout_id', 'payout_sn']) || ''),
+          title: '金额 ' + round2(amt),
+          sub: fmtSec(firstOf(info, ['payout_time', 'create_time'])),
+        });
       }
-      if (!resp.more || list.length < PAGE_SIZE) break;
     }
     if (got) {
       metrics['funds.payout_15d'] = round2(total);
@@ -754,31 +769,25 @@ async function collectFundsDomain(shopId) {
   }
   // 2) 担保释放列表（官方无状态字段、仅已释放记录；payout_detail 不可用时作打款金额兜底）
   try {
+    const list = await collectByPage(shopId, '/api/v2/payment/get_escrow_list', {
+      release_time_from: nowSec - FUNDS_WINDOW_DAYS * 86400,
+      release_time_to: nowSec,
+      page_size: PAGE_SIZE,
+    }, 'escrow_list', 1);
     let total = 0;
     let got = false;
     const escrowRows = [];
-    for (let page = 1; page <= MAX_PAGES; page++) {
-      const j = await callOpenApi('/api/v2/payment/get_escrow_list', {
-        release_time_from: nowSec - FUNDS_WINDOW_DAYS * 86400,
-        release_time_to: nowSec,
-        page_size: PAGE_SIZE,
-        page_no: page,
-      }, { shopId, method: 'GET' });
-      const resp = (j && j.response) || {};
-      const list = Array.isArray(resp.escrow_list) ? resp.escrow_list : [];
-      for (const it of list) {
-        const amt = it ? Number(it.payout_amount) : NaN;
-        if (isFinite(amt)) {
-          total += amt;
-          got = true;
-          escrowRows.push({
-            id: String(firstOf(it, ['escrow_id', 'order_sn']) || ''),
-            title: '金额 ' + round2(amt),
-            sub: fmtSec(firstOf(it, ['release_time', 'create_time'])),
-          });
-        }
+    for (const it of list) {
+      const amt = it ? Number(it.payout_amount) : NaN;
+      if (isFinite(amt)) {
+        total += amt;
+        got = true;
+        escrowRows.push({
+          id: String(firstOf(it, ['escrow_id', 'order_sn']) || ''),
+          title: '金额 ' + round2(amt),
+          sub: fmtSec(firstOf(it, ['release_time', 'create_time'])),
+        });
       }
-      if (!resp.more || list.length < PAGE_SIZE) break;
     }
     if (got && metrics['funds.payout_15d'] == null) {
       metrics['funds.payout_15d'] = round2(total);
@@ -790,19 +799,11 @@ async function collectFundsDomain(shopId) {
   }
   // 3) 钱包流水（仅本土；唯一带状态字段的资金接口：处理中/失败计数 + 最新余额）
   try {
-    const txns = [];
-    for (let offset = 0; offset < MAX_PAGES * PAGE_SIZE; offset += PAGE_SIZE) {
-      const j = await callOpenApi('/api/v2/payment/get_wallet_transaction_list', {
-        page_no: offset, // offset 语义（0 起），非页码
-        page_size: PAGE_SIZE,
-        create_time_from: nowSec - FUNDS_WINDOW_DAYS * 86400,
-        create_time_to: nowSec,
-      }, { shopId, method: 'GET' });
-      const resp = (j && j.response) || {};
-      const list = Array.isArray(resp.transaction_list) ? resp.transaction_list : [];
-      txns.push(...list);
-      if (!resp.more || list.length < PAGE_SIZE) break;
-    }
+    const txns = await collectByPage(shopId, '/api/v2/payment/get_wallet_transaction_list', {
+      page_size: PAGE_SIZE,
+      create_time_from: nowSec - FUNDS_WINDOW_DAYS * 86400,
+      create_time_to: nowSec,
+    }, 'transaction_list', 0);
     const s = walletSummary(txns);
     metrics['funds.pending_txn'] = s.pending;
     metrics['funds.failed_txn'] = s.failed;
@@ -835,63 +836,25 @@ async function collectFundsDomain(shopId) {
 
 /** 全店差评扫描（官方 get_comment 的 item_id 可选，不带则按游标返回全店评论；语义未实测，失败/为空则降级逐商品） */
 async function scanCommentsShopWide(shopId, nowMs) {
-  let cursor = '';
-  const items = [];
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const j = await callOpenApi('/api/v2/product/get_comment', {
-      cursor,
-      page_size: PAGE_SIZE,
-    }, { shopId, method: 'GET' });
-    const resp = (j && j.response) || {};
-    const list = Array.isArray(resp.item_comment_list) ? resp.item_comment_list : [];
-    items.push(...list);
-    // 已翻到 24h 前的评论即可提前结束；官方单接口最多回 500 条（more 可能恒为 true）
-    if (list.some((c) => c && c.create_time && Number(c.create_time) * 1000 < nowMs - AFTERSALE_WINDOW_MS)) break;
-    if (!resp.more) break;
-    cursor = String(resp.next_cursor || '');
-    if (!cursor) break;
-  }
+  // 已翻到 24h 前的评论即可提前结束；官方单接口最多回 500 条（more 可能恒为 true）
+  const items = await collectByCursor(shopId, '/api/v2/product/get_comment', { page_size: PAGE_SIZE }, 'item_comment_list', {
+    stopWhen: (list) => list.some((c) => c && c.create_time && Number(c.create_time) * 1000 < nowMs - AFTERSALE_WINDOW_MS),
+  });
   if (!items.length) throw new Error('全店评论为空（网关可能要求 item_id）');
   return commentSummary(items, COMMENT_KEYWORDS, nowMs);
 }
 
 /** 逐商品差评扫描（降级模式）：商品清单 top COMMENT_SCAN_ITEMS 个，每商品最多 3 页评论 */
 async function scanCommentsByItems(shopId, nowMs) {
-  const nowSec = Math.floor(nowMs / 1000);
-  const ids = [];
-  let offset = 0;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const j = await callOpenApi('/api/v2/product/get_item_list', {
-      item_status: 'NORMAL',
-      update_time_from: nowSec - ITEM_SCAN_WINDOW_DAYS * 86400,
-      update_time_to: nowSec,
-      offset,
-      page_size: PAGE_SIZE,
-    }, { shopId, method: 'GET' });
-    const resp = (j && j.response) || {};
-    const items = resp.item || [];
-    for (const it of items) if (it && it.item_id) ids.push(String(it.item_id));
-    if (resp.has_next_page !== true) break;
-    offset = Number(resp.next_offset || 0);
-  }
+  const ids = await collectItemIds(shopId);
+  const stopWhen = (list) => list.some((c) => c && c.create_time && Number(c.create_time) * 1000 < nowMs - AFTERSALE_WINDOW_MS);
   const all = [];
   for (const id of ids.slice(0, COMMENT_SCAN_ITEMS)) {
     try {
-      let cursor = '';
-      for (let page = 0; page < 3; page++) {
-        const j = await callOpenApi('/api/v2/product/get_comment', {
-          item_id: Number(id),
-          cursor,
-          page_size: PAGE_SIZE,
-        }, { shopId, method: 'GET' });
-        const resp = (j && j.response) || {};
-        const list = Array.isArray(resp.item_comment_list) ? resp.item_comment_list : [];
-        all.push(...list);
-        if (list.some((c) => c && c.create_time && Number(c.create_time) * 1000 < nowMs - AFTERSALE_WINDOW_MS)) break;
-        if (!resp.more) break;
-        cursor = String(resp.next_cursor || '');
-        if (!cursor) break;
-      }
+      all.push(...await collectByCursor(shopId, '/api/v2/product/get_comment', {
+        item_id: Number(id),
+        page_size: PAGE_SIZE,
+      }, 'item_comment_list', { maxPages: 3, stopWhen }));
     } catch (e) {
       // 单品失败（已下架等）跳过，不影响整域
     }
@@ -908,19 +871,11 @@ async function collectAftersaleDomain(shopId) {
   let anyOk = false;
   // 1) 退货申请（24h 窗；page_no 为 offset 0 起）
   try {
-    const returns = [];
-    for (let offset = 0; offset < MAX_PAGES * PAGE_SIZE; offset += PAGE_SIZE) {
-      const j = await callOpenApi('/api/v2/returns/get_return_list', {
-        page_no: offset,
-        page_size: PAGE_SIZE,
-        create_time_from: nowSec - Math.floor(AFTERSALE_WINDOW_MS / 1000),
-        create_time_to: nowSec,
-      }, { shopId, method: 'GET' });
-      const resp = (j && j.response) || {};
-      const list = Array.isArray(resp.return) ? resp.return : [];
-      returns.push(...list);
-      if (!resp.more || list.length < PAGE_SIZE) break;
-    }
+    const returns = await collectByPage(shopId, '/api/v2/returns/get_return_list', {
+      page_size: PAGE_SIZE,
+      create_time_from: nowSec - Math.floor(AFTERSALE_WINDOW_MS / 1000),
+      create_time_to: nowSec,
+    }, 'return', 0);
     const s = returnSummary(returns, nowMs);
     metrics['aftersale.returns_24h'] = s.count;
     const recent = returns.filter((r) => {

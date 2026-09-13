@@ -14,18 +14,13 @@
  *   scheduler.js  巡检调度（每店串行、跨店并发限流、手动触发）
  */
 const { sendJson, sse, jsonAction } = require('./lib/http-utils');
-const { MATRIX_METRICS, METRICS } = require('./monitor/constants');
+const { MATRIX_METRICS, METRICS, isMoneyMetric } = require('./monitor/constants');
 const { levelOf } = require('./monitor/rules');
 const { toRmb, fromRmb, roundMoney, symbolOf, ensureRates } = require('./monitor/currency');
 const store = require('./monitor/store');
 const engine = require('./monitor/engine');
 const scheduler = require('./monitor/scheduler');
 const openapiStore = require('./openapi/store');
-
-/** 指标是否为金额类（单位「元」；阈值按人民币比较、展示按全局模式换算） */
-function isMoneyMetric(metricId) {
-  return (METRICS[metricId] || {}).unit === '元';
-}
 
 /** 单店大屏数据：最新指标 + 矩阵定级（金额指标按全局模式换算展示、按人民币定级） */
 function shopView(shopId, name) {

@@ -9,7 +9,7 @@ const DATA_DIR = process.env.MONITOR_DATA_DIR || path.join(__dirname, '..', 'dat
 const RETENTION_DAYS = 90;
 // 单店单指标单日快照上限（防异常写入撑爆磁盘）
 const SNAPSHOT_CAP_PER_DAY = 2000;
-// 内存告警条数上限（超出时淘汰最旧的已关闭/已恢复）
+// 内存告警条数上限（超出时淘汰最旧的已关闭记录）
 const ALERT_CAP = 500;
 // SSE 事件回放缓存条数（迟到连接回放用，同 video/job.js 的思路）
 const EVENT_LOG_CAP = 200;
@@ -63,6 +63,11 @@ const METRICS = {
   'aftersale.returns_24h': { title: '近24h退货申请', unit: '单', direction: 'up' },
   'aftersale.negative_24h': { title: '近24h差评', unit: '条', direction: 'up' },
 };
+
+/** 指标是否为金额类（单位「元」；阈值按人民币比较、展示按全局模式换算） */
+function isMoneyMetric(metricId) {
+  return (METRICS[metricId] || {}).unit === '元';
+}
 
 // 大屏对比矩阵展示的核心指标（顺序即列顺序）
 const MATRIX_METRICS = [
@@ -246,6 +251,7 @@ module.exports = {
   OK_COLOR,
   JOBS,
   METRICS,
+  isMoneyMetric,
   MATRIX_METRICS,
   DEFAULT_RULES,
   RULES_BY_ID,

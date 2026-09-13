@@ -2,7 +2,7 @@
 // 左栏：店铺健康墙。按告警级别置顶排序（排序由父组件完成），点击卡片切换当前店铺。
 // 自带店铺搜索（店名 / 店铺ID），并展示每店「最高告警」摘要，便于多店快速定位。
 import { ref, computed } from 'vue';
-import { LEVEL_COLOR, OK_COLOR, DOMAIN_LABEL, shopName, fmtTime } from './constants.js';
+import { LEVEL_COLOR, OK_COLOR, DOMAIN_LABEL, shopName, fmtTime, filterByKeywords } from './constants.js';
 
 const props = defineProps({
   shops: { type: Array, default: () => [] },
@@ -16,14 +16,7 @@ const emit = defineEmits(['select']);
 const search = ref('');
 
 /** 按关键词过滤（店名 / 店铺ID，大小写不敏感，空格分隔多关键词需同时命中） */
-const shownShops = computed(() => {
-  const kws = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (!kws.length) return props.shops;
-  return props.shops.filter((s) => {
-    const hay = `${s.name || ''} ${s.shopId}`.toLowerCase();
-    return kws.every((k) => hay.includes(k));
-  });
-});
+const shownShops = computed(() => filterByKeywords(props.shops, search.value, (s) => `${s.name || ''} ${s.shopId}`));
 </script>
 
 <template>

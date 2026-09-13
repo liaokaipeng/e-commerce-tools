@@ -39,7 +39,7 @@ html {
   --d-reauth: #8f95a8;
   --d-reauth-bg: rgba(143, 149, 168, 0.25);
   --d-p0-soft: rgba(255, 59, 48, 0.07);   /* 店铺卡 P0 底色 */
-  --d-muted: #5b6272;        /* 已恢复 / 已关闭的中性色 */
+  --d-muted: #5b6272;        /* 中性色（已关闭等） */
   --d-warn-bg: #2a2410;      /* 授权失效横幅 */
   --d-warn-border: #4d3c14;
   --d-warn-text: #ffd97a;
@@ -306,7 +306,6 @@ html.dark {
   flex: none; /* 条目不随列表高度压缩，避免「确认/关闭」按钮被裁掉；溢出交给列表滚动 */
 }
 .ai-bar { width: 4px; flex: none; }
-.alert-item.recovered { opacity: 0.55; }
 .alert-item.ack { opacity: 0.75; }
 .alert-item.flashing { animation: itemFlash 1s ease-in-out 3; }
 @keyframes itemFlash {
@@ -321,7 +320,6 @@ html.dark {
 .ai-time { margin-left: auto; font-size: var(--d-fs-3xs); color: var(--d-text-4); font-variant-numeric: tabular-nums; }
 .ai-msg { font-size: var(--d-fs-2xs); color: var(--d-text-3); margin-top: 4px; line-height: 1.5; }
 .ai-count { font-style: normal; color: var(--d-p1); margin-left: 4px; font-weight: 700; }
-.ai-recovered { font-style: normal; color: var(--d-ok); margin-left: 6px; }
 .ai-ack { font-style: normal; color: var(--d-text-3); margin-left: 6px; }
 .ai-ops { margin-top: 6px; display: flex; gap: 6px; }
 /* 底部 */

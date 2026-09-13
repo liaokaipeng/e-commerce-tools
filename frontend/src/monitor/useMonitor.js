@@ -2,7 +2,7 @@
 // 页面组件（App.vue）只做视图编排，本文件不关心任何 DOM 结构，便于单独演进。
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
-import { MATRIX_METRICS, levelRank, shopName, failInfo } from './constants.js';
+import { MATRIX_METRICS, levelRank, shopName, failInfo, filterByKeywords } from './constants.js';
 
 /** 在场心跳间隔：30s 上报一次「大屏仍可见」，服务端据此按需采集 */
 const PRESENCE_HEARTBEAT_MS = 30 * 1000;
@@ -18,7 +18,7 @@ export function useMonitor() {
   const overview = reactive({
     configured: false,
     scheduler: { running: false, active: 0, lastTickAt: 0 },
-    totals: { P0: 0, P1: 0, P2: 0, recovered: 0 },
+    totals: { P0: 0, P1: 0, P2: 0 },
     reAuthCount: 0,
     excludedCount: 0,
     currencyMode: 'local', // 金额展示单位：local=当地货币（默认）/ rmb=人民币；规则阈值始终按人民币
@@ -75,17 +75,13 @@ export function useMonitor() {
 
   const shownAlerts = computed(() => {
     let list = alerts.value;
-    if (filterLevel.value === 'recovered') list = list.filter((a) => a.status === 'recovered');
-    else {
-      list = list.filter((a) => a.status !== 'recovered');
-      if (filterLevel.value) list = list.filter((a) => a.level === filterLevel.value);
-    }
+    if (filterLevel.value) list = list.filter((a) => a.level === filterLevel.value);
     return list;
   });
 
   const openTopAlerts = computed(() => alerts.value.filter((a) => a.status === 'open' && (a.level === 'P0' || a.level === 'P1')));
 
-  const openCount = computed(() => alerts.value.filter((a) => a.status !== 'recovered').length);
+  const openCount = computed(() => alerts.value.length);
 
   /** 每店最高优先级的未关闭告警（店铺墙「最高告警」摘要用） */
   const topAlertByShop = computed(() => {
@@ -114,14 +110,7 @@ export function useMonitor() {
     ? failInfo(selectedShopObj.value, selectedMetric.value) : null));
 
   /** 按关键词过滤监控店铺配置（店铺名 / 店铺ID，大小写不敏感，空格分隔多关键词需同时命中） */
-  const shownShopConfig = computed(() => {
-    const kws = shopSearch.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    if (!kws.length) return shopConfig.value;
-    return shopConfig.value.filter((s) => {
-      const hay = `${s.name || ''} ${s.shopId}`.toLowerCase();
-      return kws.every((k) => hay.includes(k));
-    });
-  });
+  const shownShopConfig = computed(() => filterByKeywords(shopConfig.value, shopSearch.value, (s) => `${s.name || ''} ${s.shopId}`));
 
   const monitoredCount = computed(() => shopConfig.value.filter((s) => s.monitored).length);
 
@@ -173,6 +162,17 @@ export function useMonitor() {
   }
 
   // ---------- 接口调用 ----------
+  /** POST JSON，返回 { ok, data }：ok = HTTP 2xx 且业务 ok；网络/解析异常抛出，由调用方统一提示 */
+  async function postJson(url, body) {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await r.json();
+    return { ok: r.ok && !!data && data.ok === true, data: data || {} };
+  }
+
   async function loadOverview() {
     try {
       const r = await fetch('/api/monitor/overview');
@@ -241,39 +241,29 @@ export function useMonitor() {
 
   async function alertAction(a, action) {
     try {
-      const r = await fetch('/api/monitor/alert-action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: a.id, action }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) {
-        upsertAlert(j.alert); // 响应里的告警带 change:'delete'，upsertAlert 会从列表移除
+      const { ok, data } = await postJson('/api/monitor/alert-action', { id: a.id, action });
+      if (ok) {
+        upsertAlert(data.alert); // 响应里的告警带 change:'delete'，upsertAlert 会从列表移除
         showToast(action === 'delete' ? '已删除该告警' : '操作已完成', 'success');
         refreshSoon(); // 总览计数（P0/P1/P2 徽标、店铺墙）同步刷新，SSE 断开时也能及时更新
-      } else showToast(j.message || '操作失败', 'error');
+      } else showToast(data.message || '操作失败', 'error');
     } catch (e) {
       showToast('本地服务异常：' + e.message, 'error');
     }
   }
 
-  /** 批量确认 / 关闭（告警流多选操作；后端支持 { ids } 形态） */
+  /** 批量删除（告警流多选操作；后端支持 { ids } 形态） */
   async function batchAlertAction(ids, action) {
     const list = (ids || []).filter(Boolean);
     if (!list.length) return;
     try {
-      const r = await fetch('/api/monitor/alert-action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: list, action }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) {
+      const { ok, data } = await postJson('/api/monitor/alert-action', { ids: list, action });
+      if (ok) {
         // 响应里的每条告警都带 change:'delete'，upsertAlert 逐条从列表移除
-        for (const a of (j.alerts || [j.alert])) if (a) upsertAlert(a);
-        showToast(`已删除 ${j.count || list.length} 条告警`, 'success');
+        for (const a of (data.alerts || [data.alert])) if (a) upsertAlert(a);
+        showToast(`已删除 ${data.count || list.length} 条告警`, 'success');
         refreshSoon(); // 总览计数同步刷新（SSE 断开时也能及时更新）
-      } else showToast(j.message || '操作失败', 'error');
+      } else showToast(data.message || '操作失败', 'error');
     } catch (e) {
       showToast('本地服务异常：' + e.message, 'error');
     }
@@ -281,13 +271,8 @@ export function useMonitor() {
 
   async function manualCollect() {
     try {
-      const r = await fetch('/api/monitor/collect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      const j = await r.json();
-      showToast(r.ok && j.ok ? j.message || '已触发采集' : j.message || '触发失败', r.ok && j.ok ? 'success' : 'error');
+      const { ok, data } = await postJson('/api/monitor/collect', {});
+      showToast(data.message || (ok ? '已触发采集' : '触发失败'), ok ? 'success' : 'error');
     } catch (e) {
       showToast('本地服务异常：' + e.message, 'error');
     }
@@ -296,19 +281,14 @@ export function useMonitor() {
   /** 切换金额展示单位（规则阈值始终按人民币配置与比较，仅影响展示与告警消息） */
   async function saveCurrencyMode() {
     try {
-      const r = await fetch('/api/monitor/currency-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: overview.currencyMode }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) {
-        showToast(j.message || '已切换金额单位', 'success');
+      const { ok, data } = await postJson('/api/monitor/currency-config', { mode: overview.currencyMode });
+      if (ok) {
+        showToast(data.message || '已切换金额单位', 'success');
         await loadOverview();
         await loadAlerts();
         loadTrend(selectedShop.value, selectedMetric.value);
       } else {
-        showToast(j.message || '切换失败', 'error');
+        showToast(data.message || '切换失败', 'error');
         await loadOverview(); // 还原服务端生效值
       }
     } catch (e) {
@@ -392,19 +372,14 @@ export function useMonitor() {
         }
         overrides[e.id] = { enabled: e.enabled, thresholds: th };
       }
-      const r = await fetch('/api/monitor/rules', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ overrides }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) {
+      const { ok, data } = await postJson('/api/monitor/rules', { overrides });
+      if (ok) {
         showToast('规则已保存并生效', 'success');
         rulesDrawer.value = false;
         await loadRules();
         loadOverview();
         loadTrend(selectedShop.value, selectedMetric.value); // 阈值参考线同步刷新（矩阵定级走 loadOverview）
-      } else showToast(j.message || '保存失败', 'error');
+      } else showToast(data.message || '保存失败', 'error');
     } catch (e) {
       showToast('本地服务异常：' + e.message, 'error');
     } finally {
@@ -436,18 +411,13 @@ export function useMonitor() {
     savingShops.value = true;
     try {
       const excludedShopIds = shopConfig.value.filter((s) => !s.monitored).map((s) => s.shopId);
-      const r = await fetch('/api/monitor/shops-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ excludedShopIds }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) {
+      const { ok, data } = await postJson('/api/monitor/shops-config', { excludedShopIds });
+      if (ok) {
         showToast('监控店铺配置已保存', 'success');
         shopsDrawer.value = false;
         await loadOverview();
         await loadAlerts();
-      } else showToast(j.message || '保存失败', 'error');
+      } else showToast(data.message || '保存失败', 'error');
     } catch (e) {
       showToast('本地服务异常：' + e.message, 'error');
     } finally {
@@ -512,13 +482,8 @@ export function useMonitor() {
   let hasParentReply = false;
 
   function sendPresence(active) {
-    try {
-      fetch('/api/monitor/presence', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ active }),
-      }).catch(() => { /* 服务暂不可用时忽略，下个心跳重试 */ });
-    } catch { /* 忽略 */ }
+    // 服务暂不可用时忽略，下个心跳重试
+    postJson('/api/monitor/presence', { active }).catch(() => { /* 忽略 */ });
   }
 
   function startPresence() {

@@ -3,7 +3,7 @@
 // 删除即移除该条告警，若下轮采集仍异常会重新出现并重新计数。
 // 每条显示「已持续」时长，帮助快速判断问题卡了多久。
 import { reactive, computed, watch } from 'vue';
-import { LEVEL_COLOR, LEVEL_NAME, RECOVERED_COLOR, shopName, fmtTime, fmtDuration } from './constants.js';
+import { LEVEL_COLOR, LEVEL_NAME, shopName, fmtTime, fmtDuration } from './constants.js';
 
 const filterLevel = defineModel('filterLevel', { type: String, default: '' });
 
@@ -61,7 +61,6 @@ const durationOf = (a) => fmtDuration((props.now || Date.now()) - a.firstAt);
         <el-radio-button value="P0">P0</el-radio-button>
         <el-radio-button value="P1">P1</el-radio-button>
         <el-radio-button value="P2">P2</el-radio-button>
-        <el-radio-button value="recovered">已恢复</el-radio-button>
       </el-radio-group>
     </div>
     <div v-if="alerts.length" class="batch-bar">
@@ -82,7 +81,7 @@ const durationOf = (a) => fmtDuration((props.now || Date.now()) - a.firstAt);
         v-for="a in alerts"
         :key="a.id + ':' + a.seq"
         class="alert-item"
-        :class="['alv-' + a.level, { recovered: a.status === 'recovered' }, { flashing: flashIds.has(a.id), ack: a.status === 'ack' }]"
+        :class="['alv-' + a.level, { flashing: flashIds.has(a.id), ack: a.status === 'ack' }]"
         :title="a.suggest || ''"
       >
         <el-checkbox
@@ -91,7 +90,7 @@ const durationOf = (a) => fmtDuration((props.now || Date.now()) - a.firstAt);
           @click.stop
           @change="toggle(a.id)"
         />
-        <div class="ai-bar" :style="{ background: a.status === 'recovered' ? RECOVERED_COLOR : LEVEL_COLOR[a.level] }"></div>
+        <div class="ai-bar" :style="{ background: LEVEL_COLOR[a.level] }"></div>
         <div class="ai-body">
           <div class="ai-head">
             <i class="ai-level" :style="{ background: LEVEL_COLOR[a.level] }">{{ a.level }} {{ LEVEL_NAME[a.level] }}</i>
@@ -102,8 +101,7 @@ const durationOf = (a) => fmtDuration((props.now || Date.now()) - a.firstAt);
           <div class="ai-msg">
             {{ a.message }}
             <i v-if="a.count > 1" class="ai-count">×{{ a.count }}</i>
-            <i v-if="a.status === 'recovered'" class="ai-recovered">✓ 已恢复</i>
-            <i v-else-if="a.status === 'ack'" class="ai-ack">已确认</i>
+            <i v-if="a.status === 'ack'" class="ai-ack">已确认</i>
             <i v-if="a.status === 'open' || a.status === 'ack'" class="ai-dur">已持续 {{ durationOf(a) }}</i>
           </div>
           <div class="ai-ops">

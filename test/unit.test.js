@@ -1077,14 +1077,14 @@ async function run() {
     engine.ingest('T1', 'order', { 'order.pending_24h': 16 }, now + 180000); // P0
     list = engine.getAlerts({ shopId: 'T1' });
     t('引擎：阈值升级 P2→P1→P0', list.length === 1 && list[0].level === 'P0', JSON.stringify(list));
-    // 恢复
+    // 回稳：指标回到阈值内直接从告警流移除（已移除「已恢复」状态）
     engine.ingest('T1', 'order', { 'order.pending_24h': 1 }, now + 240000);
-    list = engine.getAlerts({ shopId: 'T1', status: 'recovered' });
-    t('引擎：回到阈值内自动恢复', list.length === 1 && list[0].status === 'recovered' && list[0].recoveredAt != null);
-    // 恢复后再次触发 → 重新打开
+    list = engine.getAlerts({ shopId: 'T1' });
+    t('引擎：回到阈值内自动移除告警', list.length === 0, JSON.stringify(list));
+    // 移除后再次触发 → 按新记录重建
     engine.ingest('T1', 'order', { 'order.pending_24h': 4 }, now + 300000);
     list = engine.getAlerts({ shopId: 'T1', status: 'open' });
-    t('引擎：恢复后再次触发重新打开', list.length === 1 && list[0].status === 'open');
+    t('引擎：移除后再次触发重新生成', list.length === 1 && list[0].status === 'open' && list[0].count === 1);
     // 确认 / 关闭 / 关闭后再触发 seq+1
     const id = list[0].id;
     engine.ackAlert(id);
@@ -1196,8 +1196,7 @@ async function run() {
     let a = engine.getAlerts({ shopId: 'T5' })[0];
     t('引擎：金额指标按人民币换算比较阈值（500泰铢≈105元触发P2）', !!a && a.level === 'P2' && a.current === 500, JSON.stringify(a));
     engine.ingest('T5', 'ads', { 'ads.spend_today': 400 }, now + 60000);
-    a = engine.getAlerts({ shopId: 'T5' })[0];
-    t('引擎：换算后回落阈值内自动恢复（400泰铢≈84元）', a.status === 'recovered', JSON.stringify(a));
+    t('引擎：换算后回落阈值内自动移除告警（400泰铢≈84元）', engine.getAlerts({ shopId: 'T5' }).length === 0, JSON.stringify(engine.getAlerts({ shopId: 'T5' })));
     engine.ingest('T5', 'ads', { 'ads.spend_today': 500 }, now + 120000);
     a = engine.getAlerts({ shopId: 'T5' })[0];
     t('引擎：rmb 模式告警消息换算为人民币', !!a && a.status === 'open' && a.message.includes('105 元'), a && a.message);
@@ -1230,8 +1229,8 @@ async function run() {
     a = engine.getAlerts({ shopId: 'T2' })[0];
     t('系统告警：5 次失败升级 P0', a.level === 'P0' && a.current === 5);
     engine.systemOk('T2', now + 5000);
-    a = engine.getAlerts({ shopId: 'T2', status: 'recovered' })[0];
-    t('系统告警：采集成功自动恢复', !!a && a.status === 'recovered');
+    a = engine.getAlerts({ shopId: 'T2' })[0];
+    t('系统告警：采集成功自动移除告警', !a, JSON.stringify(a));
     // 时间升级：P2 挂 24h → P1
     engine.ingest('T3', 'order', { 'order.pending_12_24h': 6 }, now); // P2（阈值 p2=5）
     const t3 = monitorEngine._test.alerts.find((x) => x.shopId === 'T3');
@@ -1241,7 +1240,7 @@ async function run() {
     t('引擎：P2 持续 24h 自动升级 P1', a.level === 'P1', JSON.stringify(a));
     // 汇总
     const s = engine.summary();
-    t('引擎汇总：按店按级别计数', s.byShop['T1'].P2 === 1 && s.byShop['T3'].P1 === 1 && s.totals.P0 === 0 && s.totals.P1 === 1 && s.totals.P2 === 1 && s.totals.recovered === 1, JSON.stringify(s));
+    t('引擎汇总：按店按级别计数', s.byShop['T1'].P2 === 1 && s.byShop['T3'].P1 === 1 && s.totals.P0 === 0 && s.totals.P1 === 1 && s.totals.P2 === 1, JSON.stringify(s));
     // 汇总白名单（只统计启用监控的店铺）
     const s2 = engine.summary(new Set(['T1']));
     t('引擎汇总：按监控店铺白名单过滤', !!s2.byShop['T1'] && !s2.byShop['T2'] && !s2.byShop['T3'] && s2.totals.P2 === 1, JSON.stringify(s2));
@@ -1253,7 +1252,7 @@ async function run() {
     t('系统告警：规则开启时正常触发', engine.getAlerts({ shopId: 'T8', status: 'open' }).length === 1);
     monitorStore.setRuleOverrides({ 'system.collect_fail': { enabled: false } });
     engine.systemFail('T8', 'product', '超时', now + 1000);
-    t('系统告警：规则关闭后既有告警收尾为已恢复且不重开', engine.getAlerts({ shopId: 'T8', status: 'open' }).length === 0 && engine.getAlerts({ shopId: 'T8', status: 'recovered' }).length === 1, JSON.stringify(engine.getAlerts({ shopId: 'T8' })));
+    t('系统告警：规则关闭后既有告警移除且不重开', engine.getAlerts({ shopId: 'T8' }).length === 0, JSON.stringify(engine.getAlerts({ shopId: 'T8' })));
     engine.systemFail('T9', 'order', '网络错误', now);
     t('系统告警：规则关闭时不产生新告警', engine.getAlerts({ shopId: 'T9' }).length === 0, JSON.stringify(engine.getAlerts({ shopId: 'T9' })));
     monitorStore.setRuleOverrides({});
