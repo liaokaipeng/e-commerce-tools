@@ -1,8 +1,8 @@
 {
-  "version": "1.0.1",
-  "builtAt": "2026-09-13T10:51:40.010Z",
-  "commit": "d8f082c",
-  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.0.1/kp_tools-v1.0.1.zip",
-  "sha256": "1a0ab8294808abdcd540ba0500f7add8e571d1dcbb889b1e33cd71b7ba91b3ce",
-  "notes": "修复开放平台「批量刷新 token」连点后全部店铺变成「需重新授权」的问题：手动/批量刷新新增 5 分钟冷却（刚刷过直接复用当前 token，不再重复请求网关），批量刷新新增单飞互斥（同一时刻只允许一个任务，重复触发会提示并可取消）。修复 v1.0.1 安装包用 Windows 自带解压打开为空的问题（重新打包）。"
+  "version": "1.0.2",
+  "builtAt": "2026-09-13T11:13:29.927Z",
+  "commit": "b3b0a0c",
+  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.0.2/kp_tools-v1.0.2.zip",
+  "sha256": "ecdb7ba07b3a1ed92abb0dd561b82b5c9f508ac7b9e3d8e6c55bbdbb49d0492a",
+  "notes": "内部结构整理：把测试入口与 Shopee 官方接口文档目录归入各自目录，发布包不再包含开发者文档（docs/），安装包体积更小。本版本无用户可见的功能变化。"
 }
