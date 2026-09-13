@@ -20,6 +20,13 @@ const { buildBaseString, hmacHex, nowSec } = require('../lib/openapi-utils');
 const { retry, fixedBackoff } = require('../lib/retry');
 const store = require('./store');
 
+// 手动刷新冷却（毫秒）：距上次成功刷新不足该时长、且当前 access_token 仍有效时，手动/批量刷新
+// 直接复用当前 token，不再向网关发 access_token/get。官方语义是「旧 refresh_token 用一次即作废」，
+// 连续点击会让网关拒绝刚被轮换的凭证，而拒绝文案会被 isAuthDead 判成「凭证死透」，进而把共享
+// token 组整组标成「需重新授权」。自动续期与认证失败重试**不走**冷却（见 ensureFresh 的 cooldown 选项），
+// 否则坏 token 会被反复复用、白跑一遍就标失效。
+const REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
+
 // 常见业务错误 -> 中文提示（响应 error 字段非空即失败；v2 成功时 error 为空字符串）
 const ERROR_HINTS = {
   error_invalid_sign: '签名校验失败，请检查 partner_key 是否正确、本机时间是否准确',
@@ -319,6 +326,7 @@ function saveRefreshResult(env, shopId, fresh) {
     accessToken: fresh.accessToken,
     refreshToken: fresh.refreshToken,
     accessExpireAt: nowSec() + fresh.expireIn,
+    refreshedAt: Date.now(), // 手动刷新冷却基准（见 REFRESH_COOLDOWN_MS）
     invalid: false,
   });
   return 1;
@@ -336,6 +344,7 @@ function saveRefreshResultGroup(env, oldRefreshToken, fresh) {
       accessToken: fresh.accessToken,
       refreshToken: fresh.refreshToken,
       accessExpireAt: nowSec() + fresh.expireIn,
+      refreshedAt: Date.now(),
       invalid: false,
     });
   }
@@ -422,17 +431,31 @@ async function performRefresh(env, shopId) {
  * 刷新失败且确认凭证死透时按分组语义标记「需重新授权」。
  * @param {string} env 环境
  * @param {string|number} shopId 店铺 ID
- * @param {object} [opts] { force } force=true 时即使未过期也强制刷新（手动刷新 / 认证失败重试）
+ * @param {object} [opts] { force, cooldown }
+ *   force=true 时即使未过期也强制刷新（手动刷新 / 认证失败重试）；
+ *   cooldown=true 时（仅手动/批量刷新入口）若距上次成功刷新不足 REFRESH_COOLDOWN_MS 且当前 token 仍有效，
+ *   直接复用当前 token 返回 mode='cooldown'，不发网关请求——防连点把刚轮换的凭证刷死。
+ *   认证失败重试**不能**开 cooldown，否则复用的还是坏 token（见 callOpenApi）。
  * @returns {Promise<{accessToken: string, accessExpireAt: number, synced: number, mode: string}>}
  */
 function ensureFresh(env, shopId, opts = {}) {
   const force = !!opts.force;
+  const cooldown = !!opts.cooldown;
   const shop = store.getShop(env, shopId);
   if (!shop) throw new Error(`店铺 ${shopId} 尚未授权，请先在「开放平台」页面完成店铺授权`);
   if (shop.invalid) {
     throw new Error(`店铺 ${shopId} 授权已失效：${shop.invalidReason || '凭证无效'}（到「开放平台」页重新授权后自动恢复采集）`);
   }
   const remain = (shop.accessExpireAt || 0) - nowSec() - ACCESS_EXPIRE_MARGIN;
+  // 冷却：手动/批量刷新入口专用。当前 token 仍有效且刚刷过 → 复用，避免连续刷新把凭证刷死
+  if (force && cooldown && remain > 0 && shop.refreshedAt && Date.now() - shop.refreshedAt < REFRESH_COOLDOWN_MS) {
+    return Promise.resolve({
+      accessToken: shop.accessToken,
+      accessExpireAt: shop.accessExpireAt || 0,
+      synced: 0,
+      mode: 'cooldown',
+    });
+  }
   if (!force && remain > 0) {
     return Promise.resolve({
       accessToken: shop.accessToken,
@@ -461,13 +484,15 @@ function ensureFresh(env, shopId, opts = {}) {
 }
 
 /**
- * 强制刷新某店铺（「开放平台」页的「刷新」按钮）。
+ * 强制刷新某店铺（「开放平台」页的「刷新」按钮 / 批量刷新）。
  * 与自动续期走完全相同的分组决策与串行链：共享 token 组会整组续期，
  * 避免「手动刷新单店 → 同组其它店铺的 refresh_token 被作废」。
+ * 额外开启冷却（cooldown）：刚刷过且 token 仍有效时直接复用，防连点把刚轮换的凭证刷死
+ * （返回 mode='cooldown'，synced=0）。认证失败重试走的是 ensureFresh(force) 而非本函数，不受冷却影响。
  * @returns {Promise<{accessToken: string, accessExpireAt: number, synced: number, mode: string}>}
  */
 function refreshShopNow(env, shopId) {
-  return ensureFresh(env, shopId, { force: true });
+  return ensureFresh(env, shopId, { force: true, cooldown: true });
 }
 
 /**
@@ -529,4 +554,5 @@ module.exports = {
   isAuthDead,
   isAuthRetryable,
   planRefresh,
+  REFRESH_COOLDOWN_MS,
 };

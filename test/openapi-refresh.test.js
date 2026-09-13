@@ -13,6 +13,7 @@
 //   6. 换 partner_id 清空旧凭证；非数字 id 明确报错；响应载荷层解析口径统一
 //   7. 批量刷新（/api/openapi/refresh-all/run）按共享 token 分组去重：3 店共享组只发一次网关请求，
 //      失效店铺整组跳过且不被误标恢复
+//   8. 手动刷新冷却（刚刷过不重复请求网关，但不拦截 callOpenApi 的认证失败强制刷新）与批量刷新单飞互斥
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -26,6 +27,8 @@ process.env.OPENAPI_SESSION_FILE = SESSION_FILE;
 const httpLib = require('../server/lib/http');
 const origRequest = httpLib.request;
 const gw = { revoked: new Set(), seq: 0, bizFail: 0, calls: [] };
+// 测试用闸门：置 on 后刷新请求会挂起，直到 waiters 被逐个放行（用于验证批量刷新单飞互斥）
+const gwHold = { on: false, waiters: [] };
 const okJson = (json) => ({ status: 200, json, text: '' });
 const PARTNER_RE = /partner\.(?:test-stable\.)?shopeemobile\.com/;
 
@@ -36,6 +39,7 @@ httpLib.request = async (opts) => {
   const apiPath = url.replace(/^https:\/\/[^/]+/, '').split('?')[0];
   gw.calls.push({ apiPath, body });
   if (apiPath === '/api/v2/auth/access_token/get') {
+    if (gwHold.on) await new Promise((resolve) => gwHold.waiters.push(resolve)); // 卡住响应
     const rt = body && body.refresh_token;
     if (!rt || gw.revoked.has(rt)) {
       return okJson({ error: 'error_auth', message: 'Your refresh token or shop_id is wrong' });
@@ -128,6 +132,8 @@ function reset(shops) {
   gw.revoked.clear();
   gw.seq = 0;
   gw.bizFail = 0;
+  gwHold.on = false;
+  gwHold.waiters.length = 0;
   for (const s of shops) {
     store.setShop('prod', s.shopId, Object.assign({
       merchantId: '', accessToken: 'OLD_AT', refreshToken: 'R', accessExpireAt: NOW + 3600,
@@ -299,6 +305,60 @@ async function cases() {
     pg.skipped.length === 2 && pg.skipped.some((s) => s.shopIds.join(',') === '4,5')
       && pg.skipped.some((s) => s.shopIds.join(',') === '6'),
     JSON.stringify(pg.skipped));
+
+  // 10) 手动刷新冷却：刚刷过再点不重复请求网关（防连点把刚轮换的凭证刷死 → 整组被判需重新授权）
+  reset([{ shopId: '111', merchantId: '9001' }, { shopId: '222', merchantId: '9001' }]);
+  await client.refreshShopNow('prod', '111');
+  const callsAfterFirst = gw.calls.filter((c) => c.apiPath === REFRESH_PATH).length;
+  const cool = await client.refreshShopNow('prod', '111');
+  t('冷却期内重复手动刷新不重复请求网关（mode=cooldown / synced=0）',
+    cool.mode === 'cooldown' && cool.synced === 0
+      && gw.calls.filter((c) => c.apiPath === REFRESH_PATH).length === callsAfterFirst,
+    JSON.stringify({ mode: cool.mode, synced: cool.synced, calls: gw.calls.length }));
+  t('冷却未把店铺标记「需重新授权」', store.getShopsRaw('prod').every((s) => !s.invalid));
+  store.setShop('prod', '111', { refreshedAt: 0 }); // 老数据无冷却基准 → 应照常真刷新
+  const cool2 = await client.refreshShopNow('prod', '111');
+  t('无 refreshedAt（老数据）不受冷却拦截，仍真刷新整组',
+    cool2.mode === 'group-merchant' && cool2.synced === 2,
+    JSON.stringify({ mode: cool2.mode, synced: cool2.synced }));
+
+  // 11) 冷却只作用于手动/批量入口：callOpenApi 的认证失败重试必须仍真刷新（否则坏 token 被复用、白标失效）
+  reset([{ shopId: '888' }]);
+  store.setShop('prod', '888', { refreshedAt: Date.now() }); // 处于冷却窗口内
+  gw.bizFail = 1;
+  let retryOk2 = false;
+  try {
+    await client.callOpenApi('/api/v2/shop/get_shop_info', {}, { shopId: '888', method: 'GET' });
+    retryOk2 = true;
+  } catch { /* 断言见下 */ }
+  t('冷却不拦截 callOpenApi 的认证失败强制刷新（坏 token 必须真换）',
+    retryOk2 && gw.calls.some((c) => c.apiPath === REFRESH_PATH),
+    gw.calls.map((c) => c.apiPath).join(' → '));
+  t('强制重试成功后店铺未被标记「需重新授权」', store.getShop('prod', '888').invalid !== true);
+
+  // 12) 批量刷新单飞：任务进行中再触发被 409 拒绝，结束后互斥释放、可再次发起
+  reset([{ shopId: '111', merchantId: '9001' }, { shopId: '222', merchantId: '9001' }]);
+  gwHold.on = true; // 卡住第一组的网关响应，让任务停留在「进行中」
+  const runA = await callRoute('POST /api/openapi/refresh-all/run', {});
+  const runB = await callRoute('POST /api/openapi/refresh-all/run', {});
+  t('批量刷新单飞：进行中再触发返回 409（不启动第二套刷新）',
+    runB.status === 409 && runB.data && runB.data.ok === false,
+    JSON.stringify({ status: runB.status, data: runB.data }));
+  gwHold.on = false;
+  gwHold.waiters.splice(0).forEach((f) => f());
+  await runA.endPromise;
+  const evsA = sseEvents(runA);
+  t('批量刷新单飞：被放行的任务正常收尾',
+    evsA.some((e) => e.type === 'summary'),
+    JSON.stringify(evsA.map((e) => e.type)));
+  const callsBeforeC = gw.calls.filter((c) => c.apiPath === REFRESH_PATH).length;
+  const runC = await callRoute('POST /api/openapi/refresh-all/run', {});
+  await runC.endPromise;
+  const evsC = sseEvents(runC);
+  t('批量刷新互斥释放后可再次发起（冷却生效：1 组跳过重复刷新、未再触达网关）',
+    evsC.some((e) => e.type === 'summary' && e.cooled === 1 && e.synced === 0)
+      && gw.calls.filter((c) => c.apiPath === REFRESH_PATH).length === callsBeforeC,
+    JSON.stringify(evsC.find((e) => e.type === 'summary')));
 }
 
 async function run() {

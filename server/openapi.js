@@ -293,6 +293,7 @@ function register({ get, post }) {
         accessToken: t.accessToken,
         refreshToken: t.refreshToken,
         accessExpireAt,
+        refreshedAt: Date.now(), // 授权即最新凭证，手动刷新冷却基准
         invalid: false, // 重新授权成功即恢复
         invalidReason: '',
         invalidAt: 0,
@@ -331,9 +332,12 @@ function register({ get, post }) {
       mode: r.mode,
       accessTokenMasked: maskToken(r.accessToken),
       accessExpireAt: r.accessExpireAt,
-      message: r.synced > 1
-        ? `Token 刷新成功，已同步续期同组 ${r.synced} 个店铺（旧 refresh_token 已失效）`
-        : 'Token 刷新成功（旧 refresh_token 已失效）',
+      message: r.mode === 'cooldown'
+        // 冷却：距上次刷新不足 REFRESH_COOLDOWN_MS，当前 token 仍有效，未重复请求网关（防连点刷死凭证）
+        ? `距上次刷新不足 ${Math.round(client.REFRESH_COOLDOWN_MS / 60000)} 分钟，当前 token 仍在有效期内，未重复刷新`
+        : r.synced > 1
+          ? `Token 刷新成功，已同步续期同组 ${r.synced} 个店铺（旧 refresh_token 已失效）`
+          : 'Token 刷新成功（旧 refresh_token 已失效）',
     });
   }));
 
