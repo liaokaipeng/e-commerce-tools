@@ -4,15 +4,18 @@
 //         + /api/monitor/events SSE 实时推送（告警变更/采集结果，迟到回放），30s 兜底轮询。
 // 告警只在本页展示（本期不接 IM）：P0 红色脉冲置顶 + 声音提醒，P1 橙色，P2 黄色。
 //
-// 分工：状态与数据层在 useMonitor.js，展示拆到同目录各子组件，
-//       常量/纯函数在 constants.js，趋势图 option 在 trend-chart.js，样式在 monitor.css。
+// 分工：数据层由 useMonitor.js 编排（状态/数据/SSE/心跳/规则/店铺拆到 useMonitor*.js），
+//       展示拆到同目录各子组件，常量/纯函数在 constants.js，趋势图 option 在 trend-chart.js，样式在 monitor.css。
 import { useMonitor } from './useMonitor.js';
 import MonitorHeader from './MonitorHeader.vue';
 import ShopWall from './ShopWall.vue';
-import CenterPanels from './CenterPanels.vue';
+import TrendPanel from './TrendPanel.vue';
+import MetricMatrix from './MetricMatrix.vue';
 import AlertStream from './AlertStream.vue';
 import MonitorFooter from './MonitorFooter.vue';
-import MonitorDrawers from './MonitorDrawers.vue';
+import RulesDrawer from './RulesDrawer.vue';
+import ShopConfigDrawer from './ShopConfigDrawer.vue';
+import AlertDetailDrawer from './AlertDetailDrawer.vue';
 
 const {
   overview, alerts, trend, now,
@@ -98,21 +101,27 @@ const {
       />
 
       <!-- 中：趋势 + 矩阵 -->
-      <CenterPanels
-        :shops="sortedShops"
-        :selected-shop="selectedShop"
-        :selected-shop-obj="selectedShopObj"
-        :selected-metric="selectedMetric"
-        :metric-chips="metricChips"
-        :selected-fail="selectedFail"
-        :trend="trend"
-        :trend-days="trendDays"
-        :trend-compare="trendCompare"
-        @select-shop="selectShop"
-        @select-metric="selectMetric"
-        @select-days="setTrendDays"
-        @toggle-compare="toggleTrendCompare"
-      />
+      <section class="center">
+        <TrendPanel
+          :selected-shop-obj="selectedShopObj"
+          :selected-metric="selectedMetric"
+          :metric-chips="metricChips"
+          :selected-fail="selectedFail"
+          :trend="trend"
+          :trend-days="trendDays"
+          :trend-compare="trendCompare"
+          @select-metric="selectMetric"
+          @select-days="setTrendDays"
+          @toggle-compare="toggleTrendCompare"
+        />
+        <MetricMatrix
+          :shops="sortedShops"
+          :selected-shop="selectedShop"
+          :metric-chips="metricChips"
+          @select-shop="selectShop"
+          @select-metric="selectMetric"
+        />
+      </section>
 
       <!-- 右：告警流 -->
       <AlertStream
@@ -132,25 +141,30 @@ const {
     <MonitorFooter :overview="overview" :ticker-text="tickerText" :open-top-alerts="openTopAlerts" />
 
     <!-- ===== 规则 / 监控店铺 / 告警详情抽屉 ===== -->
-    <MonitorDrawers
+    <RulesDrawer
       v-model:rulesDrawer="rulesDrawer"
-      v-model:shopsDrawer="shopsDrawer"
-      v-model:shopSearch="shopSearch"
-      v-model:detailDrawer="detailDrawer"
       :rule-edits="ruleEdits"
       :saving-rules="savingRules"
       :rule-suggestions="ruleSuggestions"
       :loading-suggestions="loadingSuggestions"
+      @save-rules="saveRules"
+      @apply-suggestion="applySuggestion"
+    />
+    <ShopConfigDrawer
+      v-model:shopsDrawer="shopsDrawer"
+      v-model:shopSearch="shopSearch"
       :shop-config="shopConfig"
       :saving-shops="savingShops"
       :shown-shop-config="shownShopConfig"
       :monitored-count="monitoredCount"
-      :detail-alert="detailAlert"
-      :shops="overview.shops"
-      @save-rules="saveRules"
       @save-shops="saveShopsConfig"
       @set-all="setAllMonitored"
-      @apply-suggestion="applySuggestion"
+    />
+    <AlertDetailDrawer
+      v-model:detailDrawer="detailDrawer"
+      :detail-alert="detailAlert"
+      :shops="overview.shops"
+      :shop-config="shopConfig"
     />
   </div>
 </template>

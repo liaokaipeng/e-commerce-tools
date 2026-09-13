@@ -1,152 +1,32 @@
-// 监控大屏的数据层：状态、接口调用、SSE 推送、在场心跳、投影轮播与生命周期。
+// 监控大屏数据层编排：组合状态、数据访问、实时推送、在场心跳与各面板，向外暴露页面所需 API。
 // 页面组件（App.vue）只做视图编排，本文件不关心任何 DOM 结构，便于单独演进。
-import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
-import { ElMessage } from 'element-plus';
-import { MATRIX_METRICS, levelRank, shopName, failInfo, filterByKeywords } from './constants.js';
+// 分工：状态与派生 useMonitorState / 数据访问 useMonitorData / 实时推送 useMonitorSse /
+//       在场心跳 useMonitorPresence / 提醒 useMonitorNotify / 规则 useMonitorRules / 店铺 useMonitorShops。
+import { watch, onMounted, onUnmounted } from 'vue';
+import { useMonitorState } from './useMonitorState.js';
+import { useMonitorData } from './useMonitorData.js';
+import { useMonitorNotify } from './useMonitorNotify.js';
+import { useMonitorPresence } from './useMonitorPresence.js';
+import { useMonitorSse } from './useMonitorSse.js';
+import { useMonitorRules } from './useMonitorRules.js';
+import { useMonitorShops } from './useMonitorShops.js';
+import { showToast } from './toast.js';
 
-/** 在场心跳间隔：30s 上报一次「大屏仍可见」，服务端据此按需采集 */
-const PRESENCE_HEARTBEAT_MS = 30 * 1000;
 /** SSE 断开时兜底轮询间隔 */
 const POLL_FALLBACK_MS = 30 * 1000;
 /** 投影模式轮播间隔 */
 const ROTATE_INTERVAL_MS = 20 * 1000;
-/** 收到 SSE 后合并刷新的防抖延时（避免一轮采集触发多次拉取） */
-const REFRESH_DEBOUNCE_MS = 800;
 
 export function useMonitor() {
-  // ---------- 状态 ----------
-  const overview = reactive({
-    configured: false,
-    scheduler: { running: false, active: 0, lastTickAt: 0 },
-    totals: { P0: 0, P1: 0, P2: 0 },
-    reAuthCount: 0,
-    excludedCount: 0,
-    currencyMode: 'local', // 金额展示单位：local=当地货币（默认）/ rmb=人民币；规则阈值始终按人民币
-    metrics: {},
-    shops: [],
-    at: 0,
-  });
-  const alerts = ref([]);
-  const rules = ref([]);
-  const trend = reactive({ metric: { id: '', title: '', unit: '' }, thresholds: null, points: [], prev: [] });
-  // 趋势时间窗（1/7/30 天）与环比对比线开关
-  const trendDays = ref(7);
-  const trendCompare = ref(true);
-  const selectedShop = ref('');
-  const selectedMetric = ref('order.pending_24h');
-  const filterLevel = ref('');
-  const projectMode = ref(false);
-  const soundOn = ref(true);
-  const rotateOn = ref(true);
-  const sseOk = ref(false);
-  const initialLoading = ref(true);
-  const flashIds = reactive(new Set());
-  const rulesDrawer = ref(false);
-  const ruleEdits = ref([]);
-  const ruleSuggestions = ref({});
-  const loadingSuggestions = ref(false);
-  const savingRules = ref(false);
-  const shopsDrawer = ref(false);
-  const shopConfig = ref([]);
-  const savingShops = ref(false);
-  const shopSearch = ref('');
-  // 告警详情抽屉：当前查看的告警快照（SSE 更新会替换 alerts 里的对象，抽屉内保持打开时的快照）
-  const detailDrawer = ref(false);
-  const detailAlert = ref(null);
-  const now = ref(Date.now());
+  const state = useMonitorState();
+  const data = useMonitorData(state);
+  const notify = useMonitorNotify(state);
+  const sse = useMonitorSse({ state, data, notify });
+  const rules = useMonitorRules({ state, data });
+  const shops = useMonitorShops({ state, data });
+  useMonitorPresence(data.postJson);
 
-  let es = null;
-  let refreshTimer = null;
   let rotateTimer = null;
-  let audioCtx = null;
-  let presenceTimer = null;
-  let parentTimer = null;
-
-  // ---------- 计算 ----------
-  const sortedShops = computed(() => {
-    const arr = overview.shops.slice();
-    arr.sort((a, b) => levelRank(b.alerts.maxLevel) - levelRank(a.alerts.maxLevel) || shopName(a).localeCompare(shopName(b)));
-    return arr;
-  });
-
-  const normalCount = computed(() => overview.shops.filter((s) => !s.alerts.maxLevel).length);
-
-  const reAuthCount = computed(() => overview.reAuthCount || overview.shops.filter((s) => s.authBroken).length);
-
-  const shownAlerts = computed(() => {
-    let list = alerts.value;
-    if (filterLevel.value) list = list.filter((a) => a.level === filterLevel.value);
-    return list;
-  });
-
-  const openTopAlerts = computed(() => alerts.value.filter((a) => a.status === 'open' && (a.level === 'P0' || a.level === 'P1')));
-
-  const openCount = computed(() => alerts.value.length);
-
-  /** 每店最高优先级的未关闭告警（店铺墙「最高告警」摘要用） */
-  const topAlertByShop = computed(() => {
-    const m = {};
-    for (const a of alerts.value) {
-      if (a.status !== 'open' && a.status !== 'ack') continue;
-      const cur = m[a.shopId];
-      if (!cur || levelRank(a.level) > levelRank(cur.level)
-        || (levelRank(a.level) === levelRank(cur.level) && a.updatedAt > cur.updatedAt)) {
-        m[a.shopId] = a;
-      }
-    }
-    return m;
-  });
-
-  const tickerText = computed(() => openTopAlerts.value
-    .map((a) => `【${a.level}】${shopName(overview.shops.find((s) => s.shopId === a.shopId))} ${a.title}：${a.message}`)
-    .join('　·　'));
-
-  const metricChips = computed(() => MATRIX_METRICS.map((id) => Object.assign({ id }, overview.metrics[id] || { title: id, unit: '' })));
-
-  const selectedShopObj = computed(() => overview.shops.find((s) => s.shopId === selectedShop.value) || null);
-
-  /** 当前所选店铺+指标的采集失败信息（趋势面板警示用） */
-  const selectedFail = computed(() => (selectedShopObj.value && selectedMetric.value
-    ? failInfo(selectedShopObj.value, selectedMetric.value) : null));
-
-  /** 按关键词过滤监控店铺配置（店铺名 / 店铺ID，大小写不敏感，空格分隔多关键词需同时命中） */
-  const shownShopConfig = computed(() => filterByKeywords(shopConfig.value, shopSearch.value, (s) => `${s.name || ''} ${s.shopId}`));
-
-  const monitoredCount = computed(() => shopConfig.value.filter((s) => s.monitored).length);
-
-  // ---------- 工具函数 ----------
-  function flash(id) {
-    flashIds.add(id);
-    setTimeout(() => flashIds.delete(id), 4000);
-  }
-
-  function showToast(msg, type = 'info') {
-    if (type === 'success') ElMessage.success(msg);
-    else if (type === 'error') ElMessage.error(msg);
-    else if (type === 'warning') ElMessage.warning(msg);
-    else ElMessage.info(msg);
-  }
-
-  function beep(times = 1) {
-    if (!soundOn.value) return;
-    try {
-      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-      for (let i = 0; i < times; i++) {
-        const t0 = audioCtx.currentTime + i * 0.55;
-        const o = audioCtx.createOscillator();
-        const g = audioCtx.createGain();
-        o.type = 'square';
-        o.frequency.value = 880;
-        g.gain.setValueAtTime(0.06, t0);
-        g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.35);
-        o.connect(g);
-        g.connect(audioCtx.destination);
-        o.start(t0);
-        o.stop(t0 + 0.4);
-      }
-    } catch { /* 音频不可用则静默 */ }
-  }
 
   /** 跳转到门户页「开放平台」Tab（同源 iframe，经 parent postMessage 切 Tab） */
   function goOpenapi() {
@@ -157,423 +37,74 @@ export function useMonitor() {
   /** 打开告警详情抽屉（查看该告警的具体明细清单，如断货商品 ID / 待发货订单号） */
   function openAlertDetail(a) {
     if (!a) return;
-    detailAlert.value = a;
-    detailDrawer.value = true;
+    state.detailAlert.value = a;
+    state.detailDrawer.value = true;
   }
 
-  // ---------- 接口调用 ----------
-  /** POST JSON，返回 { ok, data }：ok = HTTP 2xx 且业务 ok；网络/解析异常抛出，由调用方统一提示 */
-  async function postJson(url, body) {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {}),
-    });
-    const data = await r.json();
-    return { ok: r.ok && !!data && data.ok === true, data: data || {} };
-  }
-
-  async function loadOverview() {
-    try {
-      const r = await fetch('/api/monitor/overview');
-      const j = await r.json();
-      if (j && j.ok) {
-        Object.assign(overview, j);
-        // 所选店铺可能已被停用监控：不在列表中则改选第一家
-        if (selectedShop.value && !overview.shops.some((s) => s.shopId === selectedShop.value)) {
-          const first = overview.shops.find((s) => s.alerts.maxLevel) || overview.shops[0];
-          selectShop(first ? first.shopId : '');
-        }
-      }
-    } catch { /* 服务未就绪，兜底轮询重试 */ }
-  }
-
-  async function loadAlerts() {
-    try {
-      const r = await fetch('/api/monitor/alerts');
-      const j = await r.json();
-      if (j && j.ok) alerts.value = j.alerts || [];
-    } catch { /* 同上 */ }
-  }
-
-  async function loadRules() {
-    try {
-      const r = await fetch('/api/monitor/rules');
-      const j = await r.json();
-      if (j && j.ok) rules.value = j.rules || [];
-    } catch { /* 忽略 */ }
-  }
-
-  async function loadTrend(shopId, metric) {
-    trend.points = [];
-    trend.prev = [];
-    if (!shopId || !metric) return;
-    try {
-      const q = `days=${trendDays.value}${trendCompare.value ? '&compare=1' : ''}`;
-      const r = await fetch(`/api/monitor/trend?shopId=${encodeURIComponent(shopId)}&metric=${encodeURIComponent(metric)}&${q}`);
-      const j = await r.json();
-      if (j && j.ok) {
-        trend.metric = j.metric || trend.metric;
-        trend.thresholds = j.thresholds;
-        trend.points = j.points || [];
-        trend.prev = j.prevPoints || [];
-      }
-    } catch { /* 忽略 */ }
-  }
-
-  function refreshSoon() {
-    clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => { loadOverview(); loadAlerts(); }, REFRESH_DEBOUNCE_MS);
-  }
-
-  function upsertAlert(a) {
-    if (!a) return;
-    const i = alerts.value.findIndex((x) => x.id === a.id);
-    // 删除（change=delete）与历史遗留的「已关闭」都从列表移除
-    if (a.change === 'delete' || a.status === 'closed') {
-      if (i >= 0) alerts.value.splice(i, 1);
-      return;
-    }
-    if (i >= 0) alerts.value.splice(i, 1, a);
-    else alerts.value.unshift(a);
-    alerts.value.sort((x, y) => levelRank(y.level) - levelRank(x.level) || y.updatedAt - x.updatedAt);
-  }
-
-  async function alertAction(a, action) {
-    try {
-      const { ok, data } = await postJson('/api/monitor/alert-action', { id: a.id, action });
-      if (ok) {
-        upsertAlert(data.alert); // 响应里的告警带 change:'delete'，upsertAlert 会从列表移除
-        showToast(action === 'delete' ? '已删除该告警' : '操作已完成', 'success');
-        refreshSoon(); // 总览计数（P0/P1/P2 徽标、店铺墙）同步刷新，SSE 断开时也能及时更新
-      } else showToast(data.message || '操作失败', 'error');
-    } catch (e) {
-      showToast('本地服务异常：' + e.message, 'error');
-    }
-  }
-
-  /** 批量删除（告警流多选操作；后端支持 { ids } 形态） */
-  async function batchAlertAction(ids, action) {
-    const list = (ids || []).filter(Boolean);
-    if (!list.length) return;
-    try {
-      const { ok, data } = await postJson('/api/monitor/alert-action', { ids: list, action });
-      if (ok) {
-        // 响应里的每条告警都带 change:'delete'，upsertAlert 逐条从列表移除
-        for (const a of (data.alerts || [data.alert])) if (a) upsertAlert(a);
-        showToast(`已删除 ${data.count || list.length} 条告警`, 'success');
-        refreshSoon(); // 总览计数同步刷新（SSE 断开时也能及时更新）
-      } else showToast(data.message || '操作失败', 'error');
-    } catch (e) {
-      showToast('本地服务异常：' + e.message, 'error');
-    }
-  }
-
-  async function manualCollect() {
-    try {
-      const { ok, data } = await postJson('/api/monitor/collect', {});
-      showToast(data.message || (ok ? '已触发采集' : '触发失败'), ok ? 'success' : 'error');
-    } catch (e) {
-      showToast('本地服务异常：' + e.message, 'error');
-    }
-  }
-
-  /** 切换金额展示单位（规则阈值始终按人民币配置与比较，仅影响展示与告警消息） */
-  async function saveCurrencyMode() {
-    try {
-      const { ok, data } = await postJson('/api/monitor/currency-config', { mode: overview.currencyMode });
-      if (ok) {
-        showToast(data.message || '已切换金额单位', 'success');
-        await loadOverview();
-        await loadAlerts();
-        loadTrend(selectedShop.value, selectedMetric.value);
-      } else {
-        showToast(data.message || '切换失败', 'error');
-        await loadOverview(); // 还原服务端生效值
-      }
-    } catch (e) {
-      showToast('本地服务异常：' + e.message, 'error');
-    }
-  }
-
-  function selectShop(shopId) {
-    selectedShop.value = shopId || '';
-    loadTrend(selectedShop.value, selectedMetric.value);
-  }
-
-  function selectMetric(metric) {
-    selectedMetric.value = metric;
-    loadTrend(selectedShop.value, metric);
-  }
-
-  /** 切换趋势时间窗（1/7/30 天）并重新拉取 */
-  function setTrendDays(d) {
-    trendDays.value = d;
-    loadTrend(selectedShop.value, selectedMetric.value);
-  }
-
-  /** 切换环比对比线开关并重新拉取 */
-  function toggleTrendCompare(v) {
-    trendCompare.value = v;
-    loadTrend(selectedShop.value, selectedMetric.value);
-  }
-
-  // ---------- 规则面板 ----------
-  function openRules() {
-    ruleEdits.value = rules.value.map((r) => ({
-      id: r.id,
-      title: r.title,
-      unit: (overview.metrics[r.metric] || {}).unit || r.unit || '',
-      enabled: r.enabled !== false,
-      p2: r.thresholds && typeof r.thresholds.p2 === 'number' ? r.thresholds.p2 : null,
-      p1: r.thresholds && typeof r.thresholds.p1 === 'number' ? r.thresholds.p1 : null,
-      p0: r.thresholds && typeof r.thresholds.p0 === 'number' ? r.thresholds.p0 : null,
-    }));
-    rulesDrawer.value = true;
-    loadRuleSuggestions();
-  }
-
-  /** 拉取阈值分位数建议（只读快照，不落盘、不自动应用） */
-  async function loadRuleSuggestions() {
-    loadingSuggestions.value = true;
-    try {
-      const r = await fetch('/api/monitor/rule-suggestions?days=30');
-      const j = await r.json();
-      if (j && j.ok) ruleSuggestions.value = j.suggest || {};
-    } catch { /* 忽略：建议不可用不影响手动编辑 */ } finally {
-      loadingSuggestions.value = false;
-    }
-  }
-
-  /** 把某条规则的历史建议填入编辑行（仅填输入框，仍需用户点「保存」才生效） */
-  function applySuggestion(id) {
-    const s = ruleSuggestions.value[id];
-    if (!s || !s.suggest) return;
-    const row = ruleEdits.value.find((e) => e.id === id);
-    if (!row) return;
-    row.p2 = s.suggest.p2;
-    row.p1 = s.suggest.p1;
-    row.p0 = s.suggest.p0;
-    showToast('已填入历史建议值，请确认后点「保存」生效', 'info');
-  }
-
-  async function saveRules() {
-    savingRules.value = true;
-    try {
-      const overrides = {};
-      for (const e of ruleEdits.value) {
-        const th = {};
-        // 留空的级别统一送 null（= 显式禁用该级别）：不送 / 送 undefined 时后端会保留默认阈值，
-        // 表现为「清空输入框保存后阈值又自己回来了」。
-        for (const k of ['p2', 'p1', 'p0']) {
-          const raw = e[k];
-          const n = raw === '' || raw === null || raw === undefined ? NaN : Number(raw);
-          th[k] = isFinite(n) ? n : null;
-        }
-        overrides[e.id] = { enabled: e.enabled, thresholds: th };
-      }
-      const { ok, data } = await postJson('/api/monitor/rules', { overrides });
-      if (ok) {
-        showToast('规则已保存并生效', 'success');
-        rulesDrawer.value = false;
-        await loadRules();
-        loadOverview();
-        loadTrend(selectedShop.value, selectedMetric.value); // 阈值参考线同步刷新（矩阵定级走 loadOverview）
-      } else showToast(data.message || '保存失败', 'error');
-    } catch (e) {
-      showToast('本地服务异常：' + e.message, 'error');
-    } finally {
-      savingRules.value = false;
-    }
-  }
-
-  // ---------- 监控店铺配置面板 ----------
-  async function openShopsConfig() {
-    try {
-      const r = await fetch('/api/monitor/shops-config');
-      const j = await r.json();
-      if (j && j.ok) {
-        shopConfig.value = (j.shops || []).map((s) => Object.assign({}, s));
-        shopSearch.value = '';
-        shopsDrawer.value = true;
-      } else showToast(j.message || '读取失败', 'error');
-    } catch (e) {
-      showToast('本地服务异常：' + e.message, 'error');
-    }
-  }
-
-  /** 勾选/取消当前列表（无搜索词时作用于全部店铺，有搜索词时只作用于匹配项） */
-  function setAllMonitored(v) {
-    for (const s of shownShopConfig.value) s.monitored = v;
-  }
-
-  async function saveShopsConfig() {
-    savingShops.value = true;
-    try {
-      const excludedShopIds = shopConfig.value.filter((s) => !s.monitored).map((s) => s.shopId);
-      const { ok, data } = await postJson('/api/monitor/shops-config', { excludedShopIds });
-      if (ok) {
-        showToast('监控店铺配置已保存', 'success');
-        shopsDrawer.value = false;
-        await loadOverview();
-        await loadAlerts();
-      } else showToast(data.message || '保存失败', 'error');
-    } catch (e) {
-      showToast('本地服务异常：' + e.message, 'error');
-    } finally {
-      savingShops.value = false;
-    }
-  }
-
-  // ---------- SSE 与轮播 ----------
-  function onSseEvent(ev) {
-    if (!ev || typeof ev !== 'object') return;
-    if (ev.type === 'alert') {
-      upsertAlert(ev.data);
-      if (ev.data && ev.data.change === 'new' && ev.data.level === 'P0' && ev.data.status === 'open') {
-        flash(ev.data.id);
-        beep(2);
-      } else if (ev.data && (ev.data.change === 'new' || ev.data.change === 'escalate')) {
-        flash(ev.data.id);
-        if (ev.data.change === 'escalate') beep(1);
-      }
-      refreshSoon();
-    } else if (ev.type === 'collection') {
-      refreshSoon();
-    } else if (ev.type === 'rules') {
-      loadRules();
-      refreshSoon();
-    } else if (ev.type === 'config') {
-      // 其他页面修改了监控店铺配置或金额单位：同步刷新总览/告警/趋势
-      loadOverview();
-      loadAlerts();
-      loadTrend(selectedShop.value, selectedMetric.value);
-    }
-  }
-
-  function connectSse() {
-    if (es) { try { es.close(); } catch { /* 忽略 */ } }
-    es = new EventSource('/api/monitor/events');
-    es.onopen = () => { sseOk.value = true; };
-    es.onerror = () => { sseOk.value = false; };
-    es.onmessage = (m) => {
-      try { onSseEvent(JSON.parse(m.data)); } catch { /* 忽略无法解析的事件 */ }
-    };
-  }
-
+  // ---------- 投影轮播 ----------
   function rotate() {
-    const pool = sortedShops.value;
+    const pool = state.sortedShops.value;
     if (!pool.length) return;
     const withAlerts = pool.filter((s) => s.alerts.maxLevel);
     const list = withAlerts.length ? withAlerts : pool;
-    const idx = list.findIndex((s) => s.shopId === selectedShop.value);
-    selectShop(list[(idx + 1) % list.length].shopId);
+    const idx = list.findIndex((s) => s.shopId === state.selectedShop.value);
+    data.selectShop(list[(idx + 1) % list.length].shopId);
   }
 
   function applyRotate() {
     clearInterval(rotateTimer);
-    if (projectMode.value && rotateOn.value) rotateTimer = setInterval(rotate, ROTATE_INTERVAL_MS);
+    if (state.projectMode.value && state.rotateOn.value) rotateTimer = setInterval(rotate, ROTATE_INTERVAL_MS);
   }
 
-  watch([projectMode, rotateOn], applyRotate);
-
-  // ---------- 在场心跳（按需采集：仅本页可见时采集，离开即停） ----------
-  let tabActive = window.parent === window; // 直接打开本页（非门户 iframe）时默认视为可见
-  let hasParentReply = false;
-
-  function sendPresence(active) {
-    // 服务暂不可用时忽略，下个心跳重试
-    postJson('/api/monitor/presence', { active }).catch(() => { /* 忽略 */ });
-  }
-
-  function startPresence() {
-    if (presenceTimer) clearInterval(presenceTimer);
-    sendPresence(true); // 立即报告在场（服务端会立刻巡检一轮）
-    presenceTimer = setInterval(() => sendPresence(true), PRESENCE_HEARTBEAT_MS);
-  }
-
-  function stopPresence() {
-    if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; }
-    sendPresence(false); // 离开即停采
-  }
-
-  /** 按「门户当前 Tab + 页面可见性」同步在场状态 */
-  function syncPresence() {
-    if (tabActive && document.visibilityState !== 'hidden') startPresence();
-    else stopPresence();
-  }
-
-  function onParentMessage(ev) {
-    if (!ev || !ev.data) return;
-    if (ev.data.type === 'portal-tab') {
-      hasParentReply = true;
-      tabActive = ev.data.key === 'monitor';
-      syncPresence();
-    }
-  }
-
-  function onVisibilityChange() {
-    syncPresence();
-  }
+  watch([state.projectMode, state.rotateOn], applyRotate);
 
   // ---------- 生命周期 ----------
   onMounted(async () => {
     // Element Plus 深色主题（本页为 iframe 内独立 document，弹层/控件跟随暗色变量）
     document.documentElement.classList.add('dark');
-    await loadOverview();
-    await loadAlerts();
-    await loadRules();
-    initialLoading.value = false;
-    const firstAlert = sortedShops.value.find((s) => s.alerts.maxLevel) || sortedShops.value[0];
-    if (firstAlert) selectShop(firstAlert.shopId);
-    connectSse();
-    // 在场心跳：门户 iframe 内先询问当前激活 Tab（避免「刚打开又立刻切走」误报在场）；
-    // 没有父窗口（直接访问本页）则立即视为在场
-    window.addEventListener('message', onParentMessage);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    if (window.parent !== window) {
-      try { window.parent.postMessage({ type: 'monitor-ready' }, location.origin || '*'); } catch { /* 忽略 */ }
-      parentTimer = setTimeout(() => {
-        if (!hasParentReply) { tabActive = true; syncPresence(); }
-      }, 1500);
-    } else {
-      syncPresence();
-    }
+    await data.loadOverview();
+    await data.loadAlerts();
+    await data.loadRules();
+    state.initialLoading.value = false;
+    const firstAlert = state.sortedShops.value.find((s) => s.alerts.maxLevel) || state.sortedShops.value[0];
+    if (firstAlert) data.selectShop(firstAlert.shopId);
+    sse.connect();
     // 兜底轮询（SSE 断开时数据不落后太多）+ 时钟
     setInterval(() => {
-      if (!sseOk.value) { loadOverview(); loadAlerts(); }
+      if (!state.sseOk.value) { data.loadOverview(); data.loadAlerts(); }
     }, POLL_FALLBACK_MS);
-    setInterval(() => { now.value = Date.now(); }, 1000);
+    setInterval(() => { state.now.value = Date.now(); }, 1000);
     applyRotate();
   });
 
   onUnmounted(() => {
-    if (es) { try { es.close(); } catch { /* 忽略 */ } }
     clearInterval(rotateTimer);
-    stopPresence();
-    if (parentTimer) clearTimeout(parentTimer);
-    window.removeEventListener('message', onParentMessage);
-    document.removeEventListener('visibilitychange', onVisibilityChange);
     document.documentElement.classList.remove('dark');
   });
 
   return {
     // 状态
-    overview, rules, trend, now,
-    selectedShop, selectedMetric, filterLevel,
-    projectMode, soundOn, rotateOn, sseOk, flashIds, initialLoading,
-    trendDays, trendCompare,
-    rulesDrawer, ruleEdits, savingRules, ruleSuggestions, loadingSuggestions,
-    shopsDrawer, shopConfig, savingShops, shopSearch,
-    detailDrawer, detailAlert,
+    overview: state.overview, rules: state.rules, trend: state.trend, now: state.now,
+    selectedShop: state.selectedShop, selectedMetric: state.selectedMetric, filterLevel: state.filterLevel,
+    projectMode: state.projectMode, soundOn: state.soundOn, rotateOn: state.rotateOn,
+    sseOk: state.sseOk, flashIds: state.flashIds, initialLoading: state.initialLoading,
+    trendDays: state.trendDays, trendCompare: state.trendCompare,
+    rulesDrawer: state.rulesDrawer, ruleEdits: state.ruleEdits, savingRules: state.savingRules,
+    ruleSuggestions: state.ruleSuggestions, loadingSuggestions: state.loadingSuggestions,
+    shopsDrawer: state.shopsDrawer, shopConfig: state.shopConfig, savingShops: state.savingShops, shopSearch: state.shopSearch,
+    detailDrawer: state.detailDrawer, detailAlert: state.detailAlert,
     // 派生
-    alerts: shownAlerts, sortedShops, normalCount, reAuthCount,
-    openTopAlerts, openCount, tickerText, metricChips, topAlertByShop,
-    selectedShopObj, selectedFail, shownShopConfig, monitoredCount,
+    alerts: state.shownAlerts, sortedShops: state.sortedShops, normalCount: state.normalCount, reAuthCount: state.reAuthCount,
+    openTopAlerts: state.openTopAlerts, openCount: state.openCount, tickerText: state.tickerText, metricChips: state.metricChips,
+    topAlertByShop: state.topAlertByShop, selectedShopObj: state.selectedShopObj, selectedFail: state.selectedFail,
+    shownShopConfig: state.shownShopConfig, monitoredCount: state.monitoredCount,
     // 动作
-    selectShop, selectMetric, setTrendDays, toggleTrendCompare,
-    openRules, saveRules, applySuggestion,
-    openShopsConfig, setAllMonitored, saveShopsConfig,
-    saveCurrencyMode, manualCollect, alertAction, batchAlertAction, goOpenapi, openAlertDetail,
+    selectShop: data.selectShop, selectMetric: data.selectMetric,
+    setTrendDays: data.setTrendDays, toggleTrendCompare: data.toggleTrendCompare,
+    openRules: rules.openRules, saveRules: rules.saveRules, applySuggestion: rules.applySuggestion,
+    openShopsConfig: shops.openShopsConfig, setAllMonitored: shops.setAllMonitored, saveShopsConfig: shops.saveShopsConfig,
+    saveCurrencyMode: data.saveCurrencyMode, manualCollect: data.manualCollect,
+    alertAction: data.alertAction, batchAlertAction: data.batchAlertAction,
+    goOpenapi, openAlertDetail,
   };
 }

@@ -1,8 +1,8 @@
 <!-- 控制台风格日志面板：tiktok / bidding / bidding-cancel / video 四页共用。
-     lines: [{ time, cls, msg, title? }]（useToolPage.js 的 useLog 生成），cls 决定行颜色。 -->
+     lines: [{ time, cls, msg, title? }]（composables/useLog.js 的 useLog 生成），cls 决定行颜色。 -->
 <script setup>
 import { computed } from 'vue';
-import { useLogScroll } from '../composables/useToolPage.js';
+import { useLogScroll } from '../composables/useLogScroll.js';
 
 const props = defineProps({
   lines: { type: Array, default: () => [] },

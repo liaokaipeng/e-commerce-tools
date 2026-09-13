@@ -8,8 +8,9 @@ import LoginCard from '../components/LoginCard.vue';
 import StorePicker from '../components/StorePicker.vue';
 import PreviewTableCard from '../components/PreviewTableCard.vue';
 import { useShopeeSession } from '../composables/useShopeeSession.js';
-import { useLog } from '../composables/useToolPage.js';
-import { useBatchJob, usePreviewScan } from '../composables/useBatchJob.js';
+import { useLog } from '../composables/useLog.js';
+import { useBatchJob } from '../composables/useBatchJob.js';
+import { usePreviewScan } from '../composables/usePreviewScan.js';
 
 const {
   status, refreshing, flash, refreshStatus,

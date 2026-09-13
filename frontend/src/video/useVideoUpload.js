@@ -1,8 +1,9 @@
-// 视频上传页 · 批量上传编排：启动任务 / SSE 事件分流 / 进度统计 / 取消。
-// 从 video/App.vue 抽出（与表格解析、凭证管理解耦）。
+// 视频上传页 · 批量上传编排：启动任务 / 传输（POST + SSE）/ 终态处理 / 取消。
+// 单条事件如何映射成进度、日志与行状态属于纯逻辑，见 upload-events.js；本模块只做编排与传输。
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { useLog } from '../composables/useToolPage.js';
+import { useLog } from '../composables/useLog.js';
+import { reduceUploadEvent } from './upload-events.js';
 
 export function useVideoUpload({ site, isPh, siteLabel, onFinish }) {
   const { logLines, log, clear: clearLog } = useLog();
@@ -64,54 +65,24 @@ export function useVideoUpload({ site, isPh, siteLabel, onFinish }) {
       .then(({ jobId }) => {
         currentJobId.value = jobId;
         es = new EventSource('/api/events?jobId=' + jobId);
-        let done = 0, ok = 0, fail = 0, skip = 0, total = 0;
-        const updateSummary = () => {
-          summary.value = `进度：${done} / ${total}　成功 ${ok} / 失败 ${fail}` + (skip ? `（含商品为空跳过 ${skip}）` : '');
-        };
+        let stats = { done: 0, ok: 0, fail: 0, skip: 0, total: 0 };
         es.onmessage = (ev) => {
           const d = JSON.parse(ev.data);
-          const row = rows[d.index];
-          if (d.type === 'row-start') {
-            total = d.total;
-            updateSummary();
-            if (row) row.status = 'run';
-            log(`▶ 任务 ${d.index + 1}/${d.total}: ${d.row.path}`);
-          } else if (d.type === 'step') {
-            log(`    [${d.index + 1}] (${d.step}) ${d.msg}`);
-          } else if (d.type === 'row-done') {
-            done++; ok++;
-            updateSummary();
-            if (row) row.status = 'ok';
-            log(`  ✓ 任务 ${d.index + 1} 完成 → vid=${d.result.vid}` + (d.result.itemId ? ` item_id=${d.result.itemId}` : ''), 'ok');
-          } else if (d.type === 'row-error') {
-            done++;
-            if (d.skip) {
-              // 后端判定「商品为空」跳过上传：状态列显示「失败，商品为空」
-              skip++;
-              updateSummary();
-              if (row) row.status = 'no-product';
-              log(`  ⊘ 任务 ${d.index + 1} 跳过（不上传）: ${d.error}`, 'err');
-            } else {
-              fail++;
-              updateSummary();
-              if (row) row.status = 'err';
-              log(`  ✗ 任务 ${d.index + 1} 失败: ${d.error}`, 'err');
+          const res = reduceUploadEvent(d, stats);
+          stats = res.stats;
+          if (res.row) {
+            const row = rows[res.row.index];
+            if (row) row.status = res.row.status;
+          }
+          if (res.log) log(res.log.msg, res.log.cls);
+          if (res.summary !== null) summary.value = res.summary;
+          if (res.terminal) {
+            if (res.terminal === 'cancelled') cancelledFlag = true;
+            finish();
+            // 任务正常结束或取消后导出带【状态】列的结果表格（保留已处理行的状态）；致命错误不导出
+            if (res.terminal !== 'fatal' && onFinish) {
+              try { onFinish(res.finish); } catch (e) { /* 导出失败不影响主流程 */ }
             }
-          } else if (d.type === 'finished') {
-            log(`全部完成：成功 ${ok}，失败 ${fail}` + (skip ? `（含商品为空跳过 ${skip}）` : '') + `，共 ${d.total}`, ok ? 'ok' : 'err');
-            summary.value = `已完成：成功 ${ok} / 失败 ${fail}` + (skip ? `（含商品为空跳过 ${skip}）` : '');
-            finish();
-            // 任务正常结束后导出带【状态】列的结果表格（cancelled 同理，保留已处理行的状态）
-            if (onFinish) { try { onFinish({ ok, fail, skip }); } catch (e) { /* 导出失败不影响主流程 */ } }
-          } else if (d.type === 'cancelled') {
-            log(`已取消：已处理 ${d.done} / ${d.total}（成功 ${ok}，失败 ${fail}` + (skip ? `，含商品为空跳过 ${skip}` : '') + `）`, 'err');
-            summary.value = `已取消：成功 ${ok} / 失败 ${fail}` + (skip ? `（含商品为空跳过 ${skip}）` : '');
-            cancelledFlag = true;
-            finish();
-            if (onFinish) { try { onFinish({ ok, fail, skip }); } catch (e) { /* 导出失败不影响主流程 */ } }
-          } else if (d.type === 'fatal') {
-            log('致命错误: ' + d.error, 'err');
-            finish();
           }
         };
         es.onerror = () => {

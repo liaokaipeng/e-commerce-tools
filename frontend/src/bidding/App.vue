@@ -6,7 +6,9 @@ import StorePicker from '../components/StorePicker.vue';
 import DirRow from '../components/DirRow.vue';
 import LogPanel from '../components/LogPanel.vue';
 import { useShopeeSession } from '../composables/useShopeeSession.js';
-import { useDirSettings, useLog, runSSE } from '../composables/useToolPage.js';
+import { useDirSettings } from '../composables/useDirSettings.js';
+import { useLog } from '../composables/useLog.js';
+import { runSSE } from '../composables/useSSE.js';
 
 // ---------- 登录状态 + 店铺列表（与取消竞价共用） ----------
 const {
