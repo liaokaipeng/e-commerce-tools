@@ -150,7 +150,7 @@ onMounted(() => {
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-text">
-          <b>工具合集</b>
+          <b>电商工具箱</b>
         </span>
       </div>
       <nav>

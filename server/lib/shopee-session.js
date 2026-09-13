@@ -36,7 +36,7 @@ function readSession() {
 function matchCookies(targetDomain) {
   const session = readSession();
   if (!session || !session.cookies || session.cookies.length === 0) {
-    throw new Error('未找到登录 Cookie，请先在浏览器点扩展「发送登录信息到本地工具」');
+    throw new Error('未找到登录 Cookie，请先在浏览器点扩展「发送登录信息到工具」');
   }
   const matched = session.cookies.filter(c => {
     const d = String(c.domain || '').toLowerCase();

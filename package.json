@@ -1,7 +1,7 @@
 {
   "name": "shopee-tools-all-in-one",
   "version": "1.0.2",
-  "description": "工具合集：TikTok 下载 / Shopee 竞价导出 / 视频上传（单服务单端口，前端 Vue3 + Element Plus + Vite）",
+  "description": "电商工具箱：TikTok 下载 / Shopee 竞价导出 / 视频上传（单服务单端口，前端 Vue3 + Element Plus + Vite）",
   "main": "server/main.js",
   "scripts": {
     "start": "node server/main.js",

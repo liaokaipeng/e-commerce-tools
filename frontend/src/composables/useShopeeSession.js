@@ -26,7 +26,7 @@ export function useShopeeSession(readyTip = 'Cookie 已就绪，可直接选择�
       } else {
         status.loggedIn = false;
         status.tip =
-          '请先登录 seller.shopee.cn，再点击浏览器扩展 [KP工具合集助手] → [发送登录信息到本地工具]，然后点「刷新状态」。';
+          '请先登录 seller.shopee.cn，再点击浏览器扩展 [电商工具箱] → [发送登录信息到工具]，然后点「刷新状态」。';
       }
     } catch {
       status.loggedIn = false;

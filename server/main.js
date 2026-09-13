@@ -1,4 +1,4 @@
-// 工具合集 - 单服务单端口（默认 8765）
+// 电商工具箱 - 单服务单端口（默认 8765）
 // 合并了四个独立工具后端：
 //   1) TikTok 无水印视频批量下载（原 8737）
 //   2) Shopee 竞价导出（原 8765）
@@ -197,12 +197,12 @@ server.on('error', (e) => {
 if (isMain) {
   server.listen(PORT, '127.0.0.1', () => {
     console.log('==============================================');
-    console.log('  工具合集（Shopee：竞价导出 / 取消竞价 / 取消Hot Listing / 视频上传；TikTok：视频下载）');
+    console.log('  电商工具箱（Shopee：竞价导出 / 取消竞价 / 取消Hot Listing / 视频上传；TikTok：视频下载）');
     console.log('  版本 v' + version.currentVersion());
     console.log('  请打开浏览器访问: http://127.0.0.1:' + PORT);
     console.log('==============================================');
     console.log('  - TikTok 下载     此页面即可直接使用');
-    console.log('  - 竞价导出/取消竞价/取消Hot Listing：需先装扩展并点「发送登录信息到本地工具」');
+    console.log('  - 竞价导出/取消竞价/取消Hot Listing：需先装扩展并点「发送登录信息到工具」');
     console.log('  - 视频上传：需先装扩展，在短视频页手动上传一次视频抓取凭证');
     console.log('  - 开放平台：录入 App 后生成授权链接登录（回调 redirect 后台与本工具填一致，默认 https://example.com/，授权后粘贴回调链接完成）');
     console.log('  - 监控大屏：开放平台授权店铺后自动巡检采集，/monitor/ 查看三级告警大屏');

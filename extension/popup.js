@@ -2,6 +2,7 @@
 // 竞价接口只走 seller.shopee.cn，故仅收集 shopee.cn 域的 Cookie
 const SERVER_URL = 'http://127.0.0.1:8765/api/cookie';
 const CACHE_URL = 'http://127.0.0.1:8765/api/cache';
+const PAGE_URL = 'http://127.0.0.1:8765';
 const SHOPEE_DOMAINS = ['shopee.cn'];
 
 function isShopeeDomain(domain) {
@@ -50,7 +51,7 @@ document.getElementById('send').addEventListener('click', async () => {
     });
     const text = await resp.text();
     if (resp.ok && text.includes('ok')) {
-      status.textContent = '✅ 发送成功！请到本地网页（http://127.0.0.1:8765）「竞价导出」Tab 查看并导出。';
+      status.textContent = '✓ 发送成功！';
       status.className = 'ok';
     } else {
       status.textContent = `发送失败（${resp.status}）：${text}。请先双击 启动.bat，再点此按钮`;
@@ -62,6 +63,10 @@ document.getElementById('send').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
   }
+});
+
+document.getElementById('open').addEventListener('click', () => {
+  chrome.tabs.create({ url: PAGE_URL });
 });
 
 // ============ 缓存清理 ============

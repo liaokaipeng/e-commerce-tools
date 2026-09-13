@@ -1,5 +1,5 @@
 'use strict';
-// 工具合集 - 测试入口
+// 电商工具箱 - 测试入口
 // 运行：node test/test.js（或 npm test）
 // 说明：不依赖真实网络（TikTok/Shopee），包含三类测试：
 //   1. 单元测试（unit.test.js）：纯函数，不启动服务

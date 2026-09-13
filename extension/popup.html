@@ -13,6 +13,7 @@
       border: none; border-radius: 4px; cursor: pointer;
     }
     button:disabled { background: #ccc; cursor: not-allowed; }
+    .open-btn { margin-top: 8px; background: #fff; color: #ee4d2d; border: 1px solid #ee4d2d; }
     #status { margin-top: 10px; font-size: 12px; color: #333; word-break: break-all; }
     .ok { color: #2e7d32; }
     .err { color: #c62828; }
@@ -29,11 +30,11 @@
   </style>
 </head>
 <body>
-  <h1>KP工具合集助手</h1>
+  <h1>电商工具箱</h1>
   <p>本扩展同时负责「竞价导出」的登录 Cookie 与「视频上传」的接口凭证推送。</p>
   <div class="tip">视频上传凭证：打开 Shopee 短视频上传页手动上传一次视频，本扩展会自动抓取并推送到本地（无需手动操作）。</div>
-  <p>竞价 Cookie：点击下方按钮，将当前浏览器中 Shopee 卖家中心的登录 Cookie 发送到本地工具（127.0.0.1:8765）。发送后到本地网页「竞价导出」Tab 选择店铺并导出 Excel。</p>
-  <button id="send">发送登录信息到本地工具</button>
+  <button id="send">发送登录信息到工具</button>
+  <button id="open" class="open-btn">打开网页</button>
   <div id="status"></div>
 
   <h2>缓存清理</h2>

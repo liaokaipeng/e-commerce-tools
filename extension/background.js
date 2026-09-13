@@ -1,4 +1,4 @@
-// KP工具合集助手 - 后台服务（视频上传凭证抓取）
+// 电商工具箱 - 后台服务（视频上传凭证抓取）
 // 监听 Shopee 请求，自动抓取 Authorization/Cookie/ShopID/UserId 并推送到本地工具 http://localhost:8765/api/creds
 // 凭证按站点区分：跨境 shopee.cn 与本土各 shopee.{cc}（如菲律宾 shopee.ph）。
 // 跨境 cn 支持多店铺：每个店铺（shopId）独立保存 cookie/auth。切换店铺后手动上传一次即可新增/更新该店铺凭证。
