@@ -166,6 +166,8 @@ Invoke-RestMethod -Method Post -Uri $up -Headers $headers -ContentType 'applicat
 ### 3.5 更新清单 `update.json`（客户端自更新）
 
 - `npm run pack` 已生成根目录 `update.json`（含 `version` / `url` / `sha256` / `notes`），**需提交并推送到仓库**。
+- ⚠️ **`notes`（更新说明）打包脚本只写空串，必须手工填写后再提交**——客户端「检查更新」直接展示这段文字，忘了填就是一片空白。`version` 从 `package.json` 读，`builtAt` / `commit`（打包时的 `HEAD`）/ `sha256` 由脚本自动写，**不要手改**。
+- **重新打包会覆盖 `update.json`，把已填好的 `notes` 一起清掉**：只想重打包（例如替换资产）时，先用脚本读出 `notes` 存到变量/文件，跑完 `pack.js` 再写回；或在改完 `update.json` 后单独 commit（见 §3.7）。
 - 客户端从**固定地址**拉清单：在 `server/config/update.json` 的 `manifestUrl` 填
   `https://raw.githubusercontent.com/<用户名>/<仓库>/<分支>/update.json`（地址格式见该文件注释）。
 - 清单中的 `url` 必须指向 **Release 资产的永久地址**：
