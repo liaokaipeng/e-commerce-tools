@@ -180,6 +180,25 @@ Invoke-RestMethod -Method Post -Uri $up -Headers $headers -ContentType 'applicat
 - **把下载到的 zip 用系统解压抽验一次**：能看到顶层条目（不是空白 zip），且中文文件名 `启动.bat`、`新手入门指南.md` 显示正常（Linux / macOS / 英文 Windows 上同样不乱码）。
 - 客户端「检查更新」能识别到新版本。
 
+### 3.7 替换已发布版本的资产（重新打包后）
+
+已发布的 zip 本身有问题（条目名编码、漏文件等）要原地替换时，**不能直接覆盖上传**——GitHub 不允许同名资产重复上传（返回 422 `already_exists`），必须先删旧资产。
+
+顺序（目的是把「清单 sha 与资产不符」的窗口压到最短）：
+
+1. **先在本地 `commit` 新的 `update.json`，但不要推**；
+2. `DELETE /repos/{owner}/{repo}/releases/assets/{asset_id}` 删旧资产（`asset_id` 取 `GET /releases/tags/v<版本>` 的 `assets[].id`）；
+3. 用同一个响应里的 `upload_url` 上传新包：
+   `POST https://uploads.github.com/repos/{owner}/{repo}/releases/{release_id}/assets?name=kp_tools-v<版本>.zip`，
+   请求头 `Content-Type: application/zip`，body 用 `--data-binary @build/...zip`；
+4. **立刻 `git push`** 更新清单，再按 §3.6 复核。
+
+> 窗口期（旧资产已删、新清单未推）客户端拉到的清单 sha 与资产不匹配，这一次「检查更新」会校验失败并回落，属预期行为——所以要一口气做完，别中途停手。
+
+- 上传响应里的 `digest: "sha256:<hex>"` 是 **GitHub 服务端**算的，可直接与本地 sha256 比对，比只信本地计算更硬。
+- 替换后 `assets[].id` 会变（同名不同 id），别处若引用过旧 id 需同步。
+- 复核别只看 `size` 对得上：重新下载一次资产，解析 zip 中央目录确认条目名与 UTF-8 标志位（§3.6）。
+
 ## 4. 常见坑速查
 
 | 场景 | 正确做法 |
@@ -192,6 +211,7 @@ Invoke-RestMethod -Method Post -Uri $up -Headers $headers -ContentType 'applicat
 | Release 创建报 422 `body is not a string` | 把 `Get-Content` 结果强转 `[string]` 再交 `ConvertTo-Json`；**若改用 Node 跑则不会遇到**（见下一行） |
 | 含中文注释的 `.ps1` 在 PS 5.1 里行接续失效 / 报 `-Headers 不是命令` | PS 5.1 按 ANSI 解码 UTF-8 无 BOM 脚本所致；**发布脚本（建 Release / 上传资产）改用 Node**：`fetch` 发字节 + `spawnSync('git',['credential','fill'],{input})` 取凭据 |
 | 上传 Release 资产 404 | 用创建响应的 `upload_url`，勿手拼 `api.github.com` 路径 |
+| 想替换已发布版本的资产，上传报 422 `already_exists` | GitHub 不允许同名资产覆盖上传；先 `DELETE /repos/{owner}/{repo}/releases/assets/<asset_id>` 删旧资产再传（顺序见 §3.7） |
 | zip 在资源管理器里打开是空的 | tar 打包时传了 `.`，条目名带 `./` 前缀所致；显式列顶层条目（见 §3.2），重新打包并替换资产 |
 | zip 里中文文件名在 Linux / macOS / 英文 Windows 解压乱码 | bsdtar 按本机代码页（中文 Windows = GBK）写条目名且不置 UTF-8 标志位；打包加 `--options hdrcharset=UTF-8`（`pack.js` 已内置），并确认打包输出没有「⚠ 编码」警告（见 §3.2） |
 | 误把凭证 / 数据提交上去 | 靠 `.gitignore`（`server/data/`、`*-session.json`、`*.har` 等）；漏网先补规则；**已推送即视为泄露，立刻作废该凭证**，流程见 §2.4 |
