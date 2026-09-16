@@ -12,7 +12,6 @@ export function useCompressJob({ log }) {
   const scanning = ref(false);
   const scanned = ref(false);
   const truncated = ref(false);
-  const emptyDirs = ref(0);
 
   const rows = ref([]);
   const totalSize = ref(0);
@@ -59,7 +58,6 @@ export function useCompressJob({ log }) {
         return false;
       }
       truncated.value = !!j.truncated;
-      emptyDirs.value = j.emptyDirs || 0;
       totalSize.value = j.totalSize || 0;
       rows.value = (j.files || []).map((f) => Object.assign({}, f, {
         status: '', percent: 0, detail: '', error: '', duration: null,
@@ -148,22 +146,25 @@ export function useCompressJob({ log }) {
             } else {
               progress.value.ok += 1;
               savedBytes.value += Math.max(0, (ev.sizeBefore || 0) - (ev.sizeAfter || 0));
-              const ratio = ratioText(ev.sizeBefore, ev.sizeAfter);
               const extra = ev.speedRatio > 1 ? `，${ev.speedRatio.toFixed(2)}× 加速` : '';
-              // 覆盖模式：ev.overwritten 为真才是真的替换了原文件；否则是「复核未通过、已保留原文件」
+              // 覆盖模式：ev.overwritten 为真才是真的替换了原文件；否则是「复核未通过、已保留原片」
               const overwriteTip = ev.overwritten ? '，已覆盖原文件' : '';
               const kept = overwriteMode.value && !ev.overwritten;
+              // 保留原片时不写「-0%」这种比率，直接给出「压出来多大 vs 原片多大」
+              const sizeText = kept
+                ? `${formatBytes(ev.sizeBefore)}（未替换，压出来 ${formatBytes(ev.producedSize || ev.sizeAfter)}）`
+                : `${formatBytes(ev.sizeBefore)} → ${formatBytes(ev.sizeAfter)}（${ratioText(ev.sizeBefore, ev.sizeAfter)}）`;
+              const timeText = `${formatDuration(ev.durationBefore)} → ${formatDuration(ev.durationAfter)}${extra}${overwriteTip}`;
+              // 产物比原片还大属异常（正常只会更小），必须标红而不是伪装成成功
+              const grew = (ev.sizeAfter || 0) > (ev.sizeBefore || 0);
               if (r) {
                 r.status = 'ok';
                 r.percent = 100;
-                r.detail = `${formatBytes(ev.sizeBefore)} → ${formatBytes(ev.sizeAfter)}（${ratio}），`
-                  + `${formatDuration(ev.durationBefore)} → ${formatDuration(ev.durationAfter)}${extra}${overwriteTip}`
-                  + (kept ? `（${ev.reason || '已保留原文件'}）` : '');
+                r.detail = `${sizeText}，${timeText}${kept ? `（${ev.reason || '已保留原片'}）` : ''}`;
               }
-              log(`✓ ${nameOf(r, ev)} 压缩完成：${formatBytes(ev.sizeBefore)} → ${formatBytes(ev.sizeAfter)}（${ratio}），`
-                + `时长 ${formatDuration(ev.durationBefore)} → ${formatDuration(ev.durationAfter)}${extra}${overwriteTip}`
-                + `${ev.withinLimit === false ? ' ⚠ 仍超出体积上限' : ''}`, ev.withinLimit === false ? 'err' : 'ok');
-              if (kept) log(`⚠ ${nameOf(r, ev)} ${ev.reason || '未覆盖，已保留原文件'}`, 'warn');
+              log(`✓ ${nameOf(r, ev)} 压缩完成：${sizeText}，时长 ${timeText}`
+                + `${ev.withinLimit === false ? ' ⚠ 仍超出体积上限' : ''}`, ev.withinLimit === false || grew ? 'err' : 'ok');
+              if (kept) log(`⚠ ${nameOf(r, ev)} 未覆盖原片：${ev.reason || '已保留原片'}`, 'warn');
             }
             break;
           }
@@ -250,7 +251,7 @@ export function useCompressJob({ log }) {
   }
 
   return {
-    scanning, scanned, truncated, emptyDirs,
+    scanning, scanned, truncated,
     rows, totalSize, overSizeCount,
     running, jobId, paused, pausing, finished, progress, progressPct, savedBytes, outDirShown,
     scan, start, togglePause, cancel,

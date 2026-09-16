@@ -18,26 +18,17 @@ export function formatDuration(sec) {
   return `${m}:${String(r).padStart(2, '0')}`;
 }
 
-/** 体积压缩比文案（源 → 产物），跳过或数据缺失时返回空串 */
+/** 体积变化文案（源 → 产物）：缩小显示 -N%，反而变大显示 +N%（变大属异常，必须一眼看出来） */
 export function ratioText(before, after) {
   const b = Number(before) || 0;
   const a = Number(after) || 0;
   if (!b || !a) return '';
-  return `-${Math.round((1 - a / b) * 100)}%`;
+  const pct = Math.round((1 - a / b) * 100);
+  return pct >= 0 ? `-${pct}%` : `+${-pct}%`;
 }
 
 /**
- * 扫描结果汇总：给预览卡片顶部一行摘要用。
- * 体积按上限预判，时长要执行时用 ffprobe 才知道，故这里只提示体积维度。
+ * 行状态 → el-tag 类型与文案（'' 等待 | run 进行中 | ok 已压缩 | skip 已达标 | err 失败）
  */
-export function scanSummary(files, maxMB) {
-  const list = Array.isArray(files) ? files : [];
-  const maxBytes = (Number(maxMB) || 0) * MB;
-  const totalSize = list.reduce((n, f) => n + (Number(f.size) || 0), 0);
-  const overSize = list.filter((f) => f.size > maxBytes).length;
-  return { count: list.length, totalSize, overSize };
-}
-
-/** 行状态 → el-tag 类型与文案（'' 等待 | run 进行中 | ok 已压缩 | skip 已达标 | err 失败） */
 export const ROW_TAG = { '': 'info', run: 'warning', ok: 'success', skip: 'info', err: 'danger' };
 export const ROW_TEXT = { '': '等待', run: '进行中', ok: '已压缩', skip: '已达标', err: '失败' };

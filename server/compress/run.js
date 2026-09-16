@@ -4,10 +4,10 @@
  *
  * 四条硬约束：
  *   - **默认绝不写回源文件**：产物落在输出目录（留空即源文件同目录）并带 OUT_SUFFIX；
- *     只有显式 overwrite=true 时才覆盖原文件，且必须先写临时文件、复核通过后再替换（原文件始终完好到最后一步）；
+ *     只有显式 overwrite=true 时才覆盖原文件——两种模式都先写临时文件，原名只在最后改名那一刻被替换；
  *   - **可中断**：外部 shouldAbort() 为真时立刻 kill 掉 ffmpeg 子进程（否则取消要等整个视频编完）；
  *   - **产物必须复核**：ffmpeg 退出码为 0 不代表体积达标，编完一定重新 stat，超标就降档重来；
- *   - **失败不留半成品**：中断或报错时删掉写了一半的文件（覆盖模式下只删临时文件）。
+ *   - **失败不留半成品**：中断或报错时删掉写了一半的临时文件（覆盖模式下原文件全程未被触碰）。
  */
 const fs = require('fs');
 const path = require('path');
@@ -120,24 +120,26 @@ async function compressOne({ input, outDir, opts, overwrite = false, onProbe, on
   }
 
   fs.mkdirSync(outDir, { recursive: true });
-  // 覆盖模式：产物与源文件同名（同样统一转 mp4）。ffmpeg 不能读写同一个路径，
-  // 故先写临时文件，编完复核后再替换原文件——替换前原文件始终完好，失败也不丢数据。
-  const finalPath = overwrite
-    ? path.join(outDir, path.basename(input, path.extname(input)) + '.mp4')
-    : path.join(outDir, outputName(input));
-  const workPath = overwrite
-    ? path.join(outDir, TEMP_PREFIX + process.pid + '-' + Date.now() + '.mp4')
-    : finalPath;
+  // 两种模式都先写临时文件再改名就位：ffmpeg 不能读写同一路径，覆盖模式更要保证原片
+  // 完好到最后一刻（原名在改名那一刻才被替换；Node 的 rename 在 Windows 上会覆盖同名文件）。
+  // 覆盖模式产物与源同名（统一转 mp4）；源本来就是 mp4（不分大小写）时直接沿用源的写法，
+  // 免得 `.MP4` 的大小写差异被当成「另一个文件」而拒绝覆盖。
+  const ext = path.extname(input);
+  const base = path.basename(input, ext);
+  const finalPath = path.join(outDir, overwrite
+    ? (ext.toLowerCase() === '.mp4' ? base + ext : base + '.mp4')
+    : outputName(input));
+  const workPath = path.join(outDir, TEMP_PREFIX + process.pid + '-' + Date.now() + '.mp4');
   const maxBytes = o.maxMB * MB;
 
   let attempt = 0;
   let cur = plan;
-  let lastSize = 0;
+  let size = 0;
   // 首次按算出的码率编；产物超标就降一档重来（最多 RETRY_TIMES 次）
   for (;;) {
     attempt += 1;
     if (shouldAbort()) {
-      if (overwrite) removeQuietly(workPath); // 覆盖模式的中间产物是临时文件，顺手清掉
+      removeQuietly(workPath);
       throw new AbortedError();
     }
     const args = buildArgs({ input, output: workPath, plan: cur });
@@ -156,55 +158,61 @@ async function compressOne({ input, outDir, opts, overwrite = false, onProbe, on
       throw e;
     }
 
-    lastSize = fs.existsSync(workPath) ? fs.statSync(workPath).size : 0;
-    if (lastSize > 0 && lastSize <= maxBytes) break;
+    size = fs.existsSync(workPath) ? fs.statSync(workPath).size : 0;
+    if (size > 0 && size <= maxBytes) break;
     if (attempt > RETRY_TIMES) break; // 降到底仍超标，如实上报，不再无限重试
     cur = lowerBitrate(cur);
   }
 
-  // 覆盖模式：复核产物确实变小了才替换原文件，否则保留原文件（避免用更大的文件盖掉原片）
+  // 就位：覆盖模式只在产物确实更小、且不会顶掉别人的同名 mp4 时才替换原片；
+  // 否则保留原文件并说明原因（绝不用更大的文件盖掉原片）。
+  const samePath = path.resolve(finalPath) === path.resolve(input);
+  const blocked = overwrite && !samePath && fs.existsSync(finalPath);
+  const smaller = size > 0 && size < info.size;
   let overwritten = false;
   let reason = '';
-  if (overwrite) {
-    const samePath = path.resolve(finalPath) === path.resolve(input);
-    const targetTaken = !samePath && fs.existsSync(finalPath);
-    if (lastSize > 0 && lastSize < info.size && !targetTaken) {
-      removeQuietly(finalPath); // Windows 上 rename 不能覆盖已存在文件，先删
+  if (overwrite && (blocked || !smaller)) {
+    removeQuietly(workPath);
+    reason = blocked ? '同名 mp4 已存在，已保留原文件' : '压缩后未变小，已保留原文件';
+  } else {
+    try {
       fs.renameSync(workPath, finalPath);
-      if (!samePath) removeQuietly(input); // 源文件是别的扩展名（如 .mov），产物已就位再删原片
-      overwritten = true;
-    } else {
+    } catch (e) {
       removeQuietly(workPath);
-      reason = targetTaken ? '同名 mp4 已存在，已保留原文件' : '压缩后未变小，已保留原文件';
+      throw new Error('写入产物失败（文件可能被占用）：' + e.message);
+    }
+    if (overwrite) {
+      overwritten = true;
+      if (!samePath) removeQuietly(input); // 源是别的扩展名（如 .mov）：产物就位后再删原片
     }
   }
+  const outPath = overwrite && !overwritten ? null : finalPath;
+  const kept = overwrite && !overwritten;
 
   // 产物复核：以实际文件为准，ffmpeg 报的时长在高倍速场景下会有零点几秒偏差
-  const producedPath = overwrite ? (overwritten ? finalPath : null) : finalPath;
   let outInfo = null;
-  if (producedPath) {
-    try { outInfo = probe(producedPath); } catch { /* 探测失败不影响主流程，前端按文件大小判断 */ }
+  if (outPath) {
+    try { outInfo = probe(outPath); } catch { /* 探测失败不影响主流程，前端按文件大小判断 */ }
   }
 
   return {
     skipped: false,
     overwritten,
     reason,
-    outPath: producedPath,
+    outPath,
     attempts: attempt,
     sizeBefore: info.size,
-    sizeAfter: overwrite && !overwritten ? info.size : lastSize,
+    sizeAfter: kept ? info.size : size,
+    producedSize: size, // 本次编出来的大小（覆盖被拒时用它说明「压出来反而更大」）
     durationBefore: info.duration,
-    durationAfter: overwrite && !overwritten
-      ? info.duration
-      : (outInfo ? outInfo.duration : plan.outDuration),
+    durationAfter: kept ? info.duration : (outInfo ? outInfo.duration : plan.outDuration),
     width: info.width,
     height: info.height,
     overSize: !!plan.overSize,
     overTime: !!plan.overTime,
     speedRatio: plan.speedRatio,
     targetKbps: cur.videoKbps,
-    withinLimit: overwrite && !overwritten ? true : lastSize <= maxBytes,
+    withinLimit: kept ? true : size <= maxBytes,
   };
 }
 

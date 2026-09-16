@@ -71,6 +71,22 @@ async function run() {
     const short = planFor({ size: 100 * MB, duration: 40, width: 1920, height: 1080, hasAudio: true }, opts);
     t('planFor 时长本身没超则不加速（只压体积）',
       short.speedRatio === 1 && short.audioFilter === '' && short.outDuration === 40);
+
+    // 只超时长、体积远低于上限：必须沿用源码率，不能按体积上限反推——否则会得到一个
+    // 远高于源码率的码率，重编码后体积暴涨（3MB/15s 压到 8s 曾得到 23MB）。
+    const light = { size: 3 * MB, duration: 15, width: 1280, height: 720, hasAudio: true };
+    const lite = planFor(light, normalizeOpts({ maxMB: 30, maxSeconds: 8, maxLongSide: 1280 }));
+    const srcKbps = (light.size * 8) / light.duration / 1000; // ≈1678
+    t('planFor 只超时长时码率不超过源码率（不再越压越大）',
+      lite.videoKbps < srcKbps && lite.videoKbps > srcKbps - 200, `${lite.videoKbps} vs 源码率 ${srcKbps}`);
+    t('planFor 只超时长时不会把码率抬到「按体积上限反推」的 3 万 kbps',
+      lite.outKbps < 2000 && lite.outKbps > 1000, String(lite.outKbps));
+
+    // 超长低码率视频同理：源码率只有两百多 kbps 时不能被抬到预算的 4000kbps
+    const longLow = planFor({ size: 100 * MB, duration: 3600, width: 1920, height: 1080, hasAudio: true },
+      normalizeOpts({ maxMB: 30, maxSeconds: 60 }));
+    t('planFor 超长低码率视频的码率不被抬高（落到下限）',
+      longLow.videoKbps === MIN_VIDEO_KBPS, String(longLow.videoKbps));
   }
 
   // ===== atempo / scale 纯函数 =====

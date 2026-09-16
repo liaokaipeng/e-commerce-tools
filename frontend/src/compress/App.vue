@@ -1,6 +1,7 @@
 <!-- 视频压缩页：选一个文件夹 → 递归找出所有视频 → 逐个压到体积与时长上限内。 -->
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
+import { ElMessage } from 'element-plus';
 import DirRow from '../components/DirRow.vue';
 import LogPanel from '../components/LogPanel.vue';
 import { useDirSettings } from '../composables/useDirSettings.js';
@@ -18,8 +19,9 @@ const job = useCompressJob({ log });
 
 // 源文件夹每次打开都为空（不持久化）
 const outDir = ref('');
-// 是否用压缩结果直接覆盖原文件（默认关闭：另存为名字带后缀的新文件）
-const overwrite = ref(false);
+// 输出方式：**故意不预选**（null）——覆盖原文件不可恢复，必须由用户明确二选一，
+// 没选就点「开始压缩」时提示先选（见 doRun），避免「以为在另存为、结果覆盖了原片」这类误操作
+const overwrite = ref(null);
 // 压缩目标（默认值取自后端，保证与后端 DEFAULTS 单一来源）
 const maxMB = ref(30);
 const maxSeconds = ref(60);
@@ -69,6 +71,11 @@ function doScan() {
 }
 
 function doRun() {
+  // 输出方式不预选：没选就不让开始，否则用户无从知道产物会落在哪、原片会不会没
+  if (overwrite.value === null) {
+    ElMessage.warning('请先选择「输出方式」：另存为（原片不动）或直接覆盖原文件');
+    return;
+  }
   job.start({
     dir: dir.value.trim(),
     outDir: outDir.value.trim(),
@@ -132,7 +139,7 @@ function doRun() {
           <el-button @click="openPath(effectiveOutDir, '请先选择源文件夹')">打开输出目录</el-button>
         </div>
         <div class="hint">
-          会递归处理该文件夹下所有子目录里的视频。默认<strong>不改动原文件</strong>：产物放在源文件旁边，
+          会递归处理该文件夹下所有子目录里的视频。输出方式选「另存为」时<strong>不改动原文件</strong>：产物放在源文件旁边，
           文件名加 <code>-compressed</code> 后缀（例如 <code>产品视频.mp4</code> → <code>产品视频-compressed.mp4</code>）。
         </div>
       </el-card>
@@ -142,13 +149,17 @@ function doRun() {
         <div class="opt-grid">
           <div class="opt">
             <label>单个文件体积上限</label>
-            <el-input-number v-model="maxMB" :min="1" :max="4096" :step="5" />
-            <span class="unit">MB</span>
+            <span class="field">
+              <el-input-number v-model="maxMB" :min="1" :max="4096" :step="5" />
+              <span class="unit">MB</span>
+            </span>
           </div>
           <div class="opt">
             <label>单个文件时长上限</label>
-            <el-input-number v-model="maxSeconds" :min="1" :max="3600" :step="10" />
-            <span class="unit">秒</span>
+            <span class="field">
+              <el-input-number v-model="maxSeconds" :min="1" :max="3600" :step="10" />
+              <span class="unit">秒</span>
+            </span>
           </div>
           <div class="opt wide">
             <label>输出方式</label>
@@ -156,7 +167,8 @@ function doRun() {
               <el-radio-button :value="false">另存为（文件名加 -compressed 后缀）</el-radio-button>
               <el-radio-button :value="true">直接覆盖原文件</el-radio-button>
             </el-radio-group>
-            <span v-if="overwrite" class="warn-tip">覆盖后原文件不可恢复，建议先备份</span>
+            <span v-if="overwrite === null" class="req-tip">必选</span>
+            <span v-else-if="overwrite" class="warn-tip">覆盖后原文件不可恢复，建议先备份</span>
           </div>
           <div class="opt wide">
             <label>分辨率上限</label>
@@ -268,14 +280,18 @@ function doRun() {
 .out-row :deep(.el-button + .el-button) { margin-left: 0; }
 .opt-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  /* 列宽下限要容得下「标签 + 输入框 + 单位」一行，否则单位会被挤到下一排 */
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: var(--sp-4);
 }
 .opt { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .opt.wide { grid-column: 1 / -1; }
 .opt label { color: var(--text-2); font-size: var(--fs-sm); white-space: nowrap; }
-.unit { color: var(--text-3); font-size: var(--fs-sm); }
+/* 数值与单位锁成一体，单位绝不单独换行 */
+.field { display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; }
+.unit { color: var(--text-3); font-size: var(--fs-sm); white-space: nowrap; }
 .warn-tip { color: var(--danger); font-size: var(--fs-sm); font-weight: 600; }
+.req-tip { color: var(--brand); font-size: var(--fs-sm); font-weight: 600; }
 .side-select { width: 260px; }
 .exec-actions { margin-bottom: var(--sp-3); }
 .progress-line {

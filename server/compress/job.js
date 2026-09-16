@@ -90,6 +90,7 @@ function runBatch(res, payload) {
           outPath: r.outPath,
           sizeBefore: r.sizeBefore,
           sizeAfter: r.sizeAfter,
+          producedSize: r.producedSize || 0,
           durationBefore: r.durationBefore,
           durationAfter: r.durationAfter,
           attempts: r.attempts || 0,

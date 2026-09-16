@@ -5,8 +5,10 @@
  * 给定源文件信息与压缩目标，算出「是否需要处理 / 输出时长 / 视频码率 / 缩放与变速滤镜」，
  * 由 run.js 据此拼 ffmpeg 命令行。拆成纯函数是为了能直接跑单元测试（见 test/unit/）。
  *
- * 码率算法：目标体积（留 SIZE_BUDGET 余量）× 8 ÷ 输出时长 = 总码率，
+ * 码率算法：取「目标体积（留 SIZE_BUDGET 余量）× 8 ÷ 输出时长」与「源码率」中的较小者，
  * 减去音频码率即为视频码率。单遍 ABR 就够用；编完仍超标时由 run.js 降码率重试。
+ * 之所以要跟源码率取小：只超时长、体积远低于上限的视频若按体积上限反推码率，
+ * 会得到一个远高于源码率的值，重编码后体积不降反增（变速不增加信息量，沿用源码率即可）。
  */
 const {
   DEFAULTS, SIZE_BUDGET, AUDIO_KBPS, MIN_VIDEO_KBPS, RETRY_FACTOR,
@@ -71,8 +73,11 @@ function planFor(info, opts) {
 
   const hasAudio = !!info.hasAudio;
   const audioKbps = hasAudio ? AUDIO_KBPS : 0;
-  const budgetBits = maxBytes * SIZE_BUDGET * 8;
-  const totalKbps = budgetBits / outDuration / 1000;
+  // 按预算反推的码率 + 源码率（体积 ÷ 时长 × 8），取小：源码率更低时照源码率编，
+  // 避免「只超时长」的视频被硬塞一个远超源码率的码率而越压越大。
+  const budgetKbps = (maxBytes * SIZE_BUDGET * 8) / outDuration / 1000;
+  const srcKbps = info.size > 0 ? (info.size * 8) / info.duration / 1000 : Infinity;
+  const totalKbps = Math.min(budgetKbps, srcKbps);
   const videoKbps = Math.max(MIN_VIDEO_KBPS, Math.floor(totalKbps - audioKbps));
 
   return {
