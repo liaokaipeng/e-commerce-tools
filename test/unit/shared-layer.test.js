@@ -215,6 +215,80 @@ async function run() {
     t('readRouteBody：不带 res 时非法 JSON 宽容返回 {}', soft && typeof soft === 'object' && Object.keys(soft).length === 0);
   }
 
+  // ===== 共享层：zip 条目名编码自检（发布包跨平台不乱码） =====
+  {
+    const { zipNameEncoding } = require('../../server/lib/archive');
+    const { removeFile } = require('../helpers');
+
+    // 最小 zip：只拼中央目录 + EOCD——被测函数只读中央目录，不需要真实数据段
+    const buildZip = (entries) => {
+      const parts = [];
+      for (const e of entries) {
+        const nameBuf = Buffer.isBuffer(e.name) ? e.name : Buffer.from(e.name, 'utf8');
+        const h = Buffer.alloc(46);
+        h.writeUInt32LE(0x02014b50, 0);                 // 中央目录条目签名
+        h.writeUInt16LE(e.utf8Flag ? 0x800 : 0, 8);     // 通用位标志 bit 11 = UTF-8
+        h.writeUInt16LE(nameBuf.length, 28);
+        parts.push(Buffer.concat([h, nameBuf]));
+      }
+      const cd = Buffer.concat(parts);
+      const eocd = Buffer.alloc(22);
+      eocd.writeUInt32LE(0x06054b50, 0);   // EOCD 签名
+      eocd.writeUInt16LE(entries.length, 10);
+      eocd.writeUInt32LE(cd.length, 12);
+      eocd.writeUInt32LE(0, 16);           // 中央目录偏移 = 0
+      return Buffer.concat([cd, eocd]);
+    };
+    const withZip = (entries, fn) => {
+      const f = path.join(os.tmpdir(), `kp_zipenc_${Date.now()}_${Math.random().toString(16).slice(2)}.zip`);
+      try {
+        fs.writeFileSync(f, buildZip(entries));
+        return fn(f);
+      } finally {
+        removeFile(f);
+      }
+    };
+
+    // 纯 ASCII 条目名：不置标志位也不算问题（契约：只看「有非 ASCII 字节且未置标志位」）
+    t('zipNameEncoding：纯 ASCII 条目名不报错',
+      withZip([{ name: 'server/main.js', utf8Flag: false }, { name: 'package.json', utf8Flag: false }],
+        (f) => { const r = zipNameEncoding(f); return r.total === 2 && r.bad.length === 0; }));
+
+    // UTF-8 条目名 + 标志位（pack.js 加 --options hdrcharset=UTF-8 后的正常产物）
+    t('zipNameEncoding：UTF-8 名 + bit11 标志位通过',
+      withZip([{ name: '启动.bat', utf8Flag: true }, { name: '新手入门指南.md', utf8Flag: true }],
+        (f) => zipNameEncoding(f).bad.length === 0));
+
+    // GBK 字节 + 未置标志位（bsdtar 默认行为）：必须被抓出来
+    // 「启动.bat」的 GBK 字节 = c6 f4 b6 af 2e 62 61 74
+    const gbkName = Buffer.from([0xc6, 0xf4, 0xb6, 0xaf, 0x2e, 0x62, 0x61, 0x74]);
+    t('zipNameEncoding：GBK 名 + 无标志位被判为问题',
+      withZip([{ name: gbkName, utf8Flag: false }],
+        (f) => { const r = zipNameEncoding(f); return r.total === 1 && r.bad.length === 1 && r.bad[0].length === gbkName.length; }));
+
+    // 混合：只报有问题的那些，合规条目不受影响
+    t('zipNameEncoding：混合包只报未按 UTF-8 存储的条目',
+      withZip([
+        { name: 'server/main.js', utf8Flag: false },
+        { name: gbkName, utf8Flag: false },
+        { name: '新手入门指南.md', utf8Flag: true },
+      ], (f) => { const r = zipNameEncoding(f); return r.total === 3 && r.bad.length === 1; }));
+
+    // 空包与非 zip 文件：返回空结果而不是抛错（打包自检不该让流程崩）
+    t('zipNameEncoding：空包返回空结果',
+      withZip([], (f) => { const r = zipNameEncoding(f); return r.total === 0 && r.bad.length === 0; }));
+    {
+      const f = path.join(os.tmpdir(), `kp_zipenc_plain_${Date.now()}.txt`);
+      try {
+        fs.writeFileSync(f, 'this is not a zip file\n', 'utf8');
+        const r = zipNameEncoding(f);
+        t('zipNameEncoding：非 zip 文件返回空结果而不抛错', r.total === 0 && r.bad.length === 0);
+      } finally {
+        removeFile(f);
+      }
+    }
+  }
+
   // ===== 共享层：CORS 白名单（main.js isAllowedOrigin） =====
   {
     t('CORS：本机 http/https（含任意端口）放行',

@@ -13,7 +13,9 @@
  *   - 清单里的 url 必须指向**永久地址**（建议 GitHub Release 资产），地址模板见下方 DOWNLOAD_URL_TEMPLATE。
  *   - 压缩用系统自带 tar（Windows 10 1803+ 内置 bsdtar）：它写出的 zip 条目分隔符是 `/`，
  *     非 Windows 侧解压不会出现反斜杠文件名（.NET 的 Compress-Archive / ZipFile 会有这个问题）。
- *     但必须显式列出顶层条目（见 main 里的说明），传 `.` 会产生 `./` 前缀导致资源管理器显示为空。
+ *     两个必须显式处理的坑（详见 main 里第 3 步的注释）：①必须列出顶层条目，传 `.` 会产生
+ *     `./` 前缀导致资源管理器显示为空；②必须加 `--options hdrcharset=UTF-8`，否则中文文件名会按
+ *     本机代码页（中文 Windows = GBK）存储且不置 UTF-8 标志位，非中文系统解压全是乱码。
  */
 const fs = require('fs');
 const os = require('os');
@@ -22,7 +24,7 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const { ROOT, currentVersion } = require('./server/lib/version');
-const { tarPath } = require('./server/lib/archive');
+const { tarPath, zipNameEncoding } = require('./server/lib/archive');
 const { COPY_ITEMS } = require('./server/update');
 // 说明：COPY_ITEMS 与一键更新的覆盖白名单是同一份，避免「包里有、更新不覆盖」这类漂移。
 
@@ -87,23 +89,34 @@ function main() {
   );
 
   // 3) 压缩：tar -a 按扩展名选 zip 格式
-  //    注意：必须显式列出顶层条目，不能传 `.`——bsdtar 会把条目名写成 `./server/...`，
+  //    注意 1：必须显式列出顶层条目，不能传 `.`——bsdtar 会把条目名写成 `./server/...`，
   //    Windows 资源管理器打开这种 zip 会显示为空（7-Zip 等第三方工具不受影响）。
+  //    注意 2：`--options hdrcharset=UTF-8` 不能省——bsdtar 默认按**当前代码页**（中文 Windows 即
+  //    GBK）写非 ASCII 条目名，且**不置** zip 的 UTF-8 标志位（通用位标志 bit 11），包发到
+  //    Linux / macOS / 英文 Windows 解压出来是 `????.bat`、`???????.md`。显式指定后条目名以
+  //    UTF-8 存储并置标志位；中文 Windows 解压照旧正常（解压器按标志位解码，不再猜代码页）。
+  //    该选项需 libarchive 3.3+（Win10 1803 自带的 3.3.2 起均支持），打包后由第 5 步兜底自检。
   fs.rmSync(BUILD_DIR, { recursive: true, force: true });
   fs.mkdirSync(BUILD_DIR, { recursive: true });
   const zipFile = path.join(BUILD_DIR, zipName);
   const topItems = fs.readdirSync(staging);
-  const r = spawnSync(tarPath(), ['-a', '-c', '-f', zipFile, '-C', staging, ...topItems], {
-    encoding: 'utf8',
-    maxBuffer: 16 * 1024 * 1024,
-  });
+  const r = spawnSync(
+    tarPath(),
+    ['--options', 'hdrcharset=UTF-8', '-a', '-c', '-f', zipFile, '-C', staging, ...topItems],
+    { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+  );
   if (r.error || r.status !== 0) {
     console.error('打包失败：' + (r.error ? r.error.message : String(r.stderr || r.stdout).trim()));
     process.exitCode = 1;
     return;
   }
 
-  // 4) 生成更新清单（sha256 必须对最终 zip 计算）
+  // 4) 自检条目名编码：确认没有「含非 ASCII 名但未置 UTF-8 标志位」的条目。
+  //    老版本 libarchive 不认识第 3 步的 --options 时不会报错，会静默写出 GBK 包，
+  //    这里兜底报警（中文 Windows 解压不受影响，故只警告不中断）。
+  const enc = zipNameEncoding(zipFile);
+
+  // 5) 生成更新清单（sha256 必须对最终 zip 计算）
   const sha256 = sha256File(zipFile);
   const manifest = {
     version,
@@ -121,6 +134,13 @@ function main() {
   console.log(`  版本      v${version}${commit ? ` (${commit})` : ''}`);
   console.log(`  安装包    build/${zipName}  ${sizeMB} MB`);
   console.log(`  清单      update.json`);
+  if (enc.bad.length) {
+    console.log(`  ⚠ 编码    ${enc.bad.length}/${enc.total} 个条目名未按 UTF-8 存储：${enc.bad.slice(0, 5).join('、')}${enc.bad.length > 5 ? ' 等' : ''}`);
+    console.log('             本机 tar 未识别 --options hdrcharset=UTF-8（需 libarchive 3.3+），');
+    console.log('             非中文系统解压这些条目会乱码——请升级系统 tar 后重新打包。');
+  } else {
+    console.log(`  编码      UTF-8（${enc.total} 个条目，跨平台解压不乱码）`);
+  }
   console.log(`  内容      ${staged.join('、')}`);
   console.log('  不含      node_modules（首次由 启动.bat 自动安装）、server/data、docs/（开发文档）、研究/测试资产\n');
   console.log('下一步：');

@@ -120,6 +120,8 @@ npm run pack        # 产出 build/kp_tools-v<version>.zip + 根目录 update.js
 - 包内**不含 `node_modules`**（首次由 `启动.bat` 自动 `npm install`）、**`server/data`**（真实店铺授权、Cookie 永不进包，也永不被更新覆盖）与 **`docs/`**（开发文档，不对外分发）。
 - zip 用系统自带 `tar -a` 生成（条目分隔符为 `/`，跨平台解压不会出现反斜杠文件名）。
   **tar 必须显式列出顶层条目、不能传 `.`**（`pack.js` 已内置正确写法）：传 `.` 时 bsdtar 会把条目名写成 `./server/...`，Windows 资源管理器（双击打开 / 右键解压）显示为**空白 zip**，而 7-Zip 等第三方工具正常——极易误判为「包是空的」。发布后务必按 §3.6 用系统解压抽验一次。
+- **中文文件名必须按 UTF-8 存储**（打包加 `--options hdrcharset=UTF-8`，`pack.js` 已内置）：bsdtar 默认按**当前代码页**（中文 Windows 即 GBK）写非 ASCII 条目名，且**不置** zip 的 UTF-8 标志位（通用位标志 bit 11）——这种包在中文 Windows 解压正常，发到 Linux / macOS / 英文 Windows 就变成 `????.bat`、`???????.md`。
+  `pack.js` 会在打包后打印自检结果：正常为「编码 UTF-8（N 个条目）」；若打印「⚠ 编码 … 未按 UTF-8 存储」，说明本机 tar 不认识该选项（需 libarchive 3.3+），**此时不要发布**，先升级系统 tar 再重打。
 - 打包脚本读 `package.json` 版本号，并对**最终 zip** 计算 `sha256` 写入 `update.json`——**先改版本号再打包**；`notes` 由打包脚本留空，发布方手工填写后提交。
 
 ### 3.3 打 tag 并推送
@@ -175,6 +177,7 @@ Invoke-RestMethod -Method Post -Uri $up -Headers $headers -ContentType 'applicat
 
 - Release 状态为已发布（非 draft），标题、正文、附件均可见；
 - 附件可下载（对 `browser_download_url` 发 HEAD 应返回 200，且长度与本地 zip 一致）；
+- **把下载到的 zip 用系统解压抽验一次**：能看到顶层条目（不是空白 zip），且中文文件名 `启动.bat`、`新手入门指南.md` 显示正常（Linux / macOS / 英文 Windows 上同样不乱码）。
 - 客户端「检查更新」能识别到新版本。
 
 ## 4. 常见坑速查
@@ -190,5 +193,6 @@ Invoke-RestMethod -Method Post -Uri $up -Headers $headers -ContentType 'applicat
 | 含中文注释的 `.ps1` 在 PS 5.1 里行接续失效 / 报 `-Headers 不是命令` | PS 5.1 按 ANSI 解码 UTF-8 无 BOM 脚本所致；**发布脚本（建 Release / 上传资产）改用 Node**：`fetch` 发字节 + `spawnSync('git',['credential','fill'],{input})` 取凭据 |
 | 上传 Release 资产 404 | 用创建响应的 `upload_url`，勿手拼 `api.github.com` 路径 |
 | zip 在资源管理器里打开是空的 | tar 打包时传了 `.`，条目名带 `./` 前缀所致；显式列顶层条目（见 §3.2），重新打包并替换资产 |
+| zip 里中文文件名在 Linux / macOS / 英文 Windows 解压乱码 | bsdtar 按本机代码页（中文 Windows = GBK）写条目名且不置 UTF-8 标志位；打包加 `--options hdrcharset=UTF-8`（`pack.js` 已内置），并确认打包输出没有「⚠ 编码」警告（见 §3.2） |
 | 误把凭证 / 数据提交上去 | 靠 `.gitignore`（`server/data/`、`*-session.json`、`*.har` 等）；漏网先补规则；**已推送即视为泄露，立刻作废该凭证**，流程见 §2.4 |
 | 远端落后导致推送被拒 | `git pull --rebase` 后再推；**禁 force push `main`** |

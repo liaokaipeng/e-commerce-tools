@@ -48,4 +48,40 @@ function extractZip(zipFile, destDir) {
   }
 }
 
-module.exports = { tarPath, probeTar, extractZip };
+/**
+ * 校验 zip 内条目名的编码，返回「含非 ASCII 字节但未置 UTF-8 标志位（bit 11）」的条目名。
+ *
+ * 用途：bsdtar 默认按**当前代码页**（中文 Windows 即 GBK）写非 ASCII 条目名且不置标志位，
+ * 这种包在非中文系统（Linux / macOS / 英文 Windows）解压会乱码（`启动.bat` → `????.bat`）。
+ * 打包方必须加 `--options hdrcharset=UTF-8`（见 pack.js），本函数在打包后自检，
+ * 避免老版本 libarchive 不认识该选项时静默产出坏包。
+ *
+ * @param {string} zipFile zip 绝对路径
+ * @returns {{ total: number, bad: string[] }} bad 为未按 UTF-8 存储的条目名（按 latin1 还原，仅供报错展示）
+ */
+function zipNameEncoding(zipFile) {
+  const buf = fs.readFileSync(zipFile);
+  let eocd = -1;
+  // 中央目录末尾记录（EOCD）在文件尾部；其后的注释最长 65535 字节，故最多回扫这么多
+  for (let i = buf.length - 22; i >= 0 && i > buf.length - 22 - 65535; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) return { total: 0, bad: [] };
+  const total = buf.readUInt16LE(eocd + 10);
+  let off = buf.readUInt32LE(eocd + 16);
+  const bad = [];
+  for (let n = 0; n < total; n++) {
+    // 中央目录条目固定头 46 字节，签名 0x02014b50
+    if (off + 46 > buf.length || buf.readUInt32LE(off) !== 0x02014b50) break;
+    const flag = buf.readUInt16LE(off + 8);
+    const nameLen = buf.readUInt16LE(off + 28);
+    const extraLen = buf.readUInt16LE(off + 30);
+    const cmtLen = buf.readUInt16LE(off + 32);
+    const name = buf.subarray(off + 46, off + 46 + nameLen);
+    if ((flag & 0x800) === 0 && name.some((b) => b >= 0x80)) bad.push(name.toString('latin1'));
+    off += 46 + nameLen + extraLen + cmtLen;
+  }
+  return { total, bad };
+}
+
+module.exports = { tarPath, probeTar, extractZip, zipNameEncoding };
