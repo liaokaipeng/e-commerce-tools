@@ -7,6 +7,10 @@
 ## 1. 前置：凭据与环境
 
 - **凭据来源**：Git Credential Manager（GCM，随 Git for Windows 安装）。交互式 shell 里 `git push` 首次会弹窗登录 GitHub，之后免密——即凭据已在册。
+- **必须显式用系统 git（`D:\Git\cmd\git.exe`），不要用 PATH 里的那个**：本机 PATH 首位是 WorkBuddy 自带的 **PortableGit**（`C:\Users\84463\.workbuddy\binaries\PortableGit\versions\<ver>\mingw64\bin\git.exe`），它的 GCM 在**无交互（自动化）环境**下会**无限挂起**——实测 `git credential fill` / `git push` 卡死 25 秒以上直到超时，且无任何输出，极难判断是「网络慢」还是「在等弹窗」。系统 git 的 GCM 直接从 Windows 凭据管理器读 `git:https://github.com`，**1.7 秒返回**，无需交互。
+  - 本地操作（`add` / `commit` / `tag`）用哪个 git 都行；**一旦涉及远端（`push` / `fetch` / `credential fill`）就换成完整路径的系统 git**。
+  - 排查用：`spawnSync('D:/Git/cmd/git.exe', ['credential','fill'], { input: 'protocol=https\nhost=github.com\n\n', env: {...process.env, GCM_INTERACTIVE:'never', GIT_TERMINAL_PROMPT:'0'}, timeout: 30000 })`，返回的 `password=` 即 OAuth token（`gho_` 开头，40 字符），可直接用作 `Authorization: Bearer`（实测能建 Release 与上传资产）。
+- **访问 GitHub 的下载/API 域名要挂本机代理**：直连 `github.com:443` 会超时（实测 21 秒 `Could not connect to server`）。git 已配 `http.https://github.com.proxy=http://127.0.0.1:7897`，但 **Node 的 `fetch` 与 `curl` 都不读 git 配置**——用 `curl -x http://127.0.0.1:7897`，或给 fetch 显式配代理。
 - **无 `gh` CLI**：需要打 API（建 Release、建仓库等）时，先用 `git credential fill` 读出 token，再调 GitHub REST API。
 - **取 token**（PowerShell 5，须用**文件重定向**喂 stdin）：
 
@@ -56,10 +60,43 @@ git push origin main
 
 - PowerShell **不支持 `&&` 与 heredoc**：多行提交信息先写成文件，再 `git commit -F <文件>`。
 
-### 2.4 提交前检查（红线）
+### 2.4 提交前检查（红线）：敏感信息与安全自检
 
-- 用 `git status` 确认没有误加：会话/凭证文件（`*-session.json`、`settings.json`）、`server/data/`、抓包 `*.har`、`node_modules/`、构建产物（`build/`、`frontend/dist/`）等。
-- 上列已由 `.gitignore` 忽略；若仍出现在待提交列表，说明规则缺失，**先补 `.gitignore` 再提交**，绝不把真实店铺授权 / Cookie 推上去。
+**每次 `git commit` / `git push` 前必做，不可跳过、不可凭印象。** 本仓库大量文件（会话、抓包、店铺授权、日志）天然含真实凭证，一旦推上去就是不可撤销的泄露。
+
+**第一步：范围确认**——看清这次到底动了什么，逐条确认每个文件「该不该进仓库」：
+
+```powershell
+git status --short                 # 新增/修改/未跟踪，逐个文件过目
+git diff --cached --name-only      # 本次实际暂存了哪些文件
+git diff --cached                  # 必须看内容，不能只看文件名
+```
+
+**第二步：内容扫描**——**文件名干净 ≠ 内容干净**。示例代码、文档、测试 fixture、注释、提交信息、Release 正文与附件里同样不得出现真实凭证，一律换成占位符（如 `SID=xxxxxx`）；文档/脚本里的本机绝对路径与用户名（`C:\Users\<你的用户名>\...`）一并替换为占位符。
+
+```powershell
+# 扫暂存内容；对已入库内容改用：git grep -n -I -E '<同样的模式>'
+git diff --cached | Select-String -Pattern 'SID=|spc_|SPC_|Bearer\s|Authorization:|access_token|refresh_token|AKIA|secret|password|BEGIN [A-Z ]*PRIVATE KEY'
+```
+
+> 关键词扫描只是兜底：Cookie 值是长串十六进制或含 `%` 转义，抓不全。真正可靠的是「先想清这个文件属于哪一类、该不该入库」，而不是靠模式匹配过关。
+
+**第三步：永不入库清单**（已在 `.gitignore` 中，若仍出现在暂存列表说明规则缺失）：
+
+| 类别 | 具体 |
+|---|---|
+| 会话 / 凭证 | `server/data/`（真实店铺授权）、`*-session.json`、`settings.json`、`.env` 类文件 |
+| 抓包数据 | `*.har`、`research/`（Playwright 抓包脚本含登录态）、`har/` 目录 |
+| 本地产物 | `node_modules/`、`frontend/dist/`、`build/`、`backup/`、`*.xlsx` 导出、`bin/`（ffmpeg） |
+| 个人信息 | 真实店铺名 / shop_id 清单、代理地址与账密、邮箱、本机用户名与绝对路径、截图（浏览器/DevTools 截图常带 Cookie 与店铺后台，慎入文档） |
+
+**第四步：泄露处置**——若敏感信息**已经推上去**：
+
+1. **第一时间作废并重签该凭证**（重新登录换取新 Cookie / token，GitHub token 去 Settings → Developer settings 撤销）。**删文件、改工作树、force push 都不解决已泄露的问题**，凭证作废才是唯一有效的止损。
+2. 需要清历史时用 `git filter-repo` / BFG 重写后强推——这是「禁 force push `main`」（§2.5）的**唯一例外**，且必须先告知协作者、确认无人基于该历史工作。
+3. 顺带排查同批推送的其它出口：Release 资产（zip 内是否含 `server/data/`）、Actions 日志、gist 与本地临时文件。
+
+> 补 `.gitignore` 规则优先于「这次小心一点」：规则缺失时靠注意力兜底，早晚漏一次。
 
 ### 2.5 推送与冲突
 
@@ -145,11 +182,13 @@ Invoke-RestMethod -Method Post -Uri $up -Headers $headers -ContentType 'applicat
 | 场景 | 正确做法 |
 |---|---|
 | 自动化里 `git push` / `credential fill` 弹窗挂起 | 先置 `$env:GCM_INTERACTIVE='never'` |
+| `git push` / `git credential fill` **无任何输出地卡死**（几十秒到几分钟） | 十有八九是用了 PATH 里的 **PortableGit**，它的 GCM 在无交互环境下挂起；**改用系统 git 完整路径 `D:\Git\cmd\git.exe`**（见 §1） |
+| 发布后想核对资产，下载却 `Could not connect` / `fetch failed` | 直连 GitHub 下载域名超时，**加 `-x http://127.0.0.1:7897`**（curl）或给 Node fetch 配代理；核对时比对 `sha256` 与 `update.json` |
 | 管道给 `git credential fill` 喂 stdin 失败 | 改用**文件重定向 stdin**（`-RedirectStandardInput`） |
 | PowerShell 里写 `&&` 或 heredoc | 不支持；多行提交信息用 `git commit -F <文件>` |
 | Release 创建报 422 `body is not a string` | 把 `Get-Content` 结果强转 `[string]` 再交 `ConvertTo-Json`；**若改用 Node 跑则不会遇到**（见下一行） |
 | 含中文注释的 `.ps1` 在 PS 5.1 里行接续失效 / 报 `-Headers 不是命令` | PS 5.1 按 ANSI 解码 UTF-8 无 BOM 脚本所致；**发布脚本（建 Release / 上传资产）改用 Node**：`fetch` 发字节 + `spawnSync('git',['credential','fill'],{input})` 取凭据 |
 | 上传 Release 资产 404 | 用创建响应的 `upload_url`，勿手拼 `api.github.com` 路径 |
 | zip 在资源管理器里打开是空的 | tar 打包时传了 `.`，条目名带 `./` 前缀所致；显式列顶层条目（见 §3.2），重新打包并替换资产 |
-| 误把凭证 / 数据提交上去 | 靠 `.gitignore`（`server/data/`、`*-session.json`、`*.har` 等）；漏网先补规则 |
+| 误把凭证 / 数据提交上去 | 靠 `.gitignore`（`server/data/`、`*-session.json`、`*.har` 等）；漏网先补规则；**已推送即视为泄露，立刻作废该凭证**，流程见 §2.4 |
 | 远端落后导致推送被拒 | `git pull --rebase` 后再推；**禁 force push `main`** |
