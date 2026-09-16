@@ -1,15 +1,17 @@
 // 电商工具箱 - 单服务单端口（默认 8765）
-// 合并了四个独立工具后端：
+// 合并了多个独立工具后端：
 //   1) TikTok 无水印视频批量下载（原 8737）
 //   2) Shopee 竞价导出（原 8765）
 //   3) Shopee 取消竞价（待改进竞价批量撤销，与竞价导出共用 Cookie）
 //   4) Shopee 视频批量上传（原 3000）
+//   5) 视频压缩（本地文件夹递归压缩，依赖外部 ffmpeg）
 // 前端为门户页（frontend/dist，源码见 frontend/），通过 Tab 切换工具页面：
 //   /tiktok/          TikTok 下载
 //   /bidding/         Shopee 竞价导出
 //   /bidding-cancel/  Shopee 取消竞价
 //   /hotlisting-cancel/  Shopee 取消注册 Hot Listing
 //   /video/           Shopee 视频上传
+//   /compress/        视频压缩
 // main.js 只负责「路由注册 + 静态服务 + 服务启动」，业务路由与 SSE 由各模块 register 提供。
 const http = require('http');
 const path = require('path');
@@ -23,6 +25,7 @@ const hotlistingCancel = require('./hotlisting-cancel');
 const video = require('./video');
 const openapi = require('./openapi');
 const monitor = require('./monitor');
+const compress = require('./compress');
 const cache = require('./cache');
 const update = require('./update');
 const routesSettings = require('./routes/settings');
@@ -51,6 +54,7 @@ hotlistingCancel.register({ get, post });
 video.register({ get, post });
 openapi.register({ get, post });
 monitor.register({ get, post });
+compress.register({ get, post });
 cache.register({ get, post });
 update.register({ get, post });
 // 工具默认目录设置（/api/settings）与目录浏览（/api/browse）分别由 routes/ 下单一职责模块注册
@@ -102,7 +106,7 @@ server.on('error', (e) => {
 if (isMain) {
   server.listen(PORT, '127.0.0.1', () => {
     console.log('==============================================');
-    console.log('  电商工具箱（Shopee：竞价导出 / 取消竞价 / 取消Hot Listing / 视频上传；TikTok：视频下载）');
+    console.log('  电商工具箱（Shopee：竞价导出 / 取消竞价 / 取消Hot Listing / 视频上传；TikTok：视频下载；其他：视频压缩）');
     console.log('  版本 v' + version.currentVersion());
     console.log('  请打开浏览器访问: http://127.0.0.1:' + PORT);
     console.log('==============================================');
@@ -111,6 +115,7 @@ if (isMain) {
     console.log('  - 视频上传：需先装扩展，在短视频页手动上传一次视频抓取凭证');
     console.log('  - 开放平台：录入 App 后生成授权链接登录（回调 redirect 后台与本工具填一致，默认 https://example.com/，授权后粘贴回调链接完成）');
     console.log('  - 监控大屏：开放平台授权店铺后自动巡检采集，/monitor/ 查看三级告警大屏');
+    console.log('  - 视频压缩：选文件夹后递归压缩（默认 ≤30MB / ≤60 秒），首次需点「下载并安装 ffmpeg」');
     console.log('  扩展安装：edge://extensions → 开发人员模式 → 加载解压缩的扩展');
 
     // 启动后自动检查更新（清单未配置时不产生定时器）

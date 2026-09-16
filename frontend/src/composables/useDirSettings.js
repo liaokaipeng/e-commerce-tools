@@ -44,10 +44,11 @@ export function useDirSettings(tool, log = () => {}) {
     }
   }
 
-  async function openDir() {
-    const d = dir.value.trim();
+  /** 在资源管理器里打开任意目录（不存在则先创建）；emptyMsg 是路径为空时的提示 */
+  async function openPath(p, emptyMsg = '请先填写目录') {
+    const d = String(p || '').trim();
     if (!d) {
-      ElMessage.warning('请先填写保存目录');
+      ElMessage.warning(emptyMsg);
       return;
     }
     try {
@@ -67,5 +68,10 @@ export function useDirSettings(tool, log = () => {}) {
     }
   }
 
-  return { dir, hasDefault, loadSettings, setDefaultDir, openDir };
+  /** 打开本工具当前填写的目录 */
+  async function openDir() {
+    return openPath(dir.value, '请先填写保存目录');
+  }
+
+  return { dir, hasDefault, loadSettings, setDefaultDir, openDir, openPath };
 }

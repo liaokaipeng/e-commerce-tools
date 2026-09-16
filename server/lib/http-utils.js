@@ -22,6 +22,7 @@ const DIR_INDEX = {
   '/video/': '/video/index.html',
   '/openapi/': '/openapi/index.html',
   '/monitor/': '/monitor/index.html',
+  '/compress/': '/compress/index.html',
 };
 
 /** 统一 JSON 响应 */

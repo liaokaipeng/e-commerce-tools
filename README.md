@@ -17,15 +17,19 @@
 | 视频上传 | `/video/`（`?mode=cn` / `?mode=ph`） | Shopee 短视频批量上传，分「跨境」与「本土-菲律宾」两个入口 |
 | 开放平台 | `/openapi/` | Shopee 开放平台 App 配置与店铺 OAuth 授权，为官方 Open API 功能统一提供登录入口 |
 | 监控大屏 | `/monitor/` | 已授权店铺定时巡检六域，P0/P1/P2 三级告警大屏展示 |
+| 视频压缩 | `/compress/` | 选一个文件夹，递归把所有视频压到 30MB / 1 分钟以内（纯本地，原文件不动） |
 
-> 除「视频下载」外，其余功能都要先在「开放平台」页完成一次**授权店铺**（店铺列表来自授权结果）。
+> 除「视频下载」与「视频压缩」外，其余功能都要先在「开放平台」页完成一次**授权店铺**（店铺列表来自授权结果）。
+
+门户页侧栏按「Shopee / TikTok / 其他」三个分组展示上述 Tab。
 
 ## 技术栈
 
 - **后端**：Node.js（CommonJS、无框架），运行时依赖仅 `exceljs`、`https-proxy-agent`、`socks-proxy-agent`
-- **前端**：Vue3 SFC + Element Plus + Vite 多页构建（8 个 HTML 入口），监控大屏折线图用 ECharts
+- **前端**：Vue3 SFC + Element Plus + Vite 多页构建（9 个 HTML 入口），监控大屏折线图用 ECharts
 - **扩展**：MV3（`extension/`），把网页里的 Cookie / 凭证推送到本地服务
 - 前端构建产物 `frontend/dist` 由后端托管；端口固定 `8765`
+- **视频压缩**额外需要一个外部 `ffmpeg`（重编码靠它，Node 自己做不到）：首次使用在页面上点一次「下载并安装 ffmpeg」，装在仓库根 `bin/`（约 180MB，不入库、不进发布包、不随更新覆盖）；也可以自己装好后放进 `bin/`
 
 实现细节见 [docs/架构.md](docs/架构.md) §3–§4。
 
@@ -77,7 +81,7 @@ npm run pack                         # 打包发布：build/kp_tools-v<版本>.z
 
 只列结论，细则见 [AGENTS.md](AGENTS.md) 与上表对应文档：
 
-- **极简零配置**：双击 `启动.bat` 即用，不加环境变量与额外安装步骤；后端不新增运行时依赖。
+- **极简零配置**：双击 `启动.bat` 即用，不加环境变量与额外安装步骤；后端不新增运行时依赖（视频压缩所需的 `ffmpeg` 是外部可执行文件、由页面一键下载到 `bin/`，不是 npm 依赖）。
 - **接口还原，不做 UI 自动化**：直接调 Shopee 内部 HTTP 接口，不改造成 Playwright / Selenium。
 - **端口固定 8765**；CORS 为本机来源白名单，**不要退回 `Access-Control-Allow-Origin: *`**。
 - **凭证不入库、不外发**：凭证与监控数据统一在 `server/data/`（gitignored），日志不完整打印 Cookie / Authorization。

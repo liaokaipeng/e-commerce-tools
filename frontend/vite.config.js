@@ -33,6 +33,7 @@ export default defineConfig({
         video: src('video/index.html'),
         openapi: src('openapi/index.html'),
         monitor: src('monitor/index.html'),
+        compress: src('compress/index.html'),
       },
     },
   },

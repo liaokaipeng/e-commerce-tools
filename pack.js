@@ -22,6 +22,7 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const { ROOT, currentVersion } = require('./server/lib/version');
+const { tarPath } = require('./server/lib/archive');
 const { COPY_ITEMS } = require('./server/update');
 // 说明：COPY_ITEMS 与一键更新的覆盖白名单是同一份，避免「包里有、更新不覆盖」这类漂移。
 
@@ -33,11 +34,6 @@ const DOWNLOAD_URL_TEMPLATE =
   'https://github.com/liaokaipeng/e-commerce-tools/releases/download/v${version}/kp_tools-v${version}.zip';
 
 const BUILD_DIR = path.join(ROOT, 'build');
-
-function tarPath() {
-  const sysTar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
-  return fs.existsSync(sysTar) ? sysTar : 'tar';
-}
 
 /** 递归复制（跳过指定名字的目录），与运行时的 mergeCopy 行为一致 */
 function copyTree(src, dest, skipNames = []) {

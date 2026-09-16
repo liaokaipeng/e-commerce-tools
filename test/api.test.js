@@ -55,7 +55,7 @@ async function run() {
     }
 
     console.log('  -- 页面静态资源 --');
-    for (const p of ['/', '/tiktok/', '/bidding/', '/bidding-cancel/', '/hotlisting-cancel/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/openapi/', '/monitor/', '/xlsx.full.min.js']) {
+    for (const p of ['/', '/tiktok/', '/bidding/', '/bidding-cancel/', '/hotlisting-cancel/', '/video/', '/video/?mode=cn', '/video/?mode=ph', '/openapi/', '/monitor/', '/compress/', '/xlsx.full.min.js']) {
       const r = await req('GET', p);
       t(`GET ${p} 返回 200`, r.status === 200, `status=${r.status}`);
     }
@@ -549,6 +549,57 @@ async function run() {
 
       const empty = await req('POST', '/api/cache/clear', {});
       t('POST /api/cache/clear 缺类别返回 400', empty.status === 400, `status=${empty.status}`);
+    }
+
+    console.log('  -- 视频压缩 API --');
+    {
+      const r = await req('GET', '/api/compress/status');
+      t('GET /api/compress/status 返回 200', r.status === 200, r.text);
+      const j = JSON.parse(r.text);
+      t('/api/compress/status 含 ffmpeg 状态与压缩默认值',
+        j.ok === true && j.ffmpeg && typeof j.ffmpeg.ready === 'boolean'
+        && typeof j.ffmpeg.binDir === 'string' && j.defaults.maxMB === 30 && j.defaults.maxSeconds === 60,
+        r.text);
+
+      // 扫描：真实临时目录（只 stat，不探测时长，故不需要 ffmpeg）
+      const scanDir = path.join(os.tmpdir(), `kp_api_compress_${process.pid}`);
+      fs.mkdirSync(path.join(scanDir, 'sub'), { recursive: true });
+      fs.mkdirSync(path.join(scanDir, 'compressed'), { recursive: true });
+      fs.writeFileSync(path.join(scanDir, 'a.mp4'), 'x');
+      fs.writeFileSync(path.join(scanDir, 'sub', 'b.mov'), 'x');
+      fs.writeFileSync(path.join(scanDir, 'compressed', 'old.mp4'), 'x');
+      try {
+        const sc = await req('POST', '/api/compress/scan', { dir: scanDir, opts: { maxMB: 30 } });
+        const sj = JSON.parse(sc.text);
+        t('POST /api/compress/scan 递归列出视频', sc.status === 200 && sj.ok === true && sj.files.length === 2, sc.text);
+        t('扫描不把自己产物目录 compressed/ 算进去', !sj.files.some((f) => f.rel.includes('compressed')), sc.text);
+      } finally {
+        try { fs.rmSync(scanDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
+      }
+
+      const emptyDir = await req('POST', '/api/compress/scan', {});
+      t('POST /api/compress/scan 缺 dir 返回 400', emptyDir.status === 400, `status=${emptyDir.status}`);
+      const badDir = await req('POST', '/api/compress/scan', { dir: path.join(os.tmpdir(), 'kp_no_such_dir_xyz') });
+      t('POST /api/compress/scan 目录不存在返回 400 且文案可读（不漏 Node 原始报错）',
+        badDir.status === 400 && !/ENOENT/.test(badDir.text), badDir.text);
+
+      const runBad = await req('POST', '/api/compress/run', { dir: path.join(os.tmpdir(), 'kp_no_such_dir_xyz') });
+      t('POST /api/compress/run 目录不存在返回 400', runBad.status === 400, `status=${runBad.status} ${runBad.text}`);
+
+      // 控制路由：统一由 lib/jobs 的 registerControlRoutes 提供
+      for (const action of ['pause', 'resume', 'cancel']) {
+        const c = await req('POST', `/api/compress/${action}`, { jobId: 'job_nope' });
+        t(`POST /api/compress/${action} 无效 jobId 返回 404`, c.status === 404, `status=${c.status} ${c.text}`);
+      }
+      {
+        const c = await rawPost('/api/compress/cancel', 'not-json');
+        t('POST /api/compress/cancel 非法 JSON 返回 400', c.status === 400, `status=${c.status}`);
+      }
+
+      const st = await req('POST', '/api/settings', { tool: 'compress', dir: os.tmpdir() });
+      t('POST /api/settings 接受 compress 工具', st.status === 200 && JSON.parse(st.text).ok === true, st.text);
+      const gl = JSON.parse((await req('GET', '/api/settings')).text);
+      t('GET /api/settings 的 defaults 含 compress', 'compress' in gl.defaults, JSON.stringify(gl.defaults));
     }
 
     console.log('  -- 404 兜底 --');

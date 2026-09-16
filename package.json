@@ -1,7 +1,7 @@
 {
   "name": "e-commerce-tools",
-  "version": "1.1.2",
-  "description": "电商工具箱：TikTok 下载 / Shopee 竞价导出 / 视频上传（单服务单端口，前端 Vue3 + Element Plus + Vite）",
+  "version": "1.2.0",
+  "description": "电商工具箱：Shopee（竞价导出 / 取消竞价 / 取消 Hot Listing / 视频上传 / 开放平台 / 监控大屏）、TikTok 视频下载、视频压缩（单服务单端口，前端 Vue3 + Element Plus + Vite）",
   "main": "server/main.js",
   "scripts": {
     "start": "node server/main.js",

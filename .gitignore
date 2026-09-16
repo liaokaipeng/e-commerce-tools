@@ -17,6 +17,10 @@ settings.json
 # 运行时生成的凭证/设置文件统一放在 server/data/
 server/data/
 
+# 视频压缩用的外部 ffmpeg / ffprobe（首次使用时由页面一键下载安装，约 180MB）
+# 既是外部二进制（非 Node 依赖），也不进发布包，因此不入库
+/bin/
+
 # 打包产物（build/*.zip）与更新前的数据备份（backup/data-<时间戳>）
 /build/
 /backup/

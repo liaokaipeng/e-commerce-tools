@@ -1,6 +1,7 @@
 <script setup>
 import { usePortalTabs } from './usePortalTabs.js';
 import { useAppUpdate } from './useAppUpdate.js';
+import { GROUP_ORDER } from './tabs.js';
 import UpdateDrawer from './UpdateDrawer.vue';
 
 // 各工具各用一个 iframe，首次访问时加载并常驻 DOM。
@@ -18,7 +19,7 @@ const { ver, upd, updateDrawer, checking, applying, steps, doneInfo, checkUpdate
         </span>
       </div>
       <nav>
-        <template v-for="g in ['Shopee', 'TikTok']" :key="g">
+        <template v-for="g in GROUP_ORDER" :key="g">
           <span class="g-label">{{ g }}</span>
           <button
             v-for="t in tabs.filter((x) => x.group === g)"

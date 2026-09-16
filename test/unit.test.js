@@ -1,7 +1,8 @@
 'use strict';
 // 单元测试入口：按主题拆分到 test/unit/ 子模块，逐个串行执行。
-// 覆盖：视频上传工具（video-utils/出站/取消）、TikTok、竞价系（导出/取消/取消注册）、开放平台、
-//      共享层（出站/长任务/重试/导出/路由分发/CORS）、监控（纯函数/引擎/存储）。
+// 覆盖：视频上传工具（video-utils/出站/取消）、TikTok、视频压缩（压缩计划/扫描过滤）、
+//       竞价系（导出/取消/取消注册）、开放平台、共享层（出站/长任务/重试/导出/路由分发/CORS）、
+//       监控（纯函数/引擎/存储）。
 //
 // 重要：监控数据目录必须先隔离到临时目录再 require 监控模块。
 // 否则 store 会读取 server/data/monitor/rules.json 里用户真实保存的规则覆盖，
@@ -17,6 +18,7 @@ process.env.MONITOR_DATA_DIR = UNIT_MONITOR_TMP;
 const modules = [
   require('./unit/video.test'),
   require('./unit/tiktok.test'),
+  require('./unit/compress.test'),
   require('./unit/bidding-cancel.test'),
   require('./unit/openapi.test'),
   require('./unit/shared-layer.test'),

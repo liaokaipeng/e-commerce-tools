@@ -4,14 +4,14 @@
 
 ## 仓库概览
 
-本仓库为**电商工具箱**：单服务、单端口（8765），前端为多页构建（8 个 HTML 入口 = 门户页 + 7 个功能页），门户页以常驻 iframe 按 Tab 切换，提供多个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 取消竞价 / Shopee 取消注册 Hot Listing / Shopee 视频批量上传）的本地 Node HTTP 服务。视频上传在门户页按站点拆「跨境」「本土」两个 Tab（共用 `/video/` 页面，`?mode=cn|ph` 固定站点）；「取消Hot Listing」Tab（`/hotlisting-cancel/`）按 SPU 批量取消注册已注册 SKU（复用竞价 Cookie）；「开放平台」Tab（`/openapi/`）负责 App 配置与店铺 OAuth 授权，为官方 Open API 功能统一提供登录与调用入口；「监控大屏」Tab（`/monitor/`）对已授权店铺定时巡检（订单/商品/健康/广告/资金/售后评价六域），P0/P1/P2 三级告警（仅在大屏展示，不接 IM）。
+本仓库为**电商工具箱**：单服务、单端口（8765），前端为多页构建（9 个 HTML 入口 = 门户页 + 8 个功能页），门户页以常驻 iframe 按 Tab 切换，侧栏按「Shopee / TikTok / 其他」三组展示，提供多个工具（TikTok 无水印下载 / Shopee 竞价导出 / Shopee 取消竞价 / Shopee 取消注册 Hot Listing / Shopee 视频批量上传 / 视频压缩）的本地 Node HTTP 服务。视频上传在门户页按站点拆「跨境」「本土」两个 Tab（共用 `/video/` 页面，`?mode=cn|ph` 固定站点）；「取消Hot Listing」Tab（`/hotlisting-cancel/`）按 SPU 批量取消注册已注册 SKU（复用竞价 Cookie）；「开放平台」Tab（`/openapi/`）负责 App 配置与店铺 OAuth 授权，为官方 Open API 功能统一提供登录与调用入口；「监控大屏」Tab（`/monitor/`）对已授权店铺定时巡检（订单/商品/健康/广告/资金/售后评价六域），P0/P1/P2 三级告警（仅在大屏展示，不接 IM）；「其他」组的「视频压缩」Tab（`/compress/`）是**唯一纯本地、不访问线上接口**的工具——递归压缩本地文件夹里的视频，依赖外部 ffmpeg（见约束 2 与 [docs/架构.md](docs/架构.md) §1.4）。
 
 ## 文档地图（先查再动手）
 
 | 文档 | 唯一负责的内容 |
 |---|---|
 | [README.md](README.md) | 仓库门面：功能一览、快速开始入口与文档导航；**只放指针，不复述细则**（不进发布包） |
-| [docs/架构.md](docs/架构.md) | 总体架构、目录结构、**API 路由总表**、取消类链路要点；**后端共享层约定（§3）与设计令牌细则（§4）的唯一权威** |
+| [docs/架构.md](docs/架构.md) | 总体架构、目录结构、**API 路由总表**、取消类与**视频压缩**链路要点；**后端共享层约定（§3）与设计令牌细则（§4）的唯一权威** |
 | [docs/视频上传链路.md](docs/视频上传链路.md) | 视频上传链路全部细节（站点 / 凭证 / 签名 / 流式 / Job / 取消 / 幂等） |
 | [docs/开放平台链路.md](docs/开放平台链路.md) | OAuth 流程、v2 签名、**token 刷新与失效语义的唯一权威** |
 | [docs/监控大屏实现.md](docs/监控大屏实现.md) | 监控按需采集调度、六域采集口径、金额换算、告警引擎与存储 |
@@ -25,6 +25,7 @@
 
 1. **极简零配置**，双击 `启动.bat` 即用，不加环境变量/额外安装步骤。
 2. **后端不新增运行时依赖**；前端新增依赖需同步更新 `frontend/package.json` 与 `docs/架构.md`。
+   - 例外说明：视频压缩需要外部 `ffmpeg`（Node 无法重编码）。它是**外部可执行文件而非 npm 依赖**，`package.json` 不变；由页面「下载并安装 ffmpeg」落到仓库根 `bin/`（gitignored，**不进发布包、不随更新覆盖**），也可由用户自备并被 `KP_FFMPEG` / PATH 探测到。细节见 [docs/架构.md](docs/架构.md) §1.4。
 3. **接口还原，不用 UI 自动化**：直接调 Shopee 内部 HTTP 接口，遵循抓包链路；不要改成 Playwright/Selenium。
 4. **端口固定 8765**，扩展与文档已硬编码。
 5. **凭证不入库**，日志不完整打印 Cookie/Authorization。
@@ -51,6 +52,7 @@
 - **监控大屏**：金额阈值一律按人民币配置与比较；规则阈值「留空 = 该级别不触发」必须用 `null` 传递（前端空值转 `null`，否则默认阈值会「复活」）；系统自检告警同样受规则 `enabled` 约束。详见 [docs/监控大屏实现.md](docs/监控大屏实现.md) §4。
 - **开放平台接口报参数错误时**（error_param / 格式错 / Wrong sign / error_unknown）：网关报错文案经常是误导性的，**先查 `docs/shopee_api_doc/` 核对参数名与必填项，再用最小参数组合逐变体验证**，不要按字面改——完整排查顺序见 [docs/开发指南.md](docs/开发指南.md) §5.1。
 - **版本与自更新**：`server/data/`（真实店铺授权）**绝不能进发布包，也绝不能被一键更新覆盖**；更新只按 `server/update.js` 的 `COPY_ITEMS` 白名单覆盖，落盘后必须重启才生效。流程与约束见 [docs/架构.md](docs/架构.md) §1.3。
+- **视频压缩**：**产物绝不写回源文件**（固定输出到 `compressed/` 并加 `_compressed` 后缀，扫描时反向跳过它们，否则连点两次会把产物再压一遍）；ffmpeg 退出码 0 **不等于**体积达标，必须重新 stat 产物、超标则降码率重试；取消要 `kill` 子进程并删掉半成品。细节见 [docs/架构.md](docs/架构.md) §1.4。
 
 ## 经验沉淀（踩坑即记）
 
@@ -65,13 +67,19 @@
 本机为 Windows，shell 行为与常规 Linux 环境不同；以下坑已反复踩过，直接按推荐做法执行：
 
 - **bash 与 PowerShell 都可能不可靠**：bash 的 `ls` / `grep` / `tail` / `rm` 常报 `command not found`（exit 127）；PowerShell 常只返回 exit 0、stdout 为空，`>` / `Out-File` 重定向会产出 UTF-16/GBK 乱码文件（Read 报 binary）。**要看命令输出就让命令自己写文件**（node 脚本里 `fs.writeFileSync(..., 'utf8')`），再用 Read 工具读。
-- **删文件别用 `rm`**：会被安全删除 shim 拦截（按累计删除数计，超 50 报 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`，批量清目录必失败）。单文件用 `[System.IO.File]::Delete('<绝对路径>')`，清整个目录用 `[System.IO.Directory]::Delete('<绝对路径>', $true)`，测试内零散删除走 `test/helpers.js` 的 `removeFile()`。
+- **删文件别用 `rm`**：会被安全删除 shim 拦截（按累计删除数计，超 50 报 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`，批量清目录必失败）。单文件用 `[System.IO.File]::Delete('<绝对路径>')`，清整个目录用 `[System.IO.Directory]::Delete('<绝对路径>', $true)`，测试内零散删除走 `test/helpers.js` 的 `removeFile()`。**清理一堆调试产物（`.tmp_*` 之类）走 node 脚本的 `fs.unlinkSync` / `fs.rmSync` 也不触发 shim**，比逐个调 PowerShell 省事。
 - **批量校验语法别写 for 循环**：bash 循环体内命令不可用时 exit code 仍是 0，错误被静默吞掉。写成 `node --check a.js && node --check b.js && echo OK`（`&&` 串联 + 末尾显式回显确认）。
 - **前端没有自动化测试**：`vite build` 只保证编译期正确，拦不住 prop 名写错 / 模板变量未定义这类运行时错误，改完前端要跑页面级验证（cdp-page-verify 技能）；本机 8765 常被用户已启动的服务占用，先探端口，别杀用户的服务。
 - **冒烟 `/monitor/` 前必须屏蔽 `POST /api/monitor/presence`**（CDP `Network.setBlockedURLs`）：该接口触发按需巡检，不屏蔽等于替用户对全部已授权店铺发起一轮真实采集；其余监控接口是只读的，照常请求即可。
+- **验证「未安装 ffmpeg」的首屏引导要换新进程**：`compress/ffmpeg.js` 把探测结果缓存在进程内，已在跑的实例会一直返回「已就绪」；把 `bin/*.exe` 临时改名后**必须重启服务（或换端口起新实例）**才看得到 warning 分支，验完记得改回来。
+- **双击 `启动.bat` 不会重启已在跑的服务**：脚本先 `netstat` 探 8765，占用则只开浏览器然后退出（这是设计使然，方便二次双击）。所以**改完后端要让新代码生效，必须先关掉旧窗口再双击**，否则会误判「改了没生效」；只是想验证新代码可以 `PORT=8899 node server/main.js` 另起一个实例，别去杀用户的进程。
+- **新增工具页后不重启的典型症状 = 该页 404、其它工具全正常**：`/xxx/` → `/xxx/index.html` 的映射表在 `lib/http-utils.js` 的 `DIR_INDEX`，旧进程内存里没有新条目，而静态文件本身已能从磁盘读到（所以直接访问 `/xxx/index.html` 反而 200，很容易误判成「文件没构建」）。看到这个组合先怀疑后端没重启，不要去查 dist。顺带：`/xxx`（无尾斜杠）对所有工具页一律 404，这是既有行为，不是 bug。
+- **BtbN / gyan.dev 的 ffmpeg 直连很慢或超时**（实测 gyan.dev 约 0.12MB/s、GitHub 直连挂断），走 `https://gh-proxy.com/` 前缀的加速代理可达 45MB/s——`compress/constants.js` 的 `FFMPEG_SOURCES` 已按此排序，别把直连地址提到前面。
 
 ## 测试
 
 `node test/test.js`（或 `npm test`）：单元（`test/unit.test.js` 编排 `test/unit/` 按主题拆分）+ 开放平台刷新链路（`test/openapi-refresh.test.js`，离线 mock 网关）+ 接口冒烟（`test/api.test.js`，临时端口 8865），**不访问真实站点**；session 凭证文件测试前备份、结束后原样恢复。
+
+压缩相关的单元用例（`test/unit/compress.test.js`）只测纯函数与扫描过滤，**不 spawn ffmpeg**（本机没装也能跑）；接口冒烟只验「参数校验 / 控制路由 / 扫描」这些不需要 ffmpeg 的分支。
 
 **测试假失败的三个坑（数据目录隔离 / 金额断言先钉汇率 / mock 网关类测试清 `require.cache`）最容易误改代码**，动手前先读 [docs/开发指南.md](docs/开发指南.md) §4 的对应说明；运行方式与新增用例同样见该节。定位后端 500 用 `KP_TEST_SERVER_LOG=1 node test/test.js`。

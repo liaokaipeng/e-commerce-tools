@@ -43,7 +43,7 @@ async function applyUpdate(emit) {
   if (!remote.sha256) throw new Error('清单缺少 sha256 校验值，为安全起见不自动更新');
 
   const probe = probeTar();
-  if (!probe.ok) throw new Error(probe.message);
+  if (!probe.ok) throw new Error(probe.message + '请点「下载安装包」手动覆盖更新。');
 
   const ts = stamp();
   const work = path.join(WORK_ROOT, ts);
