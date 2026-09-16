@@ -1,8 +1,8 @@
 {
   "version": "1.2.0",
-  "builtAt": "2026-09-16T03:54:40.583Z",
-  "commit": "ac2d1fd",
+  "builtAt": "2026-09-16T04:16:00.735Z",
+  "commit": "11116a2",
   "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.2.0/kp_tools-v1.2.0.zip",
-  "sha256": "c1624b85ace9d15fe291f3dd0d4850529ef8fee1a98bba6b5a335aa5763b9d48",
+  "sha256": "7e2a494b0d883445c440f12c942c1aa5a28c50d5e2825e1fce30dcb3b6ea6aba",
   "notes": "新增「其他」分组与「视频压缩」工具：给一个文件夹路径，递归把里面所有视频压到 ≤30MB 且 ≤60 秒（两个上限都能在页面上调整；超过 60 秒可选「截取前 N 秒」或「整段加速」两种处理方式）。产物写入源文件夹下的 compressed/ 子目录并保持原有目录层级，绝不覆盖源文件，重复执行也不会把上次的产物再压一遍。已同时在上限内的视频会整条跳过，不重新编码。首次使用需在页面上点一次「下载并安装 ffmpeg」（约 180MB，走加速代理，不会随本包分发）。另修一处启动体验问题：更新后请重新运行一次 启动.bat，让后端加载新路由。"
 }
