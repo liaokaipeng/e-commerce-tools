@@ -27,6 +27,7 @@ export function useCompressJob({ log }) {
   const progress = ref({ done: 0, ok: 0, skip: 0, fail: 0, total: 0 });
   const savedBytes = ref(0);
   const outDirShown = ref('');
+  const overwriteMode = ref(false);
 
   const progressPct = computed(() => {
     const p = progress.value;
@@ -95,6 +96,7 @@ export function useCompressJob({ log }) {
     paused.value = false;
     savedBytes.value = 0;
     outDirShown.value = '';
+    overwriteMode.value = !!body.overwrite;
     progress.value = { done: 0, ok: 0, skip: 0, fail: 0, total: rows.value.length };
 
     let sawEnd = false;
@@ -148,15 +150,20 @@ export function useCompressJob({ log }) {
               savedBytes.value += Math.max(0, (ev.sizeBefore || 0) - (ev.sizeAfter || 0));
               const ratio = ratioText(ev.sizeBefore, ev.sizeAfter);
               const extra = ev.speedRatio > 1 ? `，${ev.speedRatio.toFixed(2)}× 加速` : '';
+              // 覆盖模式：ev.overwritten 为真才是真的替换了原文件；否则是「复核未通过、已保留原文件」
+              const overwriteTip = ev.overwritten ? '，已覆盖原文件' : '';
+              const kept = overwriteMode.value && !ev.overwritten;
               if (r) {
                 r.status = 'ok';
                 r.percent = 100;
                 r.detail = `${formatBytes(ev.sizeBefore)} → ${formatBytes(ev.sizeAfter)}（${ratio}），`
-                  + `${formatDuration(ev.durationBefore)} → ${formatDuration(ev.durationAfter)}${extra}`;
+                  + `${formatDuration(ev.durationBefore)} → ${formatDuration(ev.durationAfter)}${extra}${overwriteTip}`
+                  + (kept ? `（${ev.reason || '已保留原文件'}）` : '');
               }
               log(`✓ ${nameOf(r, ev)} 压缩完成：${formatBytes(ev.sizeBefore)} → ${formatBytes(ev.sizeAfter)}（${ratio}），`
-                + `时长 ${formatDuration(ev.durationBefore)} → ${formatDuration(ev.durationAfter)}${extra}`
+                + `时长 ${formatDuration(ev.durationBefore)} → ${formatDuration(ev.durationAfter)}${extra}${overwriteTip}`
                 + `${ev.withinLimit === false ? ' ⚠ 仍超出体积上限' : ''}`, ev.withinLimit === false ? 'err' : 'ok');
+              if (kept) log(`⚠ ${nameOf(r, ev)} ${ev.reason || '未覆盖，已保留原文件'}`, 'warn');
             }
             break;
           }

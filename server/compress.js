@@ -19,7 +19,6 @@ const fs = require('fs');
 const path = require('path');
 
 const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
-const { getDefault } = require('./lib/settings');
 const jobs = require('./lib/jobs');
 const { DEFAULTS } = require('./compress/constants');
 const ffmpeg = require('./compress/ffmpeg');
@@ -45,7 +44,7 @@ function checkDir(raw) {
   return { ok: true, dir };
 }
 
-/** GET /api/compress/status：ffmpeg 可用性 + 默认目录 + 是否已有任务在跑 */
+/** GET /api/compress/status：ffmpeg 可用性 + 压缩默认值 + 是否已有任务在跑 */
 function handleStatus(req, res) {
   const st = ffmpeg.resolve();
   sendJson(res, 200, {
@@ -58,7 +57,6 @@ function handleStatus(req, res) {
       binDir: ffmpeg.binDir(),
     },
     defaults: DEFAULTS,
-    defaultDir: getDefault('compress'),
     running: isRunning(),
     maxFiles: MAX_FILES,
   });
@@ -148,24 +146,33 @@ async function handleRun(req, res) {
     return;
   }
 
-  // 输出目录：默认在源目录下建 compressed/，保持相对层级（子目录结构在 job 侧按需展开）
-  const outDir = String(body.outDir || '').trim() || path.join(scanned.root, DEFAULTS.outSubdir);
-  try {
-    fs.mkdirSync(outDir, { recursive: true });
-  } catch (e) {
-    sendJson(res, 400, { ok: false, message: '无法创建输出目录：' + e.message });
-    return;
+  // 输出位置：留空 = 与源文件同目录（产物加后缀区分，绝不覆盖源文件）；指定目录则保持相对层级。
+  // 覆盖模式（overwrite）忽略输出目录，直接写回源文件（由 run.js 先写临时文件、复核后再替换）。
+  const overwrite = !!body.overwrite;
+  const customOutDir = String(body.outDir || '').trim();
+  if (!overwrite && customOutDir) {
+    try {
+      fs.mkdirSync(customOutDir, { recursive: true });
+    } catch (e) {
+      sendJson(res, 400, { ok: false, message: '无法创建输出目录：' + e.message });
+      return;
+    }
   }
 
-  // 保持源目录的相对层级，避免不同子目录里的同名文件互相覆盖
   const files = scanned.files.map((f) => {
-    const sub = path.dirname(f.rel);
-    return Object.assign({}, f, {
-      outDir: sub && sub !== '.' ? path.join(outDir, sub) : outDir,
-    });
+    let outDir;
+    if (overwrite || !customOutDir) {
+      outDir = path.dirname(f.path); // 留空 / 覆盖：与源文件同目录
+    } else {
+      // 指定输出目录时保持源目录的相对层级，避免不同子目录里的同名文件互相覆盖
+      const sub = path.dirname(f.rel);
+      outDir = sub && sub !== '.' ? path.join(customOutDir, sub) : customOutDir;
+    }
+    return Object.assign({}, f, { outDir, overwrite });
   });
 
-  runBatch(res, { files, root: scanned.root, outDir, opts });
+  const outDirShown = overwrite || !customOutDir ? scanned.root : customOutDir;
+  runBatch(res, { files, root: scanned.root, outDir: outDirShown, opts });
 }
 
 /** 注册路由 */

@@ -24,11 +24,9 @@ function normalizeOpts(raw = {}) {
     if (!Number.isFinite(n)) return def;
     return Math.min(max, Math.max(min, n));
   };
-  const mode = raw.overMode === 'speed' ? 'speed' : 'trim';
   return {
     maxMB: num(raw.maxMB, DEFAULTS.maxMB, 1, 4096),
     maxSeconds: num(raw.maxSeconds, DEFAULTS.maxSeconds, 1, 3600),
-    overMode: mode,
     maxLongSide: num(raw.maxLongSide, DEFAULTS.maxLongSide, 0, 7680),
   };
 }
@@ -67,10 +65,8 @@ function planFor(info, opts) {
     return { skip: true, reason: '已达标（体积与时长都在上限内）', outDuration: info.duration };
   }
 
-  // 变速模式把整段加速到 maxSeconds（保留全部内容）；截取模式只留前 maxSeconds 秒
-  const speedRatio = opts.overMode === 'speed' && info.duration > opts.maxSeconds
-    ? info.duration / opts.maxSeconds
-    : 1;
+  // 超出时长上限一律「整段加速到上限」（保留全部内容，不截取前 N 秒）
+  const speedRatio = info.duration > opts.maxSeconds ? info.duration / opts.maxSeconds : 1;
   const outDuration = speedRatio > 1 ? opts.maxSeconds : Math.min(info.duration, opts.maxSeconds);
 
   const hasAudio = !!info.hasAudio;

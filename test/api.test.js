@@ -596,10 +596,11 @@ async function run() {
         t('POST /api/compress/cancel 非法 JSON 返回 400', c.status === 400, `status=${c.status}`);
       }
 
+      // 压缩页不记住文件夹：compress 不再是允许持久化的工具
       const st = await req('POST', '/api/settings', { tool: 'compress', dir: os.tmpdir() });
-      t('POST /api/settings 接受 compress 工具', st.status === 200 && JSON.parse(st.text).ok === true, st.text);
+      t('POST /api/settings 拒绝 compress（压缩页不记住文件夹）', st.status === 400, st.text);
       const gl = JSON.parse((await req('GET', '/api/settings')).text);
-      t('GET /api/settings 的 defaults 含 compress', 'compress' in gl.defaults, JSON.stringify(gl.defaults));
+      t('GET /api/settings 的 defaults 不含 compress', !('compress' in gl.defaults), JSON.stringify(gl.defaults));
     }
 
     console.log('  -- 404 兜底 --');

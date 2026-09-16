@@ -11,10 +11,8 @@ const VIDEO_EXT = new Set([
 /** 压缩目标默认值（前端可改，后端按请求体覆盖；用户需求即 30MB / 60 秒） */
 const DEFAULTS = {
   maxMB: 30,          // 单个文件体积上限（MB）
-  maxSeconds: 60,     // 单个文件时长上限（秒）
-  overMode: 'trim',   // 超过时长上限时：trim=截取前 N 秒 | speed=整段加速到 N 秒
+  maxSeconds: 60,     // 单个文件时长上限（秒）；超出时长上限一律整段加速到该值（不截取）
   maxLongSide: 1280,  // 长边上限（像素），0 = 不缩放；低码率下先缩分辨率比硬压糊更耐看
-  outSubdir: 'compressed', // 未单独指定输出目录时，在源目录下建的子目录名
 };
 
 /** 压缩目标体积的可用比例：mp4 封装 + faststart 索引会占掉一点，留 4% 余量避免刚好越界 */
@@ -30,11 +28,17 @@ const MIN_VIDEO_KBPS = 150;
 const RETRY_TIMES = 2;
 const RETRY_FACTOR = 0.82;
 
-/** 跳过的目录名：产物目录自身（避免二次压缩）与常见系统目录 */
+/** 跳过的目录名：旧版产物目录（避免把历史产物再压一遍）与常见系统目录 */
 const SKIP_DIRS = new Set(['compressed', 'node_modules', '$RECYCLE.BIN', 'System Volume Information']);
 
-/** 输出文件名后缀：与源文件区分，避免误覆盖 */
-const OUT_SUFFIX = '_compressed';
+/** 输出文件名后缀：默认与源文件同目录，靠后缀区分、绝不误覆盖源文件 */
+const OUT_SUFFIX = '-compressed';
+
+/** 历史产物后缀（旧版输出到 compressed/ 且用下划线）：扫描时同样跳过，避免被再压一遍 */
+const LEGACY_OUT_SUFFIX = '_compressed';
+
+/** 覆盖模式的临时文件前缀：先写它、复核通过后再替换原文件；扫描时跳过，不留残渣 */
+const TEMP_PREFIX = '.kp-compress-tmp-';
 
 /**
  * ffmpeg 获取途径（按顺序尝试，前一个失败就换下一个）。
@@ -73,6 +77,8 @@ module.exports = {
   RETRY_FACTOR,
   SKIP_DIRS,
   OUT_SUFFIX,
+  LEGACY_OUT_SUFFIX,
+  TEMP_PREFIX,
   FFMPEG_SOURCES,
   FFMPEG_FILES,
 };

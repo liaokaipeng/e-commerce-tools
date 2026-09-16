@@ -11,16 +11,18 @@ import { formatBytes, formatDuration, ROW_TAG, ROW_TEXT } from './compress-forma
 
 const { logLines, log, clear: clearLog } = useLog();
 const env = useCompressEnv({ log });
-const { dir, loadSettings, setDefaultDir, openDir, openPath } = useDirSettings('compress', log);
+// 压缩页不记住文件夹：只借用目录输入与「打开目录」，不读写 settings.json
+const { dir, openDir, openPath } = useDirSettings('compress', log);
 
 const job = useCompressJob({ log });
 
-// 源文件夹（dir 复用「默认目录」持久化：下次打开自动回显上次用的文件夹）
+// 源文件夹每次打开都为空（不持久化）
 const outDir = ref('');
+// 是否用压缩结果直接覆盖原文件（默认关闭：另存为名字带后缀的新文件）
+const overwrite = ref(false);
 // 压缩目标（默认值取自后端，保证与后端 DEFAULTS 单一来源）
 const maxMB = ref(30);
 const maxSeconds = ref(60);
-const overMode = ref('trim');
 const maxLongSide = ref(1280);
 
 const SIDE_OPTIONS = [
@@ -34,25 +36,23 @@ const SIDE_OPTIONS = [
 const opts = computed(() => ({
   maxMB: maxMB.value,
   maxSeconds: maxSeconds.value,
-  overMode: overMode.value,
   maxLongSide: maxLongSide.value,
 }));
 
 const canScan = computed(() => !!dir.value.trim() && !job.scanning.value && !job.running.value);
 const canRun = computed(() => env.ready.value && job.rows.value.length > 0 && !job.running.value);
 
-/** 实际输出目录（展示用；留空即「源文件夹/compressed」） */
-const effectiveOutDir = computed(
-  () => outDir.value.trim() || `${dir.value.trim().replace(/[\\/]+$/, '')}\\${env.defaults.value.outSubdir || 'compressed'}`,
-);
+/** 实际输出位置（展示用）：覆盖模式即源文件原处；留空即与源文件同目录 */
+const effectiveOutDir = computed(() => {
+  if (overwrite.value) return dir.value.trim();
+  return outDir.value.trim() || dir.value.trim().replace(/[\\/]+$/, '');
+});
 
 onMounted(async () => {
   await env.load();
   if (env.defaults.value.maxMB) maxMB.value = env.defaults.value.maxMB;
   if (env.defaults.value.maxSeconds) maxSeconds.value = env.defaults.value.maxSeconds;
-  if (env.defaults.value.overMode) overMode.value = env.defaults.value.overMode;
   if (env.defaults.value.maxLongSide !== undefined) maxLongSide.value = env.defaults.value.maxLongSide;
-  await loadSettings();
 });
 
 // 换文件夹后旧的扫描结果就不再对应，直接清掉，避免「拿 A 的列表压 B」
@@ -69,7 +69,12 @@ function doScan() {
 }
 
 function doRun() {
-  job.start({ dir: dir.value.trim(), outDir: outDir.value.trim(), opts: opts.value });
+  job.start({
+    dir: dir.value.trim(),
+    outDir: outDir.value.trim(),
+    overwrite: overwrite.value,
+    opts: opts.value,
+  });
 }
 </script>
 
@@ -111,20 +116,24 @@ function doRun() {
         <DirRow
           v-model:dir="dir"
           label="源文件夹（必须已存在）"
-          remember-text="记住此文件夹"
+          :show-remember="false"
           placeholder="例如 D:\videos\待压缩"
-          @set-default="setDefaultDir"
           @open="openDir"
         />
         <div class="dir-row out-row">
-          <el-input v-model="outDir" class="dir-field" placeholder="留空 = 源文件夹下的 compressed 子目录">
+          <el-input
+            v-model="outDir"
+            class="dir-field"
+            :disabled="overwrite"
+            placeholder="留空 = 与源文件同目录"
+          >
             <template #prepend>输出目录（可选）</template>
           </el-input>
           <el-button @click="openPath(effectiveOutDir, '请先选择源文件夹')">打开输出目录</el-button>
         </div>
         <div class="hint">
-          会递归处理该文件夹下所有子目录里的视频；原文件不会被改动或删除，
-          压缩结果按原有的子目录结构写到「{{ effectiveOutDir }}」，文件名加 <code>_compressed</code> 后缀。
+          会递归处理该文件夹下所有子目录里的视频。默认<strong>不改动原文件</strong>：产物放在源文件旁边，
+          文件名加 <code>-compressed</code> 后缀（例如 <code>产品视频.mp4</code> → <code>产品视频-compressed.mp4</code>）。
         </div>
       </el-card>
 
@@ -142,11 +151,12 @@ function doRun() {
             <span class="unit">秒</span>
           </div>
           <div class="opt wide">
-            <label>超过时长上限时怎么处理</label>
-            <el-radio-group v-model="overMode">
-              <el-radio-button value="trim">截取前 {{ maxSeconds }} 秒</el-radio-button>
-              <el-radio-button value="speed">整段加速到 {{ maxSeconds }} 秒</el-radio-button>
+            <label>输出方式</label>
+            <el-radio-group v-model="overwrite">
+              <el-radio-button :value="false">另存为（文件名加 -compressed 后缀）</el-radio-button>
+              <el-radio-button :value="true">直接覆盖原文件</el-radio-button>
             </el-radio-group>
+            <span v-if="overwrite" class="warn-tip">覆盖后原文件不可恢复，建议先备份</span>
           </div>
           <div class="opt wide">
             <label>分辨率上限</label>
@@ -156,7 +166,8 @@ function doRun() {
           </div>
         </div>
         <div class="hint">
-          已经同时满足「体积 ≤ {{ maxMB }}MB 且时长 ≤ {{ maxSeconds }} 秒」的视频会被自动跳过，不做二次压缩（避免画质白白损失）。
+          超过时长上限（{{ maxSeconds }} 秒）的视频会<strong>整段加速</strong>到上限（内容全保留，不截取）；
+          已经同时满足「体积 ≤ {{ maxMB }}MB 且时长 ≤ {{ maxSeconds }} 秒」的视频会被自动跳过，不做二次压缩。
         </div>
       </el-card>
 
@@ -264,6 +275,7 @@ function doRun() {
 .opt.wide { grid-column: 1 / -1; }
 .opt label { color: var(--text-2); font-size: var(--fs-sm); white-space: nowrap; }
 .unit { color: var(--text-3); font-size: var(--fs-sm); }
+.warn-tip { color: var(--danger); font-size: var(--fs-sm); font-weight: 600; }
 .side-select { width: 260px; }
 .exec-actions { margin-bottom: var(--sp-3); }
 .progress-line {

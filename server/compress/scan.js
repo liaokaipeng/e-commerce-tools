@@ -3,21 +3,26 @@
  * 递归扫描：从一个文件夹里找出所有视频文件（含子目录）。
  *
  * 两道自我保护：
- *   1. 跳过产物目录（默认 `compressed/`）与已带 OUT_SUFFIX 的文件——否则第二次执行会把
- *      上次的产物再压一遍，按钮点几次就越压越小；
+ *   1. 跳过已带产物后缀（`-compressed` / 旧版 `_compressed`）的文件、覆盖模式的临时文件与旧版
+ *      产物目录 `compressed/`——否则第二次执行会把上次的产物再压一遍，按钮点几次就越压越小；
  *   2. 记录 realpath 防止软链接成环把扫描卡死。
  * 上限 MAX_FILES 只为避免误选整块盘时刷爆浏览器（本地工具场景，正常目录远达不到）。
  */
 const fs = require('fs');
 const path = require('path');
 
-const { VIDEO_EXT, SKIP_DIRS, OUT_SUFFIX } = require('./constants');
+const {
+  VIDEO_EXT, SKIP_DIRS, OUT_SUFFIX, LEGACY_OUT_SUFFIX, TEMP_PREFIX,
+} = require('./constants');
 
 const MAX_FILES = 5000;
 
+/** 产物文件名匹配（含旧版下划线后缀，避免历史产物被再压一遍） */
+const OUTPUT_RE = new RegExp(`(?:${OUT_SUFFIX}|${LEGACY_OUT_SUFFIX})\\.[^.]+$`, 'i');
+
 /** 是否为产物文件（上次压缩生成的，跳过以免重复压缩） */
 function isOwnOutput(name) {
-  return new RegExp(`${OUT_SUFFIX}\\.[^.]+$`, 'i').test(name);
+  return OUTPUT_RE.test(name);
 }
 
 /**
@@ -66,6 +71,7 @@ function scanVideos(rootDir) {
         continue;
       }
       if (!e.isFile()) continue;
+      if (e.name.startsWith(TEMP_PREFIX)) continue; // 覆盖模式写盘中的临时文件
       if (!VIDEO_EXT.has(path.extname(e.name).toLowerCase())) continue;
       if (isOwnOutput(e.name)) continue;
 

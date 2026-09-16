@@ -2,10 +2,12 @@
 /**
  * 单文件压缩执行体：探测 → 算计划 → 跑 ffmpeg → 校验产物，超标则降码率重试。
  *
- * 三条硬约束：
- *   - **绝不写回源文件**：产物固定落在输出目录，名字带 OUT_SUFFIX，压缩失败时删掉半成品；
+ * 四条硬约束：
+ *   - **默认绝不写回源文件**：产物落在输出目录（留空即源文件同目录）并带 OUT_SUFFIX；
+ *     只有显式 overwrite=true 时才覆盖原文件，且必须先写临时文件、复核通过后再替换（原文件始终完好到最后一步）；
  *   - **可中断**：外部 shouldAbort() 为真时立刻 kill 掉 ffmpeg 子进程（否则取消要等整个视频编完）；
- *   - **产物必须复核**：ffmpeg 退出码为 0 不代表体积达标，编完一定重新 stat，超标就降档重来。
+ *   - **产物必须复核**：ffmpeg 退出码为 0 不代表体积达标，编完一定重新 stat，超标就降档重来；
+ *   - **失败不留半成品**：中断或报错时删掉写了一半的文件（覆盖模式下只删临时文件）。
  */
 const fs = require('fs');
 const path = require('path');
@@ -14,7 +16,7 @@ const { spawn } = require('child_process');
 const { resolve } = require('./ffmpeg');
 const { probe } = require('./probe');
 const { normalizeOpts, planFor, lowerBitrate, buildArgs, MB } = require('./plan');
-const { RETRY_TIMES, OUT_SUFFIX } = require('./constants');
+const { RETRY_TIMES, OUT_SUFFIX, TEMP_PREFIX } = require('./constants');
 
 /** 取消/中断时抛出，调用方据此区别于「压缩失败」 */
 class AbortedError extends Error {
@@ -24,7 +26,7 @@ class AbortedError extends Error {
   }
 }
 
-/** 产物文件名：源名去掉扩展名 + _compressed.mp4（统一转 mp4，便于平台侧识别） */
+/** 产物文件名：源名去掉扩展名 + 后缀 + .mp4（统一转 mp4，便于平台侧识别） */
 function outputName(sourceName) {
   const base = path.basename(sourceName, path.extname(sourceName));
   return base + OUT_SUFFIX + '.mp4';
@@ -90,14 +92,15 @@ function runFfmpeg(args, { onProgress, shouldAbort }) {
  * 压缩单个视频。
  * @param {object} o
  * @param {string} o.input 源文件绝对路径
- * @param {string} o.outDir 输出目录（不存在自动创建）
+ * @param {string} o.outDir 输出目录（不存在自动创建；覆盖模式下即源文件所在目录）
  * @param {object} o.opts 压缩选项（原始值，内部会归一化）
+ * @param {boolean} [o.overwrite] 是否用压缩结果直接覆盖原文件（默认 false，即另存为加后缀的新文件）
  * @param {(info: object) => void} [o.onProbe] 探测完成回调（上报时长/分辨率）
  * @param {(pct: number) => void} [o.onProgress] 进度回调（0~100）
  * @param {() => boolean} [o.shouldAbort] 中断判断
- * @returns {Promise<object>} 处理结果（含 skipped / sizeBefore / sizeAfter / attempts 等）
+ * @returns {Promise<object>} 处理结果（含 skipped / overwritten / sizeBefore / sizeAfter / attempts 等）
  */
-async function compressOne({ input, outDir, opts, onProbe, onProgress, shouldAbort = () => false }) {
+async function compressOne({ input, outDir, opts, overwrite = false, onProbe, onProgress, shouldAbort = () => false }) {
   const o = normalizeOpts(opts);
   if (shouldAbort()) throw new AbortedError();
 
@@ -109,6 +112,7 @@ async function compressOne({ input, outDir, opts, onProbe, onProgress, shouldAbo
     return {
       skipped: true,
       reason: plan.reason,
+      overwritten: false,
       sizeBefore: info.size,
       durationBefore: info.duration,
       outPath: null,
@@ -116,7 +120,14 @@ async function compressOne({ input, outDir, opts, onProbe, onProgress, shouldAbo
   }
 
   fs.mkdirSync(outDir, { recursive: true });
-  const outPath = path.join(outDir, outputName(input));
+  // 覆盖模式：产物与源文件同名（同样统一转 mp4）。ffmpeg 不能读写同一个路径，
+  // 故先写临时文件，编完复核后再替换原文件——替换前原文件始终完好，失败也不丢数据。
+  const finalPath = overwrite
+    ? path.join(outDir, path.basename(input, path.extname(input)) + '.mp4')
+    : path.join(outDir, outputName(input));
+  const workPath = overwrite
+    ? path.join(outDir, TEMP_PREFIX + process.pid + '-' + Date.now() + '.mp4')
+    : finalPath;
   const maxBytes = o.maxMB * MB;
 
   let attempt = 0;
@@ -125,8 +136,11 @@ async function compressOne({ input, outDir, opts, onProbe, onProgress, shouldAbo
   // 首次按算出的码率编；产物超标就降一档重来（最多 RETRY_TIMES 次）
   for (;;) {
     attempt += 1;
-    if (shouldAbort()) throw new AbortedError();
-    const args = buildArgs({ input, output: outPath, plan: cur });
+    if (shouldAbort()) {
+      if (overwrite) removeQuietly(workPath); // 覆盖模式的中间产物是临时文件，顺手清掉
+      throw new AbortedError();
+    }
+    const args = buildArgs({ input, output: workPath, plan: cur });
     try {
       await runFfmpeg(args, {
         shouldAbort,
@@ -137,36 +151,60 @@ async function compressOne({ input, outDir, opts, onProbe, onProgress, shouldAbo
         },
       });
     } catch (e) {
-      // 中断或报错时 ffmpeg 已经写了一个不完整的 mp4：留着会被误当成压缩好的成品，直接删掉
-      removeQuietly(outPath);
+      // 中断或报错时 ffmpeg 已经写了一个不完整的文件：留着会被误当成成品，直接删掉
+      removeQuietly(workPath);
       throw e;
     }
 
-    lastSize = fs.existsSync(outPath) ? fs.statSync(outPath).size : 0;
+    lastSize = fs.existsSync(workPath) ? fs.statSync(workPath).size : 0;
     if (lastSize > 0 && lastSize <= maxBytes) break;
     if (attempt > RETRY_TIMES) break; // 降到底仍超标，如实上报，不再无限重试
     cur = lowerBitrate(cur);
   }
 
+  // 覆盖模式：复核产物确实变小了才替换原文件，否则保留原文件（避免用更大的文件盖掉原片）
+  let overwritten = false;
+  let reason = '';
+  if (overwrite) {
+    const samePath = path.resolve(finalPath) === path.resolve(input);
+    const targetTaken = !samePath && fs.existsSync(finalPath);
+    if (lastSize > 0 && lastSize < info.size && !targetTaken) {
+      removeQuietly(finalPath); // Windows 上 rename 不能覆盖已存在文件，先删
+      fs.renameSync(workPath, finalPath);
+      if (!samePath) removeQuietly(input); // 源文件是别的扩展名（如 .mov），产物已就位再删原片
+      overwritten = true;
+    } else {
+      removeQuietly(workPath);
+      reason = targetTaken ? '同名 mp4 已存在，已保留原文件' : '压缩后未变小，已保留原文件';
+    }
+  }
+
   // 产物复核：以实际文件为准，ffmpeg 报的时长在高倍速场景下会有零点几秒偏差
+  const producedPath = overwrite ? (overwritten ? finalPath : null) : finalPath;
   let outInfo = null;
-  try { outInfo = probe(outPath); } catch { /* 探测失败不影响主流程，前端按文件大小判断 */ }
+  if (producedPath) {
+    try { outInfo = probe(producedPath); } catch { /* 探测失败不影响主流程，前端按文件大小判断 */ }
+  }
 
   return {
     skipped: false,
-    outPath,
+    overwritten,
+    reason,
+    outPath: producedPath,
     attempts: attempt,
     sizeBefore: info.size,
-    sizeAfter: lastSize,
+    sizeAfter: overwrite && !overwritten ? info.size : lastSize,
     durationBefore: info.duration,
-    durationAfter: outInfo ? outInfo.duration : plan.outDuration,
+    durationAfter: overwrite && !overwritten
+      ? info.duration
+      : (outInfo ? outInfo.duration : plan.outDuration),
     width: info.width,
     height: info.height,
     overSize: !!plan.overSize,
     overTime: !!plan.overTime,
     speedRatio: plan.speedRatio,
     targetKbps: cur.videoKbps,
-    withinLimit: lastSize <= maxBytes,
+    withinLimit: overwrite && !overwritten ? true : lastSize <= maxBytes,
   };
 }
 

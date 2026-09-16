@@ -62,9 +62,10 @@ function runBatch(res, payload) {
       try {
         const r = await compressOne({
           input: unit.path,
-          // 每个文件自带输出目录（保持源目录相对层级），缺省才回落到任务级 outDir
+          // 每个文件自带输出目录（留空=源目录，指定目录则保持相对层级），缺省才回落到任务级 outDir
           outDir: unit.outDir || outDir,
           opts,
+          overwrite: !!unit.overwrite,
           shouldAbort: aborted,
           onProbe: (info) => ctx.emit({
             type: 'file-probe',
@@ -84,6 +85,7 @@ function runBatch(res, payload) {
           type: 'file-done',
           index: unit.index,
           skipped: r.skipped,
+          overwritten: !!r.overwritten,
           reason: r.reason || '',
           outPath: r.outPath,
           sizeBefore: r.sizeBefore,

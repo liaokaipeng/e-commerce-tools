@@ -11,6 +11,8 @@ defineProps({
   label: { type: String, default: '保存目录（不存在将自动创建）' },
   /** 「设为默认目录」按钮文案 */
   rememberText: { type: String, default: '设为默认目录' },
+  /** 是否显示「设为默认目录」按钮（压缩页不记住文件夹，传 false） */
+  showRemember: { type: Boolean, default: true },
 });
 const emit = defineEmits(['update:dir', 'set-default', 'open']);
 
@@ -32,7 +34,7 @@ function setDir(v) {
       <template #prepend>{{ label }}</template>
     </el-input>
     <el-button @click="visible = true">浏览</el-button>
-    <el-button @click="emit('set-default', dir)">{{ rememberText }}</el-button>
+    <el-button v-if="showRemember" @click="emit('set-default', dir)">{{ rememberText }}</el-button>
     <el-button @click="emit('open')">打开目录</el-button>
   </div>
   <DirPicker v-model="visible" @select="setDir" />
