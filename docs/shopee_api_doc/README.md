@@ -26,6 +26,7 @@ shopee_api_doc/
     ├── guide_list_en.json    #   指南目录（英文站）
     ├── guide_list_cn.json    #   指南目录（中文站）
     ├── doc_module_v2.json    #   API v2 模块树（全部模块与接口清单）
+    ├── api_meta_v2.json      #   接口元数据：每个接口的方法/必填参数/分页键/错误码/限流（由 fetch-docs.js 生成）
     └── api_detail_* / guide_detail_*   # 部分接口/指南正文详情快照（按需抓取）
 ```
 
@@ -38,6 +39,7 @@ shopee_api_doc/
 | 开发者指南目录（英文站） | `https://open.shopee.com/opservice/api/v1/developer_guide/list?language_code=en` |
 | 开发者指南目录（中文站） | `https://open.shopee.cn/opservice/api/v1/developer_guide/list?language_code=zh-Hans` |
 | API v2 模块树 | `https://open.shopee.cn/opservice/api/v1/doc/module/?version=2` |
+| 单个接口详情（元数据来源） | `https://open.shopee.cn/opservice/api/v1/doc/api/?api_id={条目编号}&version=2`（免鉴权；`api_id` 即模块树里 `items[].id`） |
 
 页面链接规律（供后续开发查阅时使用）：
 
@@ -54,18 +56,23 @@ shopee_api_doc/
 ## 如何更新/扩充
 
 ```bash
-# 在 shopee_api_doc 目录下重新抓取并生成两份中文目录
+# 在 shopee_api_doc 目录下重新抓取并生成两份中文目录 + 接口元数据
 node _tools/fetch-docs.js
+# 只刷新接口元数据（读现有模块树快照，不动目录与其它快照）
+node _tools/fetch-docs.js --meta-only
+# 只抓目录、跳过接口元数据（省 441 次详情请求）
+node _tools/fetch-docs.js --no-meta
 # 仅用 _raw/ 快照重渲染（不访问网络；改了生成格式后用它刷新）
 node _tools/fetch-docs.js --local
 ```
 
 - 官方更新文档后，重新运行脚本即可刷新目录与 `_raw/` 快照。
+- 接口元数据 `_raw/api_meta_v2.json` 逐个接口抓详情（并发 8，失败的接口跳过不影响其它），是 `shopee_skill` 判定 HTTP 方法与校验必填参数的依据。
 - 如需补充新的中文译名，编辑 `_tools/fetch-docs.js` 顶部的 `ZH_MODULE`、`ZH_OVERVIEW_ITEM`、`ZH_GUIDE_CATEGORY`、`ZH_GUIDE_OVERRIDE` 映射表后重新运行。
 
 ## 注意事项
 
 - **翻译以官方为准**：† 标记的译名为本目录补充，仅作定位参考；开发对接时请以官方英文页面为准。
-- **接口目录 ≠ 接口正文**：本目录提供的是「目录索引」（名称/编号，官方链接按规律拼接），单个接口的详细参数说明在官方页面查看（页面为动态加载，正文无法直接离线抓取到本目录）。
+- **接口目录 ≠ 接口正文**：两份 README 是「目录索引」（名称/编号，官方链接按规律拼接）；单个接口的**方法、请求参数（名称/类型/必填/示例/简述）、分页键、错误码、限流**已离线抓进 `_raw/api_meta_v2.json`（`doc/api` 详情接口），但完整说明与响应结构仍以官方页面为准。
 - **数据快照**：`_raw/` 内为抓取当日的原始 JSON，可用于比对官方变更。
 - **访问来源**：以上数据接口为官方站点前端同源接口，仅供内部查阅与开发参考，请勿用于其它用途。

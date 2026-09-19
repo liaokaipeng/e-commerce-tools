@@ -1,13 +1,16 @@
 /**
  * Shopee 开放平台整站目录抓取/生成脚本（零依赖，Node 内置模块）
  *
- * 生成两份中文目录文档：
+ * 生成三份产物：
  *   - developer-guide/README.md  开发者指南整站目录（中文）
  *   - api/README.md              API 参考整站目录 v2（中文）
+ *   - _raw/api_meta_v2.json      接口元数据（方法 / 必填参数 / 分页键 / 错误码 / 限流）
  *
  * 用法（在 shopee_api_doc 目录执行）：
- *   node _tools/fetch-docs.js            # 抓取官网并生成两份目录
- *   node _tools/fetch-docs.js --local    # 不访问网络，用 _raw/ 快照重渲染（用于改格式后刷新）
+ *   node _tools/fetch-docs.js              # 抓取官网：两份目录 + 接口元数据
+ *   node _tools/fetch-docs.js --meta-only  # 只刷新接口元数据（读 _raw/ 的模块树，不动其它快照）
+ *   node _tools/fetch-docs.js --no-meta    # 只抓目录，跳过接口元数据（省 441 次请求）
+ *   node _tools/fetch-docs.js --local      # 不访问网络，用 _raw/ 快照重渲染（用于改格式后刷新）
  *
  * 说明：
  *   - 官方页面为 SPA，正文来自 /opservice/api/v1 系列内部接口，本脚本直接取 JSON 生成目录。
@@ -15,6 +18,10 @@
  *     中文译名映射（ZH_* 常量）补充，文档中以 † 标注。
  *   - 原始数据快照保存在 _raw/。
  *   - 目录文档保持紧凑：不逐条贴官方链接，链接按规律拼接（见两份 README 头部说明）。
+ *   - 接口元数据（api_meta_v2.json）来自 /doc/api/?api_id=<id>：把每个接口的「HTTP 方法、
+ *     请求参数与必填、分页键、错误码、限流」提炼出来，供 shopee_skill/cli.js 做方法判定与
+ *     调用前参数校验。方法以详情里的 method 字段为准（1=POST 写、2=GET 读）；实测
+ *     is_get_method 恒为 0 不可用，仅在 method 缺失时回退解析 request_sample 里的 HTTP 动词。
  */
 'use strict';
 
@@ -29,6 +36,11 @@ const UA =
 
 const SG = 'https://open.shopee.com'; // 国际站
 const CN = 'https://open.shopee.cn'; // 中国站
+
+const DOC_MODULE_API = CN + '/opservice/api/v1/doc/module/?version=2';
+const DOC_API_DETAIL = CN + '/opservice/api/v1/doc/api/?api_id=';
+const API_META_FILE = path.join(RAW_DIR, 'api_meta_v2.json');
+const API_META_CONCURRENCY = 8;
 
 /* ================= 中文译名映射 ================= */
 
@@ -158,6 +170,29 @@ function fetchJson(url, referer) {
     req.on('error', reject);
     req.setTimeout(40000, () => req.destroy(new Error('请求超时: ' + url)));
   });
+}
+
+/** 抓一次，失败等 800ms 再抓一次（官方详情接口偶发超时/抖动） */
+async function fetchJsonRetry(url, referer) {
+  try {
+    return await fetchJson(url, referer);
+  } catch (e) {
+    await new Promise((r) => setTimeout(r, 800));
+    return fetchJson(url, referer);
+  }
+}
+
+/** 并发受限的 map（保持零依赖） */
+async function mapLimit(items, limit, fn) {
+  let cursor = 0;
+  const n = Math.max(1, Math.min(limit, items.length));
+  const worker = async () => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: n }, worker));
 }
 
 function saveJson(file, data) {
@@ -296,6 +331,7 @@ function renderApiCatalogZh(tree, fetchedDate) {
   out.push('- 接口名保持官方标识符（如 `v2.ams.get_open_campaign_added_product`）不变，仅模块名给出中文译名。');
   out.push('- 接口官方页面按规律拼接（中国站）：`https://open.shopee.cn/documents/v2/{api_name}?module={模块ID}&type=1`，模块 ID 见「模块总览」。');
   out.push('- 「指南总览」模块下为文档指南页（非 API），官方跳转按规律拼接：`https://open.shopee.com/developer-guide?from=doc&id={条目编号}`。');
+  out.push('- 单个接口的「方法 / 必填参数 / 分页键 / 错误码」见 `_raw/api_meta_v2.json`（由本脚本随目录一并生成）。');
   out.push('');
 
   // 模块总览
@@ -327,11 +363,124 @@ function renderApiCatalogZh(tree, fetchedDate) {
   return out.join('\n');
 }
 
+/* ================= 接口元数据（api_meta_v2.json） ================= */
+
+/** 取响应结构里 `response` 层的字段（分页键 / 列表键都从这里看） */
+function responseChildren(parsed) {
+  const rp = (parsed && parsed.response_params) || [];
+  const r = rp.find((x) => x && x.name === 'response');
+  return r && Array.isArray(r.children) ? r.children : [];
+}
+
+/** 把官方详情响应提炼成调用所需的元数据 */
+function distillApiMeta(detail) {
+  const apiName = String(detail.api_name || '');
+  // 方法：method 字段为权威（1=POST 写 / 2=GET 读）；缺失时回退解析请求示例里的 HTTP 动词
+  let method = '';
+  if (detail.method === 2) method = 'GET';
+  else if (detail.method === 1) method = 'POST';
+  if (!method) {
+    const rs = String(detail.request_sample || '');
+    const m = rs.match(/CUSTOMREQUEST = '(\w+)'/) || rs.match(/--request (\w+)/);
+    if (m) method = m[1].toUpperCase();
+  }
+
+  let parsed = {};
+  try {
+    parsed = JSON.parse(detail.params || '{}') || {};
+  } catch (e) {
+    parsed = {};
+  }
+  const request = (parsed.request_params || [])
+    .map((p) => ({
+      name: String(p.name || ''),
+      type: String(p.type || ''),
+      required: p.required === 'True' || p.required === true,
+      sample: p.sample === undefined || p.sample === null ? '' : String(p.sample),
+      description: String(p.description || '').replace(/<[^>]*>/g, '').slice(0, 300),
+    }))
+    .filter((p) => p.name);
+
+  const children = responseChildren(parsed);
+  const listKeys = children.filter((c) => /\[\]$/.test(String(c.type || ''))).map((c) => String(c.name));
+  const names = new Set(children.map((c) => String(c.name)));
+  const keys = [];
+  for (const k of ['more', 'next_cursor', 'next_offset', 'page_no', 'total_count', 'has_next_page']) {
+    if (names.has(k)) keys.push(k);
+  }
+  let style = '';
+  if (names.has('next_cursor')) style = 'cursor';
+  else if (names.has('next_offset')) style = 'offset';
+  else if (names.has('more') || names.has('page_no') || names.has('total_count')) style = 'page';
+
+  const errors = Array.from(new Set((detail.error_list || []).map((e) => String((e && e.name) || '')).filter(Boolean))).slice(0, 40);
+
+  return {
+    apiName,
+    method,
+    rateLimit: String(detail.rate_limit || ''),
+    request,
+    paging: { style, keys, listKeys },
+    errors,
+  };
+}
+
+/** 抓取全部 v2 接口详情并落盘 api_meta_v2.json（失败的接口跳过，不影响其它） */
+async function fetchApiMeta(moduleTree) {
+  const items = [];
+  for (const m of moduleTree.modules || []) {
+    for (const it of m.items || []) {
+      if (it.type !== 1) continue;
+      if (!String(it.name || '').startsWith('v2.')) continue;
+      items.push({ id: it.id, name: String(it.name) });
+    }
+  }
+  const apis = {};
+  const failed = [];
+  let done = 0;
+  await mapLimit(items, API_META_CONCURRENCY, async (it) => {
+    try {
+      const d = await fetchJsonRetry(DOC_API_DETAIL + it.id + '&version=2', CN);
+      const dm = distillApiMeta(d);
+      if (!dm.apiName) dm.apiName = it.name;
+      apis[dm.apiName] = dm;
+    } catch (e) {
+      failed.push(it.name);
+    }
+    done++;
+    if (done % 50 === 0) console.log(`[meta] ${done}/${items.length}`);
+  });
+
+  const out = {
+    generatedAt: new Date().toISOString().slice(0, 10),
+    source: DOC_API_DETAIL + '<api_id>&version=2',
+    total: items.length,
+    count: Object.keys(apis).length,
+    apis,
+  };
+  saveJson(API_META_FILE, out);
+  if (failed.length) {
+    console.warn(`[meta] ${failed.length}/${items.length} 个接口详情抓取失败（其余已写入）：` + failed.slice(0, 10).join(', '));
+  }
+  return out;
+}
+
 /* ================= 主流程 ================= */
 
 async function main() {
   fs.mkdirSync(RAW_DIR, { recursive: true });
   const local = process.argv.includes('--local');
+  const noMeta = process.argv.includes('--no-meta');
+  const metaOnly = process.argv.includes('--meta-only');
+
+  // 只刷新接口元数据：读现有模块树快照，不改动目录与其它快照
+  if (metaOnly) {
+    const tree = JSON.parse(fs.readFileSync(path.join(RAW_DIR, 'doc_module_v2.json'), 'utf8'));
+    console.log('[meta] 仅抓取接口元数据（不改动其它快照 / 目录）');
+    await fetchApiMeta(tree);
+    console.log('完成。');
+    return;
+  }
 
   let guideListEn, guideListCn, moduleTree, fetchedDate;
   if (local) {
@@ -350,7 +499,7 @@ async function main() {
     saveJson(path.join(RAW_DIR, 'guide_list_cn.json'), guideListCn);
 
     // 2) API 模块树（v2）
-    moduleTree = await fetchJson(CN + '/opservice/api/v1/doc/module/?version=2', CN);
+    moduleTree = await fetchJson(DOC_MODULE_API, CN);
     saveJson(path.join(RAW_DIR, 'doc_module_v2.json'), moduleTree);
   }
 
@@ -364,6 +513,13 @@ async function main() {
   fs.mkdirSync(apiDir, { recursive: true });
   fs.writeFileSync(path.join(apiDir, 'README.md'), renderApiCatalogZh(moduleTree, fetchedDate), 'utf8');
   console.log('[doc] api/README.md');
+
+  // 4) 接口元数据（需联网；--local / --no-meta 时跳过，保留已有快照）
+  if (!local && !noMeta) {
+    await fetchApiMeta(moduleTree);
+  } else {
+    console.log('[meta] 跳过接口元数据抓取（' + (local ? '--local' : '--no-meta') + '）');
+  }
 
   console.log('完成。');
 }

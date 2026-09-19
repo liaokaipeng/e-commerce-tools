@@ -72,7 +72,7 @@
 
 - **bash 与 PowerShell 都可能不可靠**：bash 的 `ls` / `grep` / `tail` / `rm` 常报 `command not found`（exit 127）；PowerShell 常只返回 exit 0、stdout 为空，`>` / `Out-File` 重定向会产出 UTF-16/GBK 乱码文件（Read 报 binary）。**要看命令输出就让命令自己写文件**（node 脚本里 `fs.writeFileSync(..., 'utf8')`），再用 Read 工具读。
 - **删文件别用 `rm`**：会被安全删除 shim 拦截（按累计删除数计，超 50 报 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`，批量清目录必失败）。单文件用 `[System.IO.File]::Delete('<绝对路径>')`，清整个目录用 `[System.IO.Directory]::Delete('<绝对路径>', $true)`，测试内零散删除走 `test/helpers.js` 的 `removeFile()`。**清理一堆调试产物（`.tmp_*` 之类）走 node 脚本的 `fs.unlinkSync` / `fs.rmSync` 也不触发 shim**，比逐个调 PowerShell 省事。
-- **批量校验语法别写 for 循环**：bash 循环体内命令不可用时 exit code 仍是 0，错误被静默吞掉。写成 `node --check a.js && node --check b.js && echo OK`（`&&` 串联 + 末尾显式回显确认）。
+- **批量校验语法别写 for 循环**：bash 循环体内命令不可用时 exit code 仍是 0，错误被静默吞掉。改用 `;` 串联逐条执行、末尾显式回显确认，例如 `node --check a.js; node --check b.js; echo OK`。**注意本机是 PowerShell 5，不支持 `&&` / `||`**（写了会直接 ParserError、整条命令一行都不执行），也别照搬其它环境文档里的 `&&` 写法。
 - **同一文件的多处修改必须串行**：在同一条消息里对**同一个文件**发多个编辑请求会互相覆盖（读-改-写竞态），最终只有最后一个落盘，而每次都返回成功——曾因此静默丢掉 `pack.js` 顶部注释与 `docs/架构.md` 的一处改动。改完**回读确认**，同一文件分多次调用，只有跨文件的编辑才可并行。
 - **前端没有自动化测试**：`vite build` 只保证编译期正确，拦不住 prop 名写错 / 模板变量未定义这类运行时错误，改完前端要跑页面级验证（cdp-page-verify 技能）；本机 8765 常被用户已启动的服务占用，先探端口，别杀用户的服务。
 - **冒烟 `/monitor/` 前必须屏蔽 `POST /api/monitor/presence`**（CDP `Network.setBlockedURLs`）：该接口触发按需巡检，不屏蔽等于替用户对全部已授权店铺发起一轮真实采集；其余监控接口是只读的，照常请求即可。

@@ -18,9 +18,14 @@ function isPayload(v) {
   return true;
 }
 
-/** 打印美化 JSON 到 stdout */
-function print(value) {
-  process.stdout.write(JSON.stringify(value, null, 2) + '\n');
+/**
+ * 打印 JSON 到 stdout。
+ * @param {*} value 任意可序列化值
+ * @param {object} [opts] { compact?: boolean } compact 时不加缩进，省 token（适合 agent / 管道）
+ */
+function print(value, opts) {
+  const compact = !!(opts && opts.compact);
+  process.stdout.write(JSON.stringify(value, null, compact ? 0 : 2) + '\n');
 }
 
 /** 打印错误 JSON 到 stderr 并置退出码 1（不抛异常，避免堆栈污染输出） */
@@ -31,4 +36,34 @@ function fail(message, hint) {
   process.exitCode = 1;
 }
 
-module.exports = { extractPayload, print, fail };
+/** 打印一条提示/警告到 stderr（单行 JSON；不污染 stdout 的数据输出，管道依旧可解析） */
+function warn(note) {
+  process.stderr.write(JSON.stringify({ warning: String(note) }) + '\n');
+}
+
+/**
+ * 按点分路径取值，数字段可作数组下标：orders.0.order_sn / response.a.2.b。
+ * 取不到返回 undefined（由调用方决定是否报错）。
+ */
+function selectPath(value, dotted) {
+  const pathStr = String(dotted == null ? '' : dotted).trim();
+  if (!pathStr) return value;
+  let cur = value;
+  for (const seg of pathStr.split('.')) {
+    if (seg === '') continue;
+    if (cur === null || cur === undefined) return undefined;
+    if (Array.isArray(cur)) {
+      const idx = Number(seg);
+      if (!Number.isInteger(idx) || idx < 0) return undefined;
+      cur = cur[idx];
+    } else if (typeof cur === 'object') {
+      if (!Object.prototype.hasOwnProperty.call(cur, seg)) return undefined;
+      cur = cur[seg];
+    } else {
+      return undefined;
+    }
+  }
+  return cur;
+}
+
+module.exports = { extractPayload, print, fail, warn, selectPath };
