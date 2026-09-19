@@ -1,7 +1,9 @@
 'use strict';
 // 开放平台凭证存储：server/data/openapi-session.json（gitignored，凭证不入库）。
 // 结构：app = { partnerId, partnerKey, env }；shops 按环境分区，避免沙箱/生产 token 混用：
-//   shops[env][shopId] = { shopId, merchantId, accessToken, refreshToken, accessExpireAt, updatedAt }
+//   shops[env][shopId] = { shopId, merchantId, accessToken, refreshToken, accessExpireAt, updatedAt, important }
+//   important 为用户在「开放平台」页勾选的「重点店铺」标记（非凭证）：某环境有任一标记时，
+//   监控大屏采集与 shopee_skill 只作用于重点店铺；一个都没标记则回落为全部店铺。
 // 对外输出一律打码（maskToken），与仓库「凭证不入库、日志不完整打印」约定一致。
 const path = require('path');
 const { ENVS, ACCESS_EXPIRE_MARGIN, EXPIRING_SOON_SEC } = require('./constants');
@@ -100,6 +102,21 @@ function setShop(env, shopId, patch) {
   return Object.assign({}, store.shops[e][id]);
 }
 
+/**
+ * 标记 / 取消「重点店铺」：只写标记位，不动凭证。
+ * 语义：某环境存在 ≥1 个重点店铺时，「重点集合」生效——监控大屏采集与 shopee_skill 只作用于这些店铺；
+ * 一个都没标记时回落为「全部已授权店铺」，保证零配置下行为与从前一致。
+ */
+function setShopImportant(env, shopId, important) {
+  return setShop(env, shopId, { important: !!important });
+}
+
+/** 某环境下被标记为「重点」的店铺 ID 列表（不含有效性判断，由调用方结合 invalid 自行过滤） */
+function getImportantIds(env) {
+  const byEnv = store.shops[env] || {};
+  return Object.values(byEnv).filter((s) => s.important).map((s) => String(s.shopId));
+}
+
 /** 删除某店铺凭证，返回是否真的删掉（幂等） */
 function removeShop(env, shopId) {
   const byEnv = store.shops[env] || {};
@@ -133,6 +150,7 @@ function status() {
         remainSec: remain,
         invalid: !!s.invalid,
         invalidReason: s.invalidReason || '',
+        important: !!s.important,
         state: s.invalid ? 're_auth' : remain > EXPIRING_SOON_SEC ? 'valid' : remain > 0 ? 'expiring' : 'expired',
         updatedAt: s.updatedAt || 0,
       });
@@ -150,5 +168,5 @@ function status() {
 
 module.exports = {
   getApp, setApp, getShop, getShopsRaw, setShop, removeShop, clearShops,
-  markShopInvalid, clearShopInvalid, status,
+  markShopInvalid, clearShopInvalid, setShopImportant, getImportantIds, status,
 };

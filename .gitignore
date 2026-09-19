@@ -41,3 +41,6 @@ research/
 
 .DS_Store
 Thumbs.db
+
+# 临时调试产物（agent / 脚本产生的 .tmp_* 文件，不入库）
+.tmp_*

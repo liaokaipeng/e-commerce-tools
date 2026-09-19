@@ -12,12 +12,13 @@ description: "查询 Shopee 开放平台数据（订单/商品/库存/广告/资
 ## 命令速查
 
 ```bash
-node shopee_skill/cli.js shops [--names]         # 已授权店铺列表
+node shopee_skill/cli.js shops [--names]         # 已授权店铺列表（默认只列「重点店铺」）
 node shopee_skill/cli.js search <关键词>          # 搜索接口
 node shopee_skill/cli.js describe <接口名|路径>    # 接口元数据 + 官方文档链接
-node shopee_skill/cli.js call <接口名|路径> --shop <ID|all> [--params '<json>'] [--all] [--raw]
+node shopee_skill/cli.js call <接口名|路径> --shop <ID|all> [--params '<json>'] [--all] [--raw] [--all-shops]
 node shopee_skill/cli.js help                    # 完整用法
 ```
 
 - 前置：需已在本仓库「开放平台」页面配置 App 并完成店铺授权（凭证存 `server/data/openapi-session.json`，gitignored）。
+- 「重点店铺」：用户可在「开放平台」页勾选重点店铺，之后 `shops` 与 `--shop all` 默认只针对这些店铺（一个都没勾选时为全部已授权店铺）；显式 `--shop <ID>` 不受影响，`--all-shops` 可忽略筛选。
 - 红线：**默认只读**，写操作需 `--allow-write`；不可打印或提交凭证。

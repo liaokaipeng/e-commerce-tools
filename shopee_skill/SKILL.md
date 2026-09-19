@@ -38,9 +38,10 @@ node shopee_skill/cli.js call v2.shop.get_shop_info --shop 123456
 ## 常用示例
 
 ```bash
-# 已授权店铺列表（默认离线读取本地凭证，不打网关）
+# 已授权店铺列表（默认离线读取本地凭证，且只列「重点店铺」）
 node shopee_skill/cli.js shops
 node shopee_skill/cli.js shops --names        # 额外经 get_shop_info 补店铺名/地区（会产生少量网关请求）
+node shopee_skill/cli.js shops --all-shops    # 忽略「重点店铺」筛选，列出全部已授权店铺
 
 # 店铺信息（GET，无业务参数）
 node shopee_skill/cli.js call v2.shop.get_shop_info --shop 123456
@@ -57,8 +58,11 @@ node shopee_skill/cli.js call v2.product.get_model_list --shop 123456 --param it
 # 自动翻页拉全量（自适应 cursor / offset / page_no，默认上限 10 页）
 node shopee_skill/cli.js call v2.order.get_order_list --shop 123456 --all --max-pages 5 --params '{...}'
 
-# 对当前环境全部已授权店铺执行同一次查询
+# 对「重点店铺」执行同一次查询（未标记任何重点店铺时为全部已授权店铺）
 node shopee_skill/cli.js call v2.shop.get_shop_info --shop all
+
+# 忽略「重点店铺」筛选，对全部已授权店铺执行
+node shopee_skill/cli.js call v2.shop.get_shop_info --shop all --all-shops
 
 # 查看网关原始响应（含 error / message / request_id，排查用）
 node shopee_skill/cli.js call v2.shop.get_shop_info --shop 123456 --raw
@@ -70,7 +74,7 @@ node shopee_skill/cli.js call v2.shop.get_shop_info --shop 123456 --raw
 
 | 选项 | 说明 |
 |---|---|
-| `--shop <ID\|all>` | 目标店铺；仅一个已授权店铺时可省略；`all` 为当前环境全部店铺 |
+| `--shop <ID\|all>` | 目标店铺；仅一个已授权店铺时可省略；`all` 为「重点店铺」（未标记任何重点店铺时为全部已授权店铺） |
 | `--params '<json>'` | 业务参数 JSON 对象 |
 | `--param k=v` | 单个业务参数，可重复；值自动解析 true/false/null/数字 |
 | `--params-file <path>` | 从文件读取业务参数 JSON 对象 |
@@ -78,6 +82,16 @@ node shopee_skill/cli.js call v2.shop.get_shop_info --shop 123456 --raw
 | `--all` / `--max-pages <n>` | 自动翻页与页数上限（默认 10） |
 | `--allow-write` | 放行写操作接口（默认只读拦截） |
 | `--raw` | 输出网关原始响应 |
+| `--all-shops` | 忽略「重点店铺」筛选：`shops` 列出全部店铺、`--shop all` 针对全部已授权店铺 |
+
+## 重点店铺（重要店铺筛选）
+
+店铺很多时，用户可在工具的「开放平台」页面把常用店铺勾选为**重点店铺**（标记持久化在 `server/data/openapi-session.json` 的 `important` 字段）。
+
+- **有任一重点店铺时**：`shops` 默认只列重点店铺；`--shop all` 只对重点店铺执行。
+- **一个都没勾选时**：回落为全部已授权店铺（与未启用该功能时行为一致）。
+- 显式 `--shop <店铺ID>` **不受筛选影响**，始终可单独指定任意已授权店铺。
+- 需要无视筛选操作全部店铺时加 `--all-shops`。
 
 ## 方法与「默认只读」红线
 

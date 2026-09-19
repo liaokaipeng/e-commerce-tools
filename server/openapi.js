@@ -44,6 +44,31 @@ function register({ get, post }) {
     }
   });
 
+  // 标记 / 取消「重点店铺」（在「③ 已授权店铺」勾选）：
+  // 某环境有任一重点店铺时，监控大屏采集范围与 shopee_skill 取店范围都只作用于重点店铺；
+  // 一个都没标记则回落为全部已授权店铺（判定源 store.getImportantIds，见 store.js）。
+  post('/api/openapi/shop-important', jsonAction('/api/openapi/shop-important', (body, req, res) => {
+    const shopId = String(body.shopId || '').trim();
+    if (!shopId) throw new Error('缺少 shop_id');
+    const app = store.getApp();
+    if (!app) throw new Error('尚未配置 App，请先保存 partner_id / partner_key');
+    if (!store.getShop(app.env, shopId)) throw new Error(`店铺 ${shopId} 尚未授权`);
+    const important = !(body.important === false || body.important === 0
+      || body.important === '0' || body.important === 'false');
+    store.setShopImportant(app.env, shopId, important);
+    notifyMonitorAuthChanged(); // 采集范围变化：立即刷新大屏店铺列表并按需补采
+    const importantCount = store.getImportantIds(app.env).length;
+    sendJson(res, 200, {
+      ok: true,
+      shopId,
+      important,
+      importantCount,
+      message: important
+        ? `已把店铺 ${shopId} 设为重点店铺（当前 ${importantCount} 个重点店铺）`
+        : `已取消店铺 ${shopId} 的重点标记（当前 ${importantCount} 个重点店铺${importantCount === 0 ? '，已回落为全部已授权店铺' : ''}）`,
+    });
+  }));
+
   // 保存 App 配置（partner_id / partner_key / 环境）
   post('/api/openapi/app', jsonAction('/api/openapi/app', (body, req, res) => {
     const app = store.setApp({ partnerId: body.partnerId, partnerKey: body.partnerKey, env: body.env });

@@ -16,7 +16,8 @@ const emit = defineEmits(['save-shops', 'set-all']);
 <template>
   <el-drawer v-model="shopsDrawer" title="监控店铺配置" size="560px" direction="rtl">
     <p class="dim2">
-      已授权的店铺默认全部监控；取消勾选的店铺<b>不再巡检采集、不出现在大屏</b>，其未关闭的告警会自动关闭。
+      这里只列出在「开放平台」页勾选的<b>重点店铺</b>（一个都没勾选时为全部已授权店铺）。
+      默认全部监控；取消勾选的店铺<b>不再巡检采集、不出现在大屏</b>，其未关闭的告警会自动关闭。
       重新勾选后立即恢复采集，历史快照与告警记录仍保留。
     </p>
     <div class="shopcfg-search-row">

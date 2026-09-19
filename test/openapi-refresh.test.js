@@ -10,6 +10,7 @@
 //   3. 认证类失败重试必须**真的强制刷新**（token 名义未过期时旧逻辑会复用同一个 token，白跑一次就标失效）
 //   4. 并发强制刷新同一店铺只发一次网关请求（per-shop 锁）
 //   5. 路由 /api/openapi/refresh 返回整组续期结果；失效店铺不进「选择店铺」列表
+//   5b. 重点店铺标记（/api/openapi/shop-important）：写标记 / 计数 / status 回显 / 非法入参 400
 //   6. 换 partner_id 清空旧凭证；非数字 id 明确报错；响应载荷层解析口径统一
 //   7. 批量刷新（/api/openapi/refresh-all/run）按共享 token 分组去重：3 店共享组只发一次网关请求，
 //      失效店铺整组跳过且不被误标恢复
@@ -218,6 +219,29 @@ async function cases() {
     JSON.stringify(res6.data));
   t('status 仍保留失效店铺（大屏「待重新授权」依赖它）',
     store.status().shops.some((s) => s.shopId === '222' && s.state === 're_auth'));
+
+  // 5b) 重点店铺标记：写标记 / 计数 / status 回显 / 非法入参
+  reset([{ shopId: '111' }, { shopId: '222' }, { shopId: '333' }]);
+  const imp1 = await callRoute('POST /api/openapi/shop-important', { shopId: '111', important: true });
+  t('POST /api/openapi/shop-important 标记重点店铺成功且计数正确',
+    imp1.status === 200 && imp1.data.ok === true && imp1.data.important === true && imp1.data.importantCount === 1,
+    JSON.stringify(imp1.data));
+  await callRoute('POST /api/openapi/shop-important', { shopId: '333', important: true });
+  t('getImportantIds 返回全部重点店铺 ID',
+    store.getImportantIds('prod').slice().sort().join(',') === '111,333',
+    JSON.stringify(store.getImportantIds('prod')));
+  t('status 每条店铺带 important 字段（供页面回显）',
+    store.status().shops.find((s) => s.shopId === '111').important === true
+      && store.status().shops.find((s) => s.shopId === '222').important === false);
+  const impOff = await callRoute('POST /api/openapi/shop-important', { shopId: '111', important: false });
+  t('取消重点标记后计数减少',
+    impOff.status === 200 && impOff.data.important === false && impOff.data.importantCount === 1,
+    JSON.stringify(impOff.data));
+  const impBad = await callRoute('POST /api/openapi/shop-important', { shopId: '999', important: true });
+  t('对未授权店铺标记重点返回 400',
+    impBad.status === 400 && impBad.data.ok === false, JSON.stringify(impBad.data));
+  const impNone = await callRoute('POST /api/openapi/shop-important', {});
+  t('shop-important 缺少 shop_id 返回 400', impNone.status === 400, JSON.stringify(impNone.data));
 
   // 6) 换 App 清空旧凭证 / 非数字 id 报错 / 载荷层解析口径统一
   reset([{ shopId: '111' }]);

@@ -44,6 +44,19 @@ export function useOpenapiShops({ refreshStatus }) {
     });
   }
 
+  async function toggleImportant(shopId, important) {
+    await withShop(shopId, async () => {
+      const r = await fetch('/api/openapi/shop-important', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shopId, important }),
+      });
+      const j = await r.json();
+      if (r.ok && j.ok) ElMessage.success(j.message || '已更新重点店铺');
+      else ElMessage.error(j.message || '更新重点店铺失败');
+    });
+  }
+
   async function removeShop(shopId) {
     try {
       await ElMessageBox.confirm(`确定删除店铺 ${shopId} 的授权吗？删除后相关功能将无法调用官方接口。`, '删除授权', {
@@ -79,5 +92,5 @@ export function useOpenapiShops({ refreshStatus }) {
 
   const envLabel = (e) => (e === 'sandbox' ? '沙箱' : '生产');
 
-  return { busyShop, testShop, refreshShop, removeShop, stateMeta, fmtTime, envLabel };
+  return { busyShop, testShop, refreshShop, removeShop, toggleImportant, stateMeta, fmtTime, envLabel };
 }

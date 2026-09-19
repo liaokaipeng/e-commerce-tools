@@ -12,7 +12,7 @@ import OpenapiShopTable from './OpenapiShopTable.vue';
 
 const { status, form, saving, refreshStatus, saveApp } = useOpenapiStatus();
 const { authUrl, manualUrl, generating, manualing, forwardSnippet, generateAuthUrl, manualComplete, openAuthPage, copyAuthUrl, copySnippet } = useOpenapiAuth({ form, refreshStatus });
-const { busyShop, testShop, refreshShop, removeShop, stateMeta, fmtTime, envLabel } = useOpenapiShops({ refreshStatus });
+const { busyShop, testShop, refreshShop, removeShop, toggleImportant, stateMeta, fmtTime, envLabel } = useOpenapiShops({ refreshStatus });
 const { batch, batchProgress, refreshAll, cancelRefreshAll } = useOpenapiBatchRefresh({ refreshStatus });
 </script>
 
@@ -57,6 +57,7 @@ const { batch, batchProgress, refreshAll, cancelRefreshAll } = useOpenapiBatchRe
         @test-shop="testShop"
         @refresh-shop="refreshShop"
         @remove-shop="removeShop"
+        @toggle-important="toggleImportant"
       />
 
     </div>
@@ -64,5 +65,6 @@ const { batch, batchProgress, refreshAll, cancelRefreshAll } = useOpenapiBatchRe
 </template>
 
 <style scoped>
-.container { max-width: 960px; }
+/* 本页有 7 列的店铺表格（含「重点」「操作」列），900/960 宽会把最右「操作」列挤出可视区，故单独放宽 */
+.container { max-width: 1200px; }
 </style>

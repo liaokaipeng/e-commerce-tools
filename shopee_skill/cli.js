@@ -5,13 +5,13 @@
 // 凭证沿用 server/data/openapi-session.json（与「开放平台」页授权共用，gitignored）。
 //
 // 用法：node shopee_skill/cli.js <命令> [选项]
-//   shops [--names]                     列出已授权店铺（默认离线；--names 会打网关补店铺名）
+//   shops [--names] [--all-shops]       列出已授权店铺（默认只列重点店铺；--names 会打网关补店铺名）
 //   list [--module <ID|名称>] [--keyword <kw>] [--writes] [--modules]
 //   search <关键词>                      等价 list --keyword
 //   describe <接口名|路径>               查看接口元数据与官方文档链接
 //   call <接口名|路径> --shop <ID|all> [--params '<json>'] [--param k=v ...]
 //        [--params-file <path>] [--method GET|POST] [--all] [--max-pages N]
-//        [--allow-write] [--raw]
+//        [--allow-write] [--raw] [--all-shops]
 //   help
 //
 // 红线：默认只读 —— 非查询类接口（写操作）必须显式 --allow-write 才会调用；
@@ -28,7 +28,7 @@ const USAGE = [
   '用法：node shopee_skill/cli.js <命令> [选项]',
   '',
   '命令：',
-  '  shops [--names]                  列出已授权店铺（默认离线读取本地凭证）',
+  '  shops [--names] [--all-shops]    列出已授权店铺（默认只列「重点店铺」）',
   '  list [--module <ID|名称>] [--keyword <kw>] [--writes] [--modules]',
   '                                   列出接口目录（默认只列查询类；--writes 含写操作）',
   '  search <关键词>                   在接口名/模块名中搜索（等价 list --keyword）',
@@ -37,7 +37,8 @@ const USAGE = [
   '  help                             显示本说明',
   '',
   'call 选项：',
-  '  --shop <ID|all>   目标店铺；仅一个已授权店铺时可省略；all 表示当前环境全部店铺',
+  '  --shop <ID|all>   目标店铺；仅一个已授权店铺时可省略；all 表示重点店铺（未标记任何重点店铺时为全部）',
+  '  --all-shops       忽略「重点店铺」筛选：--shop all 针对全部已授权店铺',
   '  --params <json>   业务参数 JSON，如 --params \'{"item_id":123}\'',
   '  --param k=v       单个业务参数，可重复；值自动按 JSON 标量解析',
   '  --params-file <p> 从文件读取业务参数 JSON（对象）',
@@ -68,17 +69,33 @@ function cmdShops(flags) {
     });
     return Promise.resolve();
   }
-  let shops = st.shops.map((s) => ({
+  // 「重点店铺」筛选：有标记且未加 --all-shops 时只列出重点店铺（与监控大屏取店范围一致）；
+  // 一个都没标记则回落为全部已授权店铺。
+  const importantSet = new Set(store.getImportantIds(st.env));
+  const onlyImportant = importantSet.size > 0 && !bool(flags['all-shops']);
+  const source = onlyImportant ? st.shops.filter((s) => importantSet.has(s.shopId)) : st.shops;
+  const meta = {
+    configured: true,
+    env: st.env,
+    count: source.length,
+    importantCount: importantSet.size,
+    onlyImportant,
+    filterNote: onlyImportant
+      ? '仅列出「重点店铺」（在「开放平台」页面勾选）；如需全部店铺请加 --all-shops'
+      : (importantSet.size ? '未筛选（--all-shops）' : '未标记任何重点店铺，按全部已授权店铺处理'),
+  };
+  let shops = source.map((s) => ({
     shopId: s.shopId,
     env: s.env,
     state: s.state,
+    important: !!s.important,
     accessExpireAt: s.accessExpireAt,
     remainSec: s.remainSec,
     invalid: !!s.invalid,
     invalidReason: s.invalidReason || '',
   }));
   if (!bool(flags.names)) {
-    print({ configured: true, env: st.env, count: shops.length, shops });
+    print(Object.assign({}, meta, { shops }));
     return Promise.resolve();
   }
   // --names：经 authorizedStores 补店铺名/地区（会对缺名店铺调 get_shop_info，产生少量网关请求）
@@ -88,13 +105,10 @@ function cmdShops(flags) {
       const map = {};
       for (const it of list) map[String(it.id)] = { name: it.name, region: it.region };
       shops = shops.map((s) => Object.assign({}, s, map[s.shopId] || {}));
-      print({
-        configured: true,
-        env: st.env,
-        count: shops.length,
+      print(Object.assign({}, meta, {
         shops,
         note: '已尝试经 get_shop_info 补店铺名/地区（可能产生少量网关请求）',
-      });
+      }));
     });
 }
 
@@ -179,13 +193,21 @@ function parseScalar(v) {
   return s;
 }
 
-/** 解析目标店铺：未指定时按「仅一个已授权店铺」自动选用；all 表示全部有效店铺 */
-function resolveShops(input) {
+/** 解析目标店铺：未指定时按「仅一个已授权店铺」自动选用；all 表示全部有效店铺（受「重点店铺」筛选约束） */
+function resolveShops(input, flags) {
   const store = require('../server/openapi/store');
   const st = store.status();
   if (!st.configured) throw new Error('尚未配置开放平台 App，请先在工具的「开放平台」页面保存 partner_id / partner_key');
-  const available = st.shops.filter((s) => !s.invalid).map((s) => s.shopId);
   const allIds = st.shops.map((s) => s.shopId);
+  // 「重点店铺」筛选：有标记且未加 --all-shops 时，all / 自动选店只作用于重点店铺；
+  // 显式 --shop <ID> 不受影响（仍可单独指定任意已授权店铺）。
+  const importantSet = new Set(store.getImportantIds(st.env));
+  const onlyImportant = importantSet.size > 0 && !bool(flags && flags['all-shops']);
+  let available = st.shops.filter((s) => !s.invalid).map((s) => s.shopId);
+  if (onlyImportant) {
+    const filtered = available.filter((id) => importantSet.has(id));
+    if (filtered.length) available = filtered; // 重点店铺全部失效时回落为全部有效店铺，避免无目标可调
+  }
   if (input && String(input).toLowerCase() === 'all') {
     if (!available.length) throw new Error('当前环境没有已授权店铺，请先在「开放平台」页面完成店铺授权');
     return available;
@@ -222,7 +244,7 @@ async function cmdCall(positional, flags) {
   const maxPages = intOf(flags['max-pages'], 10);
   const all = bool(flags.all);
   const raw = bool(flags.raw);
-  const targets = resolveShops(flags.shop);
+  const targets = resolveShops(flags.shop, flags);
   const results = {};
   for (const shopId of targets) {
     try {

@@ -2,6 +2,8 @@
      逐店操作与批量刷新逻辑在 openapi/useOpenapiShops.js / useOpenapiBatchRefresh.js，
      本组件只负责渲染并上抛事件。 -->
 <script setup>
+import { computed, ref } from 'vue';
+
 const props = defineProps({
   /** 登录状态（shops / loading） */
   status: { type: Object, required: true },
@@ -19,7 +21,12 @@ const props = defineProps({
   fmtTime: { type: Function, required: true },
 });
 
-const emit = defineEmits(['refresh-status', 'refresh-all', 'cancel-refresh-all', 'test-shop', 'refresh-shop', 'remove-shop']);
+const emit = defineEmits(['refresh-status', 'refresh-all', 'cancel-refresh-all', 'test-shop', 'refresh-shop', 'remove-shop', 'toggle-important']);
+
+// 「只看重点店铺」仅作用于本页表格展示；重点标记本身由后端持久化
+const onlyImportant = ref(false);
+const importantCount = computed(() => props.status.shops.filter((s) => s.important).length);
+const visibleShops = computed(() => (onlyImportant.value ? props.status.shops.filter((s) => s.important) : props.status.shops));
 </script>
 
 <template>
@@ -29,6 +36,8 @@ const emit = defineEmits(['refresh-status', 'refresh-all', 'cancel-refresh-all',
         <span>③ 已授权店铺</span>
         <div class="row">
           <span v-if="batch.running" class="hint">{{ batchProgress }}</span>
+          <span class="hint">重点 {{ importantCount }} / {{ status.shops.length }}</span>
+          <el-checkbox v-model="onlyImportant" :disabled="!status.shops.length">只看重点店铺</el-checkbox>
           <el-button size="small" :disabled="batch.running" :loading="status.loading" @click="emit('refresh-status')">刷新状态</el-button>
           <el-button size="small" type="warning" :loading="batch.running" :disabled="!status.shops.length" @click="emit('refresh-all')">
             批量刷新 token
@@ -37,15 +46,24 @@ const emit = defineEmits(['refresh-status', 'refresh-all', 'cancel-refresh-all',
         </div>
       </div>
     </template>
-    <el-table v-loading="status.loading" :data="status.shops" empty-text="暂无已授权店铺，请先完成 ② 店铺授权">
-      <el-table-column prop="shopId" label="店铺 ID" min-width="140" />
-      <el-table-column label="环境" width="80">
+    <el-table v-loading="status.loading" :data="visibleShops" :empty-text="status.shops.length ? '没有标记为重点的店铺，取消勾选「只看重点店铺」可查看全部' : '暂无已授权店铺，请先完成 ② 店铺授权'">
+      <el-table-column label="重点" width="56" align="center">
+        <template #default="{ row }">
+          <el-checkbox
+            :model-value="!!row.important"
+            :disabled="batch.running || busyShop.has(row.shopId)"
+            @change="(v) => emit('toggle-important', row.shopId, v)"
+          />
+        </template>
+      </el-table-column>
+      <el-table-column prop="shopId" label="店铺 ID" min-width="110" />
+      <el-table-column label="环境" width="72">
         <template #default="{ row }">{{ envLabel(row.env) }}</template>
       </el-table-column>
       <el-table-column label="access_token 到期" min-width="170">
         <template #default="{ row }">{{ fmtTime(row.accessExpireAt) }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="110">
+      <el-table-column label="状态" width="90">
         <template #default="{ row }">
           <el-tag :type="stateMeta(row).type" effect="light">{{ stateMeta(row).label }}</el-tag>
         </template>
@@ -66,6 +84,7 @@ const emit = defineEmits(['refresh-status', 'refresh-all', 'cancel-refresh-all',
       </el-table-column>
     </el-table>
     <div class="hint" style="margin-top: 8px">
+      <b>重点店铺</b>：勾选「重点」后，<b>监控大屏采集</b>与 <b>Shopee 查询 Skill</b> 只作用于这些店铺；一个都没勾选时按「全部已授权店铺」生效（各工具页「选择店铺」下拉不受影响）。<br />
       access_token 约 4 小时有效（过期自动刷新）；refresh_token 约 30 天有效，长期不用需重新授权。<br />
       批量刷新按共享 token 分组整组续期（每组只刷一次）；短时间内刚刷新过会跳过重复刷新（防连点把刚轮换的凭证刷死），同一时刻只允许一个批量任务在跑；标「需重新授权」的店铺会被跳过，重新授权后自动恢复。
     </div>
