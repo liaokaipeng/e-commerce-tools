@@ -16,11 +16,15 @@
 //
 // 红线：默认只读 —— 非查询类接口（写操作）必须显式 --allow-write 才会调用；
 //       不对外暴露 token 刷新入口（刷新由 callOpenApi 内部按共享 token 组语义自动处理）。
+// --shop all 时跨店并发执行（同店内翻页仍串行）。限流按店铺维度，跨店并发安全。
 const fs = require('fs');
 const { parse, bool, intOf } = require('./lib/args');
 const catalog = require('./lib/catalog');
 const { callWithPaging } = require('./lib/paging');
 const { extractPayload, print, fail } = require('./lib/output');
+
+// 跨店并发度：与开放平台其它 fan-out 同量级（stores-view 取名并发 5、监控按店采集 3）
+const CALL_SHOP_CONCURRENCY = 5;
 
 const USAGE = [
   'Shopee 数据查询 CLI（复用仓库开放平台凭证，无需启动服务）',
@@ -245,17 +249,32 @@ async function cmdCall(positional, flags) {
   const all = bool(flags.all);
   const raw = bool(flags.raw);
   const targets = resolveShops(flags.shop, flags);
-  const results = {};
-  for (const shopId of targets) {
-    try {
-      const j = await callWithPaging({ apiPath, business, shopId, method, all, maxPages });
-      results[shopId] = raw ? j : extractPayload(j);
-    } catch (e) {
-      if (targets.length === 1) throw e;
-      results[shopId] = { __error: e.message };
+  // 跨店并发：限流按店铺维度，跨店并发安全；同店不并发（翻页在 callWithPaging 内串行）。
+  // 结果按下标回填、最后按 targets 顺序组装，避免并发下对象键序不确定。
+  const settled = new Array(targets.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < targets.length) {
+      const i = cursor++;
+      const shopId = targets[i];
+      try {
+        const j = await callWithPaging({ apiPath, business, shopId, method, all, maxPages });
+        settled[i] = { shopId, value: raw ? j : extractPayload(j) };
+      } catch (e) {
+        settled[i] = { shopId, error: e };
+      }
     }
+  };
+  await Promise.all(Array.from({ length: Math.min(CALL_SHOP_CONCURRENCY, targets.length) }, worker));
+  // 单店失败直接抛出（保持原语义：错误交给顶层打印并置非零退出码）
+  if (targets.length === 1) {
+    if (settled[0].error) throw settled[0].error;
+    print(settled[0].value);
+    return;
   }
-  print(targets.length === 1 ? results[targets[0]] : results);
+  const results = {};
+  for (const it of settled) results[it.shopId] = it.error ? { __error: it.error.message } : it.value;
+  print(results);
 }
 
 /** 命令分发 */
