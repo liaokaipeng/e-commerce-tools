@@ -86,7 +86,7 @@ const visibleShops = computed(() => (onlyImportant.value ? props.status.shops.fi
     <div class="hint" style="margin-top: 8px">
       <b>重点店铺</b>：勾选「重点」后，<b>监控大屏采集</b>与 <b>Shopee 查询 Skill</b> 只作用于这些店铺；一个都没勾选时按「全部已授权店铺」生效（各工具页「选择店铺」下拉不受影响）。<br />
       access_token 约 4 小时有效（过期自动刷新）；refresh_token 约 30 天有效，长期不用需重新授权。<br />
-      批量刷新按共享 token 分组整组续期（每组只刷一次）；短时间内刚刷新过会跳过重复刷新（防连点把刚轮换的凭证刷死），同一时刻只允许一个批量任务在跑；标「需重新授权」的店铺会被跳过，重新授权后自动恢复。
+      批量刷新会逐店刷新（每个店铺用各自 shop_id 换 token，各自保存）；短时间内刚刷新过会跳过重复刷新（防连点刷死凭证），同一时刻只允许一个批量任务在跑；标「需重新授权」的店铺会被跳过，重新授权后自动恢复。
     </div>
   </el-card>
 </template>

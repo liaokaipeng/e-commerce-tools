@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const { t } = require('../helpers');
 const { nowSec, buildBaseString, hmacHex, maskToken } = require('../../server/lib/openapi-utils');
 const openapi = require('../../server/openapi');
-const { isAuthDead, isAuthRetryable, planRefresh } = require('../../server/openapi/client');
+const { isAuthDead, isAuthRetryable, isAuthFatalAfterRefresh } = require('../../server/openapi/client');
 
 async function run() {
   // ===== 开放平台：签名纯函数 =====
@@ -51,24 +51,17 @@ async function run() {
   t('isAuthDead 不命中普通业务/网络错误', isAuthDead('开放平台错误 error_param：缺少必填参数') === false && isAuthDead('连接超时') === false);
   t('isAuthRetryable 认证类错误可刷新重试', isAuthRetryable('开放平台错误 error_access_token：xxx') === true && isAuthRetryable('开放平台错误 invalid_acceess_token：Invalid access_token, please have a check.') === true);
   t('isAuthRetryable 普通错误不重试', isAuthRetryable('商品清单：接口超时') === false);
-  {
-    const shared = [
-      { shopId: 's1', refreshToken: 'R', merchantId: 'M1' },
-      { shopId: 's2', refreshToken: 'R', merchantId: 'M1' },
-      { shopId: 's3', refreshToken: 'R2', merchantId: 'M1' },
-    ];
-    t('planRefresh 独立凭证 → individual', planRefresh({ shopId: 's3', refreshToken: 'R2', merchantId: 'M1' }, shared).mode === 'individual');
-    const gm = planRefresh({ shopId: 's1', refreshToken: 'R', merchantId: 'M1' }, shared);
-    t('planRefresh 共享同商户 → group-merchant（含组大小）', gm.mode === 'group-merchant' && gm.merchantId === 'M1' && gm.groupSize === 2);
-    t('planRefresh 共享跨商户 → group-nomerchant', planRefresh({ shopId: 's1', refreshToken: 'R', merchantId: 'M1' }, [
-      { shopId: 's1', refreshToken: 'R', merchantId: 'M1' },
-      { shopId: 's2', refreshToken: 'R', merchantId: 'M2' },
-    ]).mode === 'group-nomerchant');
-    t('planRefresh 共享无 merchantId → group-nomerchant', planRefresh({ shopId: 's1', refreshToken: 'R', merchantId: '' }, [
-      { shopId: 's1', refreshToken: 'R', merchantId: '' },
-      { shopId: 's2', refreshToken: 'R', merchantId: '' },
-    ]).mode === 'group-nomerchant');
-  }
+  t('isAuthFatalAfterRefresh 命中「已换新 token 仍报」的 error_auth / error_access_token',
+    isAuthFatalAfterRefresh('开放平台错误 error_auth：Invalid access_token, please have a check.') === true
+      && isAuthFatalAfterRefresh('开放平台错误 error_access_token：xxx') === true);
+  t('isAuthFatalAfterRefresh 覆盖 isAuthDead 文案',
+    isAuthFatalAfterRefresh('开放平台错误 invalid_acceess_token：Invalid access_token, please have a check.') === true);
+  t('isAuthFatalAfterRefresh 不误伤业务子码 error_auth_*',
+    isAuthFatalAfterRefresh('开放平台错误 error_auth_product_is_pff：product is pff') === false
+      && isAuthFatalAfterRefresh('开放平台错误 error_auth_shop_not_found：x') === false);
+  t('isAuthFatalAfterRefresh 不命中权限/普通错误',
+    isAuthFatalAfterRefresh('开放平台错误 error_permission：no permission') === false
+      && isAuthFatalAfterRefresh('连接超时') === false);
 }
 
 module.exports = { run };

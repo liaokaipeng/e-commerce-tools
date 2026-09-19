@@ -1,5 +1,5 @@
 'use strict';
-// 开放平台签名与 query 组装：signedCall（通用接口）与 refreshVia（刷新 token）共用同一套口径，
+// 开放平台签名与 query 组装：signedCall（通用接口）与 refreshToken（刷新 token）共用同一套口径，
 // 避免两处各写一遍签名 / 拼 URL 导致签名规则漂移。
 const { buildBaseString, hmacHex } = require('../../lib/openapi-utils');
 

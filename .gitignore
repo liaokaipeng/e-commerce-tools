@@ -39,6 +39,12 @@ research/
 # AI 助手本地记忆目录（工作日志 / 会话上下文，不入库）
 .workbuddy/
 
+# 本地自动化辅助（邮件发送脚本与 SMTP 凭证，不入库、不进发布包）
+/.trae/local/
+
+# 自动化生成的报告（含业务数据，不入库）
+/reports/
+
 .DS_Store
 Thumbs.db
 

@@ -144,8 +144,9 @@ function register({ get, post }) {
     });
   }));
 
-  // 手动刷新某店铺 token：与自动续期共用 client.refreshShopNow 的分组决策 ——
-  // 共享主账号 token 的店铺整组续期（旧 refresh_token 一次性作废，单店刷新会拖死同组其它店铺）。
+  // 手动刷新某店铺 token：与自动续期共用 client.refreshShopNow，按该店 shop_id 刷新、只写回本店。
+  // **不能**用 merchant_id 整组刷：实测刷出来的是商户级 token，拿它调店铺级接口报 invalid_acceess_token
+  // （官方 refresh_access_token 要求 shop_id / merchant_id「必须分别刷新」，见 docs/开放平台链路.md §3）。
   post('/api/openapi/refresh', jsonAction('/api/openapi/refresh', async (body, req, res) => {
     const shopId = String(body.shopId || '').trim();
     if (!shopId) throw new Error('缺少 shop_id');
@@ -168,9 +169,7 @@ function register({ get, post }) {
       message: r.mode === 'cooldown'
         // 冷却：距上次刷新不足 REFRESH_COOLDOWN_MS，当前 token 仍有效，未重复请求网关（防连点刷死凭证）
         ? `距上次刷新不足 ${Math.round(client.REFRESH_COOLDOWN_MS / 60000)} 分钟，当前 token 仍在有效期内，未重复刷新`
-        : r.synced > 1
-          ? `Token 刷新成功，已同步续期同组 ${r.synced} 个店铺（旧 refresh_token 已失效）`
-          : 'Token 刷新成功（旧 refresh_token 已失效）',
+        : 'Token 刷新成功（旧 refresh_token 已失效）',
     });
   }));
 

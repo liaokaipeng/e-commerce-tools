@@ -3,15 +3,15 @@
 // 后续功能模块统一经此调用官方接口，无需自行拼签名 / 处理刷新。
 const { signedCall } = require('./transport');
 const { ensureFresh } = require('./ensure');
-const { markInvalidByPlan } = require('./persist');
 const { resolveApp } = require('./auth');
-const { isAuthDead, isAuthRetryable } = require('./errors');
+const { isAuthDead, isAuthRetryable, isAuthFatalAfterRefresh } = require('./errors');
 
 /**
  * 通用开放平台接口调用（后续功能统一入口）。
  * 自动读取 App 配置、附带 access_token / shop_id 并签名；
  * access_token 过期先自动刷新；autoRefresh=false 时不重试认证类错误。
- * 确认凭证死透（刷新后仍报认证错）时把店铺标记为「需重新授权」，供大屏暂停采集并提示。
+ * 确认凭证死透（刷新后仍报认证错）时把**该店铺**标记为「需重新授权」——只标本店，
+ * 因为按 shop_id 刷新得到的 token 不跨店共享（见 docs/开放平台链路.md §3）。
  * @param {string} apiPath 完整接口路径（如 /api/v2/product/get_item_list）
  * @param {object} business 业务参数（不含公共参数）
  * @param {object} opts { shopId, signal, autoRefresh = true, method = 'POST' }
@@ -41,11 +41,13 @@ async function callOpenApi(apiPath, business = {}, opts = {}) {
         store.clearShopInvalid(app.env, id);
         return j;
       } catch (e2) {
-        if (isAuthDead(e2.message)) markInvalidByPlan(app.env, id, e2.message);
+        // 已强制换新 token 后重试仍失败：用 isAuthFatalAfterRefresh（覆盖 error_auth / error_access_token）。
+        // 这类错误不刷新就标失效会误杀，但刷新后仍报就是终态——否则店铺状态一直「有效」而调用一直报错。
+        if (isAuthFatalAfterRefresh(e2.message)) store.markShopInvalid(app.env, id, e2.message);
         throw e2;
       }
     }
-    if (isAuthDead(e.message)) markInvalidByPlan(app.env, id, e.message);
+    if (isAuthDead(e.message)) store.markShopInvalid(app.env, id, e.message);
     throw e;
   }
 }

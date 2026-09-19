@@ -1,20 +1,21 @@
 'use strict';
 // 开放平台「店铺授权 + token 刷新」链路测试（离线，不依赖真实网关）。
 //
-// 手法：替换 server/lib/http 的 request 为 mock 网关（模拟官方「旧 refresh_token 调用后立即作废」语义），
-//      并把凭证文件隔离到临时路径——必须在 require store/client 之前设 OPENAPI_SESSION_FILE **并清 require 缓存**，
-//      否则会命中 unit.test.js 已加载的旧实例（指向用户真实 server/data/openapi-session.json）。
+// 手法：替换 server/lib/http 的 request 为 mock 网关（模拟官方「按 shop_id 刷新、该 id 的旧 refresh_token
+//      用一次即作废」语义），并把凭证文件隔离到临时路径——必须在 require store/client 之前设
+//      OPENAPI_SESSION_FILE **并清 require 缓存**，否则会命中 unit.test.js 已加载的旧实例
+//      （指向用户真实 server/data/openapi-session.json）。
 // 覆盖（均对应真实修过的缺陷）：
-//   1. 共享 token 组的手动刷新必须整组续期（单店刷新会作废同组其它店铺的 refresh_token）
-//   2. 独立凭证按 shop_id 刷新、不跨店传播
-//   3. 认证类失败重试必须**真的强制刷新**（token 名义未过期时旧逻辑会复用同一个 token，白跑一次就标失效）
-//   4. 并发强制刷新同一店铺只发一次网关请求（per-shop 锁）
-//   5. 路由 /api/openapi/refresh 返回整组续期结果；失效店铺不进「选择店铺」列表
-//   5b. 重点店铺标记（/api/openapi/shop-important）：写标记 / 计数 / status 回显 / 非法入参 400
-//   6. 换 partner_id 清空旧凭证；非数字 id 明确报错；响应载荷层解析口径统一
-//   7. 批量刷新（/api/openapi/refresh-all/run）按共享 token 分组去重：3 店共享组只发一次网关请求，
-//      失效店铺整组跳过且不被误标恢复
+//   1. 手动刷新按 shop_id 逐店刷新、只写回本店（不再用 merchant_id 整组续期——实测 merchant 级 token
+//      调店铺级接口报 invalid_acceess_token，会「一点刷新全组变坏」）
+//   2. 认证类失败重试必须**真的强制刷新**（token 名义未过期时旧逻辑会复用同一个 token，白跑一次就标失效）
+//   3. 并发强制刷新同一店铺只发一次网关请求（per-shop 锁）
+//   4. 路由 /api/openapi/refresh 只续期本店；失效店铺不进「选择店铺」列表
+//   5. 重点店铺标记（/api/openapi/shop-important）：写标记 / 计数 / status 回显 / 非法入参 400
+//   6. 换 partner_id 清空旧凭证；非数字 shop_id 明确报错；响应载荷层解析口径统一
+//   7. 批量刷新逐店刷新（共享 token 的店各发一次网关请求、各自换 token），失效店铺跳过且不被误标恢复
 //   8. 手动刷新冷却（刚刷过不重复请求网关，但不拦截 callOpenApi 的认证失败强制刷新）与批量刷新单飞互斥
+//   9. 已强制换新 token 后仍报终端认证错 → 标「需重新授权」；业务子码 error_auth_* 不误标
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -42,10 +43,13 @@ httpLib.request = async (opts) => {
   if (apiPath === '/api/v2/auth/access_token/get') {
     if (gwHold.on) await new Promise((resolve) => gwHold.waiters.push(resolve)); // 卡住响应
     const rt = body && body.refresh_token;
-    if (!rt || gw.revoked.has(rt)) {
+    const id = body && (body.shop_id !== undefined ? body.shop_id : body.merchant_id);
+    const key = String(rt) + '|' + String(id);
+    if (!rt || gw.revoked.has(key)) {
       return okJson({ error: 'error_auth', message: 'Your refresh token or shop_id is wrong' });
     }
-    gw.revoked.add(rt); // 官方语义：旧 refresh_token 调用后立即失效
+    // 官方语义：某个 id 的旧 refresh_token 用一次即作废；共享 refresh_token 可分别用于不同店铺（各店各自换）
+    gw.revoked.add(key);
     gw.seq += 1;
     return okJson({ access_token: 'AT' + gw.seq, refresh_token: 'RT' + gw.seq, expire_in: 14400 });
   }
@@ -56,6 +60,7 @@ httpLib.request = async (opts) => {
     });
   }
   if (apiPath === '/api/v2/shop/get_shop_info') {
+    if (gw.bizAlwaysErr) return okJson(gw.bizAlwaysErr); // 持续失败：验证「刷新后仍失败」的终端判定
     if (gw.bizFail > 0) { gw.bizFail -= 1; return okJson({ error: 'error_auth', message: 'Invalid access_token' }); }
     return okJson({ shop_name: '测试店铺', region: 'SG' });
   }
@@ -149,7 +154,7 @@ function reset(shops) {
 async function cases() {
   console.log('  -- 开放平台刷新链路（离线 mock 网关） --');
 
-  // 1) 共享 token 组的手动刷新必须整组续期
+  // 1) 手动刷新按 shop_id 逐店刷新：只写回本店，不跨店传播
   reset([
     { shopId: '111', merchantId: '9001' },
     { shopId: '222', merchantId: '9001' },
@@ -157,27 +162,26 @@ async function cases() {
   ]);
   const r1 = await client.refreshShopNow('prod', '111');
   const c1 = gw.calls.filter((c) => c.apiPath === REFRESH_PATH);
-  t('共享 token 组手动刷新走 merchant_id 整组刷新（不是 shop_id）',
-    c1.length === 1 && c1[0].body.merchant_id === 9001 && c1[0].body.shop_id === undefined,
+  t('手动刷新按 shop_id 刷新（不发 merchant_id）',
+    c1.length === 1 && c1[0].body.shop_id === 111 && c1[0].body.merchant_id === undefined,
     JSON.stringify(c1));
   const after1 = store.getShopsRaw('prod');
-  t('整组续期：三店同时换到同一新 refresh_token',
-    after1.length === 3 && after1.every((s) => s.refreshToken === 'RT1'),
+  t('只写回本店：111 换新 token，共享同 token 的 222/333 保持不变',
+    after1.find((s) => s.shopId === '111').refreshToken === 'RT1'
+      && after1.find((s) => s.shopId === '222').refreshToken === 'R'
+      && after1.find((s) => s.shopId === '333').refreshToken === 'R',
     after1.map((s) => `${s.shopId}:${s.refreshToken}`).join(' '));
-  t('整组续期后没有被误标「需重新授权」的店铺',
-    after1.every((s) => !s.invalid),
-    after1.map((s) => `${s.shopId}:${s.invalid}`).join(' '));
-  t('refreshShopNow 返回 synced=3 / mode=group-merchant',
-    r1.synced === 3 && r1.mode === 'group-merchant',
+  t('refreshShopNow 返回 synced=1 / mode=individual',
+    r1.synced === 1 && r1.mode === 'individual',
     JSON.stringify({ synced: r1.synced, mode: r1.mode }));
 
-  // 2) 独立凭证按店铺刷新，不跨店传播
+  // 2) 逐店刷新只影响本店（不同 refresh_token 的店铺互不影响）
   reset([{ shopId: '111' }, { shopId: '222' }]);
   store.setShop('prod', '222', { refreshToken: 'R2' });
   const r2 = await client.refreshShopNow('prod', '111');
   const c2 = gw.calls.filter((c) => c.apiPath === REFRESH_PATH);
-  t('独立凭证按 shop_id 刷新', c2.length === 1 && c2[0].body.shop_id === 111, JSON.stringify(c2));
-  t('独立凭证刷新只写回本店（其余店铺 token 不动）',
+  t('按 shop_id 刷新', c2.length === 1 && c2[0].body.shop_id === 111, JSON.stringify(c2));
+  t('刷新只写回本店（其余店铺 token 不动）',
     r2.synced === 1 && store.getShop('prod', '111').refreshToken === 'RT1' && store.getShop('prod', '222').refreshToken === 'R2');
 
   // 3) 认证类失败重试必须真的强制刷新（token 名义未过期也要刷）
@@ -200,14 +204,14 @@ async function cases() {
     gw.calls.filter((c) => c.apiPath === REFRESH_PATH).length === 1,
     gw.calls.map((c) => c.apiPath).join(' → '));
 
-  // 5) 路由层：整组续期结果透出 / 失效店铺不进「选择店铺」列表
+  // 5) 路由层：只续期本店 / 失效店铺不进「选择店铺」列表
   reset([{ shopId: '111', merchantId: '9001' }, { shopId: '222', merchantId: '9001' }]);
   const res5 = await callRoute('POST /api/openapi/refresh', { shopId: '111' });
-  t('POST /api/openapi/refresh 返回 syncedShops=2 / mode=group-merchant',
-    res5.status === 200 && res5.data.ok === true && res5.data.syncedShops === 2 && res5.data.mode === 'group-merchant',
+  t('POST /api/openapi/refresh 返回 syncedShops=1 / mode=individual',
+    res5.status === 200 && res5.data.ok === true && res5.data.syncedShops === 1 && res5.data.mode === 'individual',
     JSON.stringify(res5.data));
-  t('刷新提示文案包含同组店铺数量',
-    typeof res5.data.message === 'string' && res5.data.message.includes('2'),
+  t('刷新提示文案为「Token 刷新成功」',
+    typeof res5.data.message === 'string' && res5.data.message.includes('刷新成功'),
     res5.data.message);
 
   reset([{ shopId: '111' }, { shopId: '222' }]);
@@ -243,7 +247,7 @@ async function cases() {
   const impNone = await callRoute('POST /api/openapi/shop-important', {});
   t('shop-important 缺少 shop_id 返回 400', impNone.status === 400, JSON.stringify(impNone.data));
 
-  // 6) 换 App 清空旧凭证 / 非数字 id 报错 / 载荷层解析口径统一
+  // 6) 换 App 清空旧凭证 / 非数字 shop_id 报错 / 载荷层解析口径统一
   reset([{ shopId: '111' }]);
   const saved = store.setApp({ partnerId: '7654321', partnerKey: 'k2', env: 'prod' });
   t('换 partner_id 时清空该环境旧店铺凭证',
@@ -251,14 +255,11 @@ async function cases() {
   const saved2 = store.setApp({ partnerId: '7654321', partnerKey: 'k3', env: 'prod' });
   t('同一 partner_id 重复保存不清空凭证', saved2.shopsCleared === false);
 
-  reset([
-    { shopId: '111', merchantId: 'M-非数字' },
-    { shopId: '222', merchantId: 'M-非数字' },
-  ]);
+  reset([{ shopId: 'abc' }]);
   let msg8 = '';
-  try { await client.refreshShopNow('prod', '111'); } catch (e) { msg8 = e.message; }
-  t('非数字 merchant_id 明确报错（不再静默发出 merchant_id:null）',
-    msg8.includes('merchant_id') && msg8.includes('非数字'),
+  try { await client.refreshShopNow('prod', 'abc'); } catch (e) { msg8 = e.message; }
+  t('非数字 shop_id 明确报错（不再静默发出 shop_id:null）',
+    msg8.includes('shop_id') && msg8.includes('非数字'),
     msg8);
 
   t('pickPayload 兼容包在 response 层的响应',
@@ -268,7 +269,7 @@ async function cases() {
     tk.authorizedShopIds.join(',') === '111,222,333' && tk.merchantId === '9001',
     JSON.stringify({ shops: tk.authorizedShopIds, merchantId: tk.merchantId }));
 
-  // 7) 批量刷新：按共享 token 分组去重（逐店刷新会作废同组凭证）
+  // 7) 批量刷新：逐店刷新，共享 token 的店各发一次网关请求、各自换 token
   reset([
     { shopId: '111', merchantId: '9001' },
     { shopId: '222', merchantId: '9001' },
@@ -279,24 +280,24 @@ async function cases() {
   await resAll.endPromise;
   const evs = sseEvents(resAll);
   const refreshCalls = gw.calls.filter((c) => c.apiPath === REFRESH_PATH);
-  t('批量刷新：共享组只刷一次（3 店 1 组）+ 独立店铺一次 = 共 2 次网关请求',
-    refreshCalls.length === 2 && refreshCalls.filter((c) => c.body.merchant_id === 9001).length === 1,
+  t('批量刷新：4 个店铺各发一次网关请求（带 shop_id、不发 merchant_id）',
+    refreshCalls.length === 4
+      && refreshCalls.every((c) => c.body.shop_id !== undefined && c.body.merchant_id === undefined),
     JSON.stringify(refreshCalls.map((c) => c.body)));
-  t('批量刷新 start 事件带 jobId 与总组数',
-    evs[0].type === 'start' && !!evs[0].jobId && evs[0].totalGroups === 2 && evs[0].totalShops === 4,
+  t('批量刷新 start 事件带 jobId 与总店铺数',
+    evs[0].type === 'start' && !!evs[0].jobId && evs[0].totalGroups === 4 && evs[0].totalShops === 4,
     JSON.stringify(evs[0]));
   const gd = evs.filter((e) => e.type === 'group-done');
-  t('批量刷新：两组都成功且各自带回 synced',
-    gd.length === 2 && gd.every((e) => e.ok === true) && gd.reduce((n, e) => n + e.synced, 0) === 4,
+  t('批量刷新：4 个店铺都成功且各自带回 synced=1',
+    gd.length === 4 && gd.every((e) => e.ok === true && e.synced === 1),
     JSON.stringify(gd));
   const afterAll = store.getShopsRaw('prod');
-  t('批量刷新后四店 token 全部续期（共享组同一新 token）',
-    afterAll.length === 4 && afterAll.filter((s) => ['111', '222', '333'].includes(s.shopId)).every((s) => s.refreshToken === 'RT1')
-      && afterAll.find((s) => s.shopId === '444').refreshToken === 'RT2',
+  t('批量刷新后四店 token 各自续期为不同新值（不共享同一 token）',
+    afterAll.length === 4 && new Set(afterAll.map((s) => s.refreshToken)).size === 4,
     afterAll.map((s) => `${s.shopId}:${s.refreshToken}`).join(' '));
   const sum7 = evs.find((e) => e.type === 'summary');
-  t('批量刷新 summary 统计：2 组成功 / 4 个店铺续期 / 0 失败 0 跳过',
-    !!sum7 && sum7.refreshed === 2 && sum7.synced === 4 && sum7.failed === 0 && sum7.skipped === 0,
+  t('批量刷新 summary 统计：4 个店铺成功 / 0 失败 0 跳过',
+    !!sum7 && sum7.refreshed === 4 && sum7.synced === 4 && sum7.failed === 0 && sum7.skipped === 0,
     JSON.stringify(sum7));
 
   // 8) 批量刷新：失效店铺被跳过，不发网关请求、不被误标「已恢复」
@@ -315,26 +316,28 @@ async function cases() {
     JSON.stringify(evsSkip.find((e) => e.type === 'summary')));
   t('批量刷新不会把失效店铺当成「已恢复」', store.getShop('prod', '222').invalid === true);
 
-  // 9) planRefreshGroups 纯函数：分组与跳过语义
+  // 9) planRefreshGroups 纯函数：一店一个单元，失效/缺 token 跳过
   const { planRefreshGroups } = require('../server/openapi/refresh-all');
   const pg = planRefreshGroups([
     { shopId: '3', refreshToken: 'A', merchantId: 'M1' },
     { shopId: '1', refreshToken: 'A', merchantId: 'M1' },
     { shopId: '2', refreshToken: 'B', merchantId: 'M1' },
-    { shopId: '4', refreshToken: 'C', merchantId: '' },
-    { shopId: '5', refreshToken: 'C', merchantId: '' },
+    { shopId: '4', refreshToken: 'C', invalid: true },
     { shopId: '6', refreshToken: '' },
   ]);
-  t('planRefreshGroups：共享 token 归一组、代表取最小 shopId、mode=group-merchant',
-    pg.groups.length === 2 && pg.groups[0].repShopId === '1' && pg.groups[0].shopIds.join(',') === '1,3'
-      && pg.groups[0].mode === 'group-merchant' && pg.groups[0].size === 2,
+  t('planRefreshGroups：一店一个单元、按 shopId 数字序、mode=individual',
+    pg.groups.length === 3 && pg.groups[0].repShopId === '1' && pg.groups[1].repShopId === '2'
+      && pg.groups[2].repShopId === '3' && pg.groups.every((g) => g.size === 1 && g.mode === 'individual'),
     JSON.stringify(pg.groups));
-  t('planRefreshGroups：共享无 merchant_id 的组与缺 refresh_token 的店铺都进跳过',
-    pg.skipped.length === 2 && pg.skipped.some((s) => s.shopIds.join(',') === '4,5')
+  t('planRefreshGroups：共享同一 refresh_token 的店不再归为一组（各自一个单元）',
+    pg.groups.filter((g) => g.shopIds[0] === '1' || g.shopIds[0] === '3').length === 2,
+    JSON.stringify(pg.groups));
+  t('planRefreshGroups：失效店铺与缺 refresh_token 的店铺都进跳过',
+    pg.skipped.length === 2 && pg.skipped.some((s) => s.shopIds.join(',') === '4')
       && pg.skipped.some((s) => s.shopIds.join(',') === '6'),
     JSON.stringify(pg.skipped));
 
-  // 10) 手动刷新冷却：刚刷过再点不重复请求网关（防连点把刚轮换的凭证刷死 → 整组被判需重新授权）
+  // 10) 手动刷新冷却：刚刷过再点不重复请求网关（防连点把刚轮换的凭证刷死）
   reset([{ shopId: '111', merchantId: '9001' }, { shopId: '222', merchantId: '9001' }]);
   await client.refreshShopNow('prod', '111');
   const callsAfterFirst = gw.calls.filter((c) => c.apiPath === REFRESH_PATH).length;
@@ -346,8 +349,8 @@ async function cases() {
   t('冷却未把店铺标记「需重新授权」', store.getShopsRaw('prod').every((s) => !s.invalid));
   store.setShop('prod', '111', { refreshedAt: 0 }); // 老数据无冷却基准 → 应照常真刷新
   const cool2 = await client.refreshShopNow('prod', '111');
-  t('无 refreshedAt（老数据）不受冷却拦截，仍真刷新整组',
-    cool2.mode === 'group-merchant' && cool2.synced === 2,
+  t('无 refreshedAt（老数据）不受冷却拦截，仍真刷新本店',
+    cool2.mode === 'individual' && cool2.synced === 1,
     JSON.stringify({ mode: cool2.mode, synced: cool2.synced }));
 
   // 11) 冷却只作用于手动/批量入口：callOpenApi 的认证失败重试必须仍真刷新（否则坏 token 被复用、白标失效）
@@ -366,7 +369,7 @@ async function cases() {
 
   // 12) 批量刷新单飞：任务进行中再触发被 409 拒绝，结束后互斥释放、可再次发起
   reset([{ shopId: '111', merchantId: '9001' }, { shopId: '222', merchantId: '9001' }]);
-  gwHold.on = true; // 卡住第一组的网关响应，让任务停留在「进行中」
+  gwHold.on = true; // 卡住第一个店铺的网关响应，让任务停留在「进行中」
   const runA = await callRoute('POST /api/openapi/refresh-all/run', {});
   const runB = await callRoute('POST /api/openapi/refresh-all/run', {});
   t('批量刷新单飞：进行中再触发返回 409（不启动第二套刷新）',
@@ -383,10 +386,33 @@ async function cases() {
   const runC = await callRoute('POST /api/openapi/refresh-all/run', {});
   await runC.endPromise;
   const evsC = sseEvents(runC);
-  t('批量刷新互斥释放后可再次发起（冷却生效：1 组跳过重复刷新、未再触达网关）',
-    evsC.some((e) => e.type === 'summary' && e.cooled === 1 && e.synced === 0)
+  t('批量刷新互斥释放后可再次发起（冷却生效：2 店跳过重复刷新、未再触达网关）',
+    evsC.some((e) => e.type === 'summary' && e.cooled === 2 && e.synced === 0)
       && gw.calls.filter((c) => c.apiPath === REFRESH_PATH).length === callsBeforeC,
     JSON.stringify(evsC.find((e) => e.type === 'summary')));
+
+  // 13) 已强制换新 token 后仍报终端认证错 → 必须标记「需重新授权」
+  // （否则状态一直显示「有效」而每次调用都报错，即用户看到的「显示成功但实际不成功」）
+  reset([{ shopId: '777' }]);
+  gw.bizAlwaysErr = { error: 'error_auth', message: 'something went wrong' }; // 文案不含误导性 "Invalid access_token"
+  let threw13 = false;
+  try { await client.callOpenApi('/api/v2/shop/get_shop_info', {}, { shopId: '777', method: 'GET' }); }
+  catch { threw13 = true; }
+  const st777 = store.status().shops.find((s) => s.shopId === '777');
+  t('强制刷新后仍报 error_auth → 标记「需重新授权」（状态不再谎报有效）',
+    threw13 && !!st777 && st777.state === 're_auth' && store.getShop('prod', '777').invalid === true,
+    JSON.stringify(st777));
+
+  // 14) 业务子码 error_auth_* 不是凭证问题，不能误标「需重新授权」
+  reset([{ shopId: '778' }]);
+  gw.bizAlwaysErr = { error: 'error_auth_product_is_pff', message: 'product is pff' };
+  try { await client.callOpenApi('/api/v2/shop/get_shop_info', {}, { shopId: '778', method: 'GET' }); }
+  catch { /* 预期抛错，但不应把店铺标失效 */ }
+  const st778 = store.status().shops.find((s) => s.shopId === '778');
+  t('业务子码 error_auth_product_is_pff 不标记「需重新授权」（避免误杀权限外的店）',
+    !!st778 && st778.state !== 're_auth' && store.getShop('prod', '778').invalid !== true,
+    JSON.stringify(st778));
+  gw.bizAlwaysErr = null;
 }
 
 async function run() {

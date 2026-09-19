@@ -45,4 +45,18 @@ function isAuthRetryable(message) {
   return /error_auth|error_access_token|invalid_acceess_token|invalid access_token|refresh token or shop_id is wrong/i.test(String(message || ''));
 }
 
-module.exports = { ERROR_HINTS, hintOf, isAuthDead, isAuthRetryable };
+// 「已强制换新 token 后仍报」的终端认证错误码：error_auth / error_access_token。
+// 这类错误刷新一次可能救得回，但真换过新 token 重试还报，就等价于凭证死透（只能重新授权）。
+// 负向前瞻排除业务子码 error_auth_product_is_pff / error_auth_shop_not_found 等（它们不是凭证问题，标失效会误杀）。
+const AUTH_FATAL_AFTER_REFRESH_RE = /error_auth(?![_a-z0-9])|error_access_token(?![_a-z0-9])/i;
+
+/**
+ * 是否「刷新后仍失败」的终端认证错误（callOpenApi 重试失败 / ensureFresh 刷新失败的收尾标记口径）。
+ * 比 isAuthDead 多覆盖 error_auth / error_access_token —— 否则这类错误刷新后仍失败时不会被标记，
+ * 店铺状态会一直显示「有效」而每次调用都报错。
+ */
+function isAuthFatalAfterRefresh(message) {
+  return isAuthDead(message) || AUTH_FATAL_AFTER_REFRESH_RE.test(String(message || ''));
+}
+
+module.exports = { ERROR_HINTS, hintOf, isAuthDead, isAuthRetryable, isAuthFatalAfterRefresh };

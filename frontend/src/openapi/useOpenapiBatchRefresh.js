@@ -1,5 +1,5 @@
 // 开放平台页 · 批量刷新 token：SSE 进度状态机（batch/batchProgress）与取消。
-// 从 openapi/App.vue 抽出；后端按共享 token 分组去重后逐组整组续期（见 server/openapi/refresh-all.js），
+// 从 openapi/App.vue 抽出；后端逐店刷新（每店用各自 shop_id 换 token，见 server/openapi/refresh-all/），
 // 这里只消费 SSE 进度。刷新结束后统一 refreshStatus 拉取最新状态。
 import { reactive, computed } from 'vue';
 import { ElMessage } from 'element-plus';
@@ -8,7 +8,7 @@ import { runSSE } from '../composables/useSSE.js';
 export function useOpenapiBatchRefresh({ refreshStatus }) {
   const batch = reactive({ running: false, jobId: '', done: 0, total: 0, synced: 0, failed: 0, skipped: 0 });
   const batchProgress = computed(() => {
-    const p = batch.total ? `${batch.done}/${batch.total} 组` : '准备中';
+    const p = batch.total ? `${batch.done}/${batch.total} 家店铺` : '准备中';
     const tail = batch.skipped ? `，跳过 ${batch.skipped} 店` : '';
     return `批量刷新中…（${p}，已续期 ${batch.synced} 店${tail}）`;
   });

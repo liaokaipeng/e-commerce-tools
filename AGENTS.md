@@ -49,7 +49,7 @@
 
 - **取消类链路（取消竞价 / Hot Listing）**：只处理资格正常的行；前端 SPU 配置区只渲染已选店铺，但 `spuMap` 必须**全量**回传（少传键＝删配置）。细节见 [docs/架构.md](docs/架构.md) §1.2。
 - **视频上传**：**写操作必须 `call({ idempotent:false })`**，否则失败重放会「重复合并 / 发两条视频」；大文件必须流式，不得整文件 `readFileSync`。详见 [docs/视频上传链路.md](docs/视频上传链路.md) §8。
-- **开放平台**：**刷新一律走 `ensureFresh` / `refreshShopNow`，绝不逐店遍历刷新**——单店刷新共享 token 组会作废组内其它店铺的 refresh_token，把整组拖成「需重新授权」；官方功能统一经 `callOpenApi`，不自行拼签名。详见 [docs/开放平台链路.md](docs/开放平台链路.md) §3。
+- **开放平台**：**刷新一律按店铺 `shop_id` 逐店进行（`ensureFresh` / `refreshShopNow`），绝不用 `merchant_id` 整组刷**——官方要求 shop_id / merchant_id「必须分别刷新」，实测 merchant_id 刷出来的是商户级 token，调店铺级接口报 `invalid_acceess_token`，会把「状态显示有效」的店铺刷成全部不可用；官方功能统一经 `callOpenApi`，不自行拼签名。详见 [docs/开放平台链路.md](docs/开放平台链路.md) §3。
 - **重点店铺筛选**：开放平台页勾选「重点店铺」后，**监控大屏采集与 shopee_skill 只作用于重点店铺**（一个都没勾选时回落为全部已授权店铺，不是硬性开关）；判定源唯一在 `server/openapi/store` 的 `getImportantIds`，改大屏注册表或 CLI 取店范围必须复用它，否则两边范围会漂移。各工具页「选择店铺」下拉不受该筛选影响。详见 [docs/开放平台链路.md](docs/开放平台链路.md) §4。
 - **监控大屏**：金额阈值一律按人民币配置与比较；规则阈值「留空 = 该级别不触发」必须用 `null` 传递（前端空值转 `null`，否则默认阈值会「复活」）；系统自检告警同样受规则 `enabled` 约束。详见 [docs/监控大屏实现.md](docs/监控大屏实现.md) §4。
 - **开放平台接口报参数错误时**（error_param / 格式错 / Wrong sign / error_unknown）：网关报错文案经常是误导性的，**先查 `docs/shopee_api_doc/` 核对参数名与必填项，再用最小参数组合逐变体验证**，不要按字面改——完整排查顺序见 [docs/开发指南.md](docs/开发指南.md) §5.1。
