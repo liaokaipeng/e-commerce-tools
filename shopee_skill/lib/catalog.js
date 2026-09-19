@@ -196,10 +196,40 @@ function findApi(input) {
   return apis.find((a) => a.apiName === apiName) || null;
 }
 
-/** 描述单个接口（未收录时仍按命名/元数据给出方法，并带 inCatalog 标记） */
-function describe(input) {
+/**
+ * 解析用户输入为接口条目（agent 提速：允许短名，省一次 search 往返）：
+ *   1) 精确匹配（v2.order.get_order_list / 完整路径）；
+ *   2) 短名唯一匹配：`get_order_list` / `order.get_order_list`（去掉 v2. 前缀后按末段/后缀比对，
+ *      大小写不敏感）；唯一命中直接用，多个命中抛错并列出候选（报错即 search 结果）；
+ *   3) 零命中：返回 entry=null（保持「未收录也能按命名推断继续」的既有语义）。
+ * @returns {{ apiName, apiPath, entry: object|null, matched: 'exact'|'suffix'|'none' }}
+ */
+function resolveApi(input) {
   const { apiName, apiPath } = normalizeApi(input);
-  const entry = findApi(apiName);
+  const { apis } = loadCatalog();
+  const exact = apis.find((a) => a.apiName === apiName) || null;
+  if (exact) return { apiName, apiPath, entry: exact, matched: 'exact' };
+  const bare = String(input || '').trim().replace(/^v2\./i, '').toLowerCase();
+  if (!bare) throw new Error('缺少接口名或接口路径');
+  const hits = apis.filter((a) => {
+    const n = a.apiName.slice(3).toLowerCase(); // 去掉 v2. 前缀
+    return n === bare || n.endsWith('.' + bare);
+  });
+  if (hits.length === 1) {
+    return { apiName: hits[0].apiName, apiPath: hits[0].apiPath, entry: hits[0], matched: 'suffix' };
+  }
+  if (hits.length > 1) {
+    const names = hits.slice(0, 8).map((h) => '  ' + h.apiName).join('\n');
+    const more = hits.length > 8 ? `\n  …共 ${hits.length} 个` : '';
+    throw new Error(`「${input}」匹配到 ${hits.length} 个接口，请用完整接口名重试：\n${names}${more}`);
+  }
+  return { apiName, apiPath, entry: null, matched: 'none' };
+}
+
+/** 描述单个接口（未收录时仍按命名/元数据给出方法，并带 inCatalog 标记）。
+ *  默认输出瘦身版参数表（name/type/required/sample，省 token）；full=true 时输出完整元数据。 */
+function describe(input, opts = {}) {
+  const { apiName, apiPath, entry } = resolveApi(input);
   const mo = methodOf(apiName);
   const meta = metaOf(apiName);
   const out = {
@@ -217,7 +247,9 @@ function describe(input) {
   if (meta) {
     out.required = (meta.request || []).filter((p) => p.required).map((p) => p.name);
     out.optional = (meta.request || []).filter((p) => !p.required).map((p) => p.name);
-    out.requestParams = meta.request || [];
+    out.params = (meta.request || []).map((p) => (opts.full
+      ? p
+      : { name: p.name, type: p.type, required: !!p.required, sample: p.sample }));
     out.paging = meta.paging || { style: '', keys: [], listKeys: [] };
     out.errors = meta.errors || [];
     out.rateLimit = meta.rateLimit || '';
@@ -240,6 +272,7 @@ function resolveModule(input, modules) {
 /**
  * 列出接口。默认只列查询类（read），--writes 时一并列出写操作。
  * 关键词匹配接口名 / 接口路径 / 模块中文名 / 模块英文名。
+ * 输出仅保留 agent 需要的字段（apiPath 可由 apiName 推导、methodSource 是噪音，均省 token）。
  * @param {object} opts { module?, keyword?, writes? }
  */
 function listApis(opts = {}) {
@@ -259,9 +292,7 @@ function listApis(opts = {}) {
   if (!opts.writes) out = out.filter((a) => a.read);
   return out.map((a) => ({
     apiName: a.apiName,
-    apiPath: a.apiPath,
     method: a.method,
-    methodSource: a.methodSource,
     read: a.read,
     module: a.moduleZh,
   }));
@@ -272,6 +303,7 @@ module.exports = {
   listApis,
   normalizeApi,
   findApi,
+  resolveApi,
   describe,
   inferMethod,
   apiNameOf,

@@ -9,77 +9,99 @@ description: "查询 Shopee 开放平台数据（订单/商品/库存/广告/资
 
 方法与必填参数取自官方文档元数据 `docs/shopee_api_doc/_raw/api_meta_v2.json`（由 `_tools/fetch-docs.js` 生成），不再靠接口名猜。
 
-## 何时使用
+## 最快用法（照抄即可）
 
-- 用户要查询某店铺的 Shopee 数据：订单、商品、库存、广告、资金、退货退款、账户健康、评价等。
-- 用户给出官方接口名（如 `v2.product.get_item_list`）或描述清楚要查什么，需要落到具体接口。
-
-## 前置条件
-
-1. 已在工具的「开放平台」页面配置 App（`partner_id` / `partner_key` / 环境），并完成**店铺授权**。
-2. 凭证保存在 `server/data/openapi-session.json`（**gitignored，切勿提交或外泄**）。CLI 与本工具页面共用这份凭证。
-3. 在仓库根目录执行命令：`node shopee_skill/cli.js ...`。
-
-## 标准流程
-
-先「找接口」→ 再看「接口元数据」→ 最后「调用」：
+在**仓库根目录**执行：
 
 ```bash
-# 1) 列出/搜索接口（默认只列查询类；加 --writes 才含写操作）
-node shopee_skill/cli.js list --modules                 # 查看全部模块（含中文名与接口数）
-node shopee_skill/cli.js search order                   # 按关键词搜接口名/路径/模块名
-node shopee_skill/cli.js list --module 商品 --keyword item   # 按模块 + 关键词过滤（支持模块 ID 或中文/英文名）
+# 1) 先拿店铺 ID（直接读本地凭证缓存，含店铺名，零网关请求）
+node shopee_skill/cli.js shops
 
-# 2) 看接口元数据（方法 / 必填与可选参数 / 分页键 / 错误码 / 官方文档链接）
-node shopee_skill/cli.js describe v2.product.get_item_list
-
-# 3) 调用
-node shopee_skill/cli.js call v2.shop.get_shop_info --shop 123456
+# 2) 查数据（接口名可用唯一短名，自动补全 v2.<模块>. 前缀）
+node shopee_skill/cli.js call get_order_list --shop <ID> --last 7d --page-size 100
+node shopee_skill/cli.js call get_shop_info --shop <ID>
+node shopee_skill/cli.js call get_order_list --shop <ID> --last 30d --page-size 100 --all   # 拉全量
 ```
+
+**起步只需两条命令**：`shops` 拿 ID，再 `call`。接口名支持**唯一短名**（如 `get_order_list`），会自动补全为 `v2.order.get_order_list`；短名有歧义时报错并列出候选（等同搜索结果），补全全名重试即可。**这样省掉「先 search 再 call」的一次往返。**
+
+## 常用接口速查（省掉 search / describe 往返）
+
+| 场景 | 接口（可直接当短名用） | 必填业务参数 | 翻页 |
+|---|---|---|---|
+| 店铺信息 | `v2.shop.get_shop_info` | 无 | — |
+| 订单列表 | `v2.order.get_order_list` | `time_range_field` `time_from` `time_to` `page_size` | cursor |
+| 订单详情 | `v2.order.get_order_detail` | `order_sn_list`（逗号分隔） | — |
+| 发货单列表 | `v2.order.get_shipment_list` | `page_size` | cursor |
+| 物流轨迹 | `v2.logistics.get_tracking_info` | `order_sn` | — |
+| 商品列表 | `v2.product.get_item_list` | `offset` `page_size` `item_status` | offset |
+| 商品基础信息 | `v2.product.get_item_base_info` | `item_id_list` | — |
+| 型号 / 库存 | `v2.product.get_model_list` | `item_id` | — |
+| 商品评价 | `v2.product.get_comment` | `cursor` `page_size` | cursor |
+| 退货退款 | `v2.returns.get_return_list` | `page_no` `page_size` | page |
+| 打款 / 账单 | `v2.payment.get_escrow_list` | `release_time_from` `release_time_to` | page |
+| 钱包流水 | `v2.payment.get_wallet_transaction_list` | `page_no` `page_size` | page |
+| 店铺表现 | `v2.account_health.get_shop_performance` | 无 | — |
+
+- **时间窗**类接口用 `--last 7d` 或 `--from 2024-01-01 --to 2024-01-31` 自动补 `time_from` / `time_to` / `time_range_field`，不必手写时间戳；**分页类记得给 `--page-size`**。
+- 表里没有的接口：`search <关键词>` → `describe <接口名>` → `call`。（`search` 默认最多 20 条，命中更多会给出 `truncated` 提示，可加 `--limit 0` 或缩窄关键词。）
+
+## 标准流程（表里没有的接口才需要）
+
+```bash
+node shopee_skill/cli.js list --modules                 # 全部模块（含中文名与接口数）
+node shopee_skill/cli.js search order                   # 按关键词搜接口名/路径/模块名（默认最多 20 条）
+node shopee_skill/cli.js list --module 商品 --keyword item   # 按模块 + 关键词过滤
+node shopee_skill/cli.js describe get_order_list        # 方法 / 必填参数 / 分页键 / 文档链接（支持短名）
+node shopee_skill/cli.js call get_shop_info --shop 123456
+```
+
+`describe` 默认输出精简参数表（`name/type/required/sample`）省 token；需要完整元数据（含参数说明）加 `--full`。
 
 ## 常用示例
 
 ```bash
-# 已授权店铺列表（默认离线读取本地凭证，且只列「重点店铺」）
+# 店铺列表（默认只列「重点店铺」，带缓存店铺名）
 node shopee_skill/cli.js shops
-node shopee_skill/cli.js shops --names        # 额外经 get_shop_info 补店铺名/地区（会产生少量网关请求）
 node shopee_skill/cli.js shops --all-shops    # 忽略「重点店铺」筛选，列出全部已授权店铺
+node shopee_skill/cli.js shops --names        # 对未缓存的店铺联网补名/地区（少量网关请求）
 
 # 店铺信息（GET，无业务参数）
-node shopee_skill/cli.js call v2.shop.get_shop_info --shop 123456
+node shopee_skill/cli.js call get_shop_info --shop 123456
 
-# 待发货订单列表（时间窗用 --last 自动补 time_from/time_to/time_range_field）
-node shopee_skill/cli.js call v2.order.get_order_list --shop 123456 --last 7d --page-size 100
+# 待发货订单（时间窗用 --last 自动补 time_from/time_to/time_range_field）
+node shopee_skill/cli.js call get_order_list --shop 123456 --last 7d --page-size 100
 
-# 时间窗也支持显式端点：epoch 秒 / 13 位毫秒 / ISO 日期 / 相对 -7d
-node shopee_skill/cli.js call v2.order.get_order_list --shop 123456 --from 2024-01-01 --to 2024-01-31 --page-size 100
+# 显式时间端点：epoch 秒 / 13 位毫秒 / ISO 日期 / 相对 -7d
+node shopee_skill/cli.js call get_order_list --shop 123456 --from 2024-01-01 --to 2024-01-31 --page-size 100
 
-# 商品列表
-node shopee_skill/cli.js call v2.product.get_item_list --shop 123456 --params '{"item_status":"NORMAL","offset":0,"page_size":50}'
+# 商品列表（--param 传单参数，值自动按标量解析）
+node shopee_skill/cli.js call get_item_list --shop 123456 --param item_status=NORMAL --param offset=0 --param page_size=50
 
-# 单品库存（--param 传单参数，值自动按标量解析）
-node shopee_skill/cli.js call v2.product.get_model_list --shop 123456 --param item_id=123456789
+# 单品库存
+node shopee_skill/cli.js call get_model_list --shop 123456 --param item_id=123456789
 
-# 自动翻页拉全量（自适应 cursor / offset / page_no，默认上限 10 页；返回带 pages/maxPages/truncated）
-node shopee_skill/cli.js call v2.order.get_order_list --shop 123456 --last 30d --all --max-pages 5 --page-size 100
+# 拉全量（自适应 cursor / offset / page_no；page 风格并行拉取，返回带 pages/maxPages/truncated）
+node shopee_skill/cli.js call get_order_list --shop 123456 --last 30d --all --max-pages 5 --page-size 100
 
-# 只取需要的字段（省 token；Windows 默认没有 jq，用内置 --select）
-node shopee_skill/cli.js call v2.order.get_order_list --shop 123456 --last 7d --page-size 100 --select orders --compact
+# 只取需要字段（省 token）：--select 定位列表，--fields 裁剪字段
+node shopee_skill/cli.js call get_order_list --shop 123456 --last 7d --page-size 100 \
+  --select order_list --fields order_sn,order_status,total_amount --compact
 
 # 对「重点店铺」执行同一次查询（未标记任何重点店铺时为全部已授权店铺）
-node shopee_skill/cli.js call v2.shop.get_shop_info --shop all --wrap
+node shopee_skill/cli.js call get_shop_info --shop all --wrap
 
 # 忽略「重点店铺」筛选，对全部已授权店铺执行（可调并发）
-node shopee_skill/cli.js call v2.shop.get_shop_info --shop all --all-shops --concurrency 8 --fail-on-error
+node shopee_skill/cli.js call get_shop_info --shop all --all-shops --concurrency 12 --fail-on-error
 
 # 写操作：先用 --dry-run 预览将发送的方法/路径/参数，确认后再加 --allow-write
 node shopee_skill/cli.js call v2.discount.add_discount --shop 123456 --params '{...}' --dry-run
 
-# 查看网关原始响应（含 error / message / request_id，排查用）
-node shopee_skill/cli.js call v2.shop.get_shop_info --shop 123456 --raw
+# 排查：输出网关原始响应（含 error / message / request_id）
+node shopee_skill/cli.js call get_shop_info --shop 123456 --raw
 ```
 
-输出默认是**美化 JSON**（单店输出载荷层 `response`；`--raw` 输出完整响应），可直接用管道解析；加 `--compact` 输出紧凑 JSON（省 token）。
+输出：`shops` / `list` / `search` / `describe` 默认**紧凑 JSON**（省 token，`--pretty` 恢复缩进）；`call` 默认美化 JSON、加 `--compact` 省 token。单店输出载荷层 `response`，`--raw` 输出完整响应。
 
 ## 选项速查
 
@@ -95,8 +117,12 @@ node shopee_skill/cli.js call v2.shop.get_shop_info --shop 123456 --raw
 | `--from <t>` / `--to <t>` | 时间窗端点：epoch 秒 / 13 位毫秒 / ISO 日期时间 / 相对 `-7d` |
 | `--page-size <n>` | `page_size` 简写 |
 | `--all` / `--max-pages <n>` | 自动翻页与页数上限（默认 10；显式 `0` 表示不翻页、只要首屏） |
-| `--concurrency <n>` | `--shop all` 时的跨店并发度，默认 5（上限 20） |
-| `--select <path>` | 只输出指定路径（点分，支持数组下标），如 `orders.0.order_sn` |
+| `--concurrency <n>` | `--shop all` 时的跨店并发度，默认 8（上限 20） |
+| `--limit <n>` | `list` / `search` 最多展示条数，默认 20（`0` = 不限） |
+| `--select <path>` | 只输出指定路径（点分，支持数组下标），如 `order_list.0.order_sn` |
+| `--fields <a,b,c>` | 裁剪对象/列表字段（常配合 `--select` 用在列表上），如 `--select order_list --fields order_sn,total_amount` |
+| `--full` | `describe` 输出完整元数据（默认精简参数表） |
+| `--pretty` | `shops` / `list` / `search` / `describe` 恢复缩进输出（默认紧凑） |
 | `--dry-run` | 只预览将发送的方法/路径/参数，不签名、不发包（写操作也可预览） |
 | `--allow-write` | 放行写操作接口（默认只读拦截） |
 | `--raw` | 输出网关原始响应 |
@@ -113,13 +139,14 @@ node shopee_skill/cli.js call v2.shop.get_shop_info --shop 123456 --raw
 
 ## 参数校验与时间窗助手
 
-- **调用前必填校验**：有元数据时，若缺少官方必填参数会**在本地直接报错**（不浪费一次网关往返），并提示可运行 `describe` 查看参数表。
+- **调用前必填校验**：有元数据时，若缺少官方必填参数会**在本地直接报错**（不浪费一次网关往返），**报错消息里已内联必填参数的名称/类型/示例**，通常无需再跑 `describe`。
 - **未知参数提示**：传入官方参数表以外的字段会在 stderr 给出 JSON 提示（不拦截，但网关可能忽略或报错）。
 - `--last/--from/--to/--page-size` 只在用户未显式给出同名字段时注入；若该接口参数表不含该字段则跳过并提示，避免给不接受的接口硬塞 `time_from` 导致 `error_param`。
 
 ## 翻页与「全量」语义
 
 - `--all` 自适应三种翻页语义（`next_cursor` / `next_offset` / `more` + `page_no`），翻页键优先取自元数据。
+- **page 风格并行拉取**：`page_no` 确定性递增、且首屏带 `total_count` 时，剩余页并发拉取（游标来自上一页响应的 cursor / offset 风格仍串行）。
 - 合并结果在载荷层追加 **`pages` / `maxPages` / `truncated`**，并清掉首页残留的 `more` / `next_cursor` / `next_offset`：**`truncated: true` 表示被页数上限截断、不是全量**，需要更多数据时调大 `--max-pages`。
 - 无翻页语义的接口加 `--all` 也只返回首屏，不报错。
 

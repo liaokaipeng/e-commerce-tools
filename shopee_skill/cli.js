@@ -19,12 +19,14 @@ const fs = require('fs');
 const { parse, bool, intOf } = require('./lib/args');
 const catalog = require('./lib/catalog');
 const { callWithPaging } = require('./lib/paging');
-const { extractPayload, print, fail, warn, selectPath } = require('./lib/output');
+const { extractPayload, print, fail, warn, selectPath, pickFields } = require('./lib/output');
 const { applyHelpers } = require('./lib/time');
 
-// 跨店并发度：与开放平台其它 fan-out 同量级（stores-view 取名并发 5、监控按店采集 3）
-const CALL_SHOP_CONCURRENCY = 5;
+// 跨店并发度：限流按店铺维度，跨店并发安全；默认 8（上限 20）
+const CALL_SHOP_CONCURRENCY = 8;
 const MAX_SHOP_CONCURRENCY = 20;
+// search / list 默认最多展示条数（省 token；--limit 0 展示全部）
+const SEARCH_DEFAULT_LIMIT = 20;
 // 公共参数由底座自动附带，不计入「必填业务参数」校验
 const COMMON_PARAMS = new Set(['shop_id', 'partner_id', 'access_token', 'timestamp', 'sign']);
 
@@ -34,12 +36,12 @@ const USAGE = [
   '用法：node shopee_skill/cli.js <命令> [选项]',
   '',
   '命令：',
-  '  shops [--names] [--all-shops]    列出已授权店铺（默认只列「重点店铺」）',
-  '  list [--module <ID|名称>] [--keyword <kw>] [--writes] [--modules]',
-  '                                   列出接口目录（默认只列查询类；--writes 含写操作）',
+  '  shops [--names] [--all-shops]    列出已授权店铺（默认只列「重点店铺」，带缓存店铺名）',
+  '  list [--module <ID|名称>] [--keyword <kw>] [--writes] [--modules] [--limit <n>]',
+  '                                   列出接口目录（默认只列查询类，最多 20 条）',
   '  search <关键词>                   在接口名/路径/模块名中搜索（等价 list --keyword）',
-  '  describe <接口名|路径>            查看接口方法、参数表、分页键、错误码与官方文档链接',
-  '  call <接口名|路径> --shop <ID|all>  调用接口并输出数据（详见下方选项）',
+  '  describe <接口名|路径> [--full]   查看接口方法、参数表、分页键与官方文档链接',
+  '  call <接口名|路径> --shop <ID|all>  调用接口并输出数据（接口名支持唯一短名，如 get_order_list）',
   '  help                             显示本说明',
   '',
   'call 选项：',
@@ -52,29 +54,34 @@ const USAGE = [
   '  --last <dur>      时间窗：最近 N 时长（7d / 24h / 30m），自动补 time_from/time_to/time_range_field',
   '  --from <t> / --to <t>  时间窗端点：epoch 秒 / 13 位毫秒 / ISO 日期 / -7d（相对现在）',
   '  --page-size <n>   page_size 简写',
-  '  --all             自动翻页拉全量（自适应 cursor / offset / page_no，默认上限 10 页）',
+  '  --all             自动翻页拉全量（自适应 cursor / offset / page_no，默认上限 10 页；page 风格并行拉取）',
   '  --max-pages <n>   自动翻页上限，默认 10；显式 0 表示不翻页（只要首屏）',
-  '  --concurrency <n> --shop all 时的跨店并发度，默认 5（上限 20）',
+  '  --concurrency <n> --shop all 时的跨店并发度，默认 8（上限 20）',
   '  --select <path>   只输出指定路径（点分，支持数组下标），如 orders.0.order_sn',
+  '  --fields <a,b,c>  裁剪输出字段（常配合 --select 用在列表上），如 --select orders --fields order_sn,total_amount',
   '  --dry-run         只打印将发送的方法/路径/参数，不签名、不发包（写操作也可预览）',
   '  --allow-write     放行写操作接口（默认只读拦截）',
   '  --raw             输出网关原始响应（含 error / message / request_id）',
   '  --wrap            统一输出信封 { ok, apiName, method, data|shops }',
   '  --fail-on-error   多店部分失败时置非零退出码',
-  '  --compact         紧凑 JSON（不加缩进，省 token）',
+  '  --compact         紧凑 JSON（不加缩进，省 token）；shops/list/search/describe 默认已紧凑，--pretty 恢复缩进',
   '',
   '示例：',
-  '  node shopee_skill/cli.js shops --names',
+  '  node shopee_skill/cli.js shops',
   '  node shopee_skill/cli.js search order',
-  '  node shopee_skill/cli.js describe v2.product.get_item_list',
-  '  node shopee_skill/cli.js call v2.shop.get_shop_info --shop 123456',
-  '  node shopee_skill/cli.js call v2.order.get_order_list --shop 123456 --last 7d --all --page-size 100',
+  '  node shopee_skill/cli.js describe get_order_list',
+  '  node shopee_skill/cli.js call get_order_list --shop 123456 --last 7d --all --page-size 100',
+  '  node shopee_skill/cli.js call get_item_list --shop 123456 --param item_status=NORMAL',
   '  node shopee_skill/cli.js call v2.discount.add_discount --shop 123456 --params \'{...}\' --dry-run',
 ].join('\n');
 
-/** 紧凑输出（--compact 时 JSON 不加缩进，省 token） */
-function emit(value, flags) {
-  print(value, { compact: bool(flags.compact) });
+/**
+ * 输出 JSON。元信息类命令（list/search/describe）默认紧凑省 token，--pretty 可恢复缩进；
+ * --compact 对任何命令强制紧凑。
+ */
+function emit(value, flags, compactDefault) {
+  const compact = bool(flags.compact) || (compactDefault && !bool(flags.pretty));
+  print(value, { compact });
 }
 
 function normConcurrency(v) {
@@ -93,7 +100,7 @@ function cmdShops(flags) {
       count: 0,
       shops: [],
       message: '尚未配置开放平台 App，请先在工具的「开放平台」页面保存 partner_id / partner_key',
-    }, flags);
+    }, flags, true);
     return Promise.resolve();
   }
   // 「重点店铺」筛选：有标记且未加 --all-shops 时只列出重点店铺（与监控大屏取店范围一致）；
@@ -111,18 +118,21 @@ function cmdShops(flags) {
       ? '仅列出「重点店铺」（在「开放平台」页面勾选）；如需全部店铺请加 --all-shops'
       : (importantSet.size ? '未筛选（--all-shops）' : '未标记任何重点店铺，按全部已授权店铺处理'),
   };
-  let shops = source.map((s) => ({
-    shopId: s.shopId,
-    env: s.env,
-    state: s.state,
-    important: !!s.important,
-    accessExpireAt: s.accessExpireAt,
-    remainSec: s.remainSec,
-    invalid: !!s.invalid,
-    invalidReason: s.invalidReason || '',
-  }));
+  // 店铺名/地区直接读本地缓存（stores-view 拉取后持久化在 session 文件），零网关请求；
+  // 缓存缺失的店可加 --names 联网补全。
+  const rawByName = {};
+  for (const s of store.getShopsRaw(st.env)) rawByName[s.shopId] = s;
+  let shops = source.map((s) => {
+    const raw = rawByName[s.shopId] || {};
+    const o = { shopId: s.shopId, state: s.state, important: !!s.important };
+    if (raw.shopName) o.name = raw.shopName;
+    if (raw.shopRegion) o.region = raw.shopRegion;
+    if (s.invalid) o.invalidReason = s.invalidReason || '';
+    return o;
+  });
   if (!bool(flags.names)) {
-    emit(Object.assign({}, meta, { shops }), flags);
+    if (shops.some((s) => !s.name)) meta.nameNote = '部分店铺名未缓存，加 --names 可联网补全';
+    emit(Object.assign({}, meta, { shops }), flags, true);
     return Promise.resolve();
   }
   // --names：经 authorizedStores 补店铺名/地区（会对缺名店铺调 get_shop_info，产生少量网关请求）
@@ -135,30 +145,49 @@ function cmdShops(flags) {
       emit(Object.assign({}, meta, {
         shops,
         note: '已尝试经 get_shop_info 补店铺名/地区（可能产生少量网关请求）',
-      }), flags);
+      }), flags, true);
     });
+}
+
+/**
+ * 列表截断：默认最多 SEARCH_DEFAULT_LIMIT 条（--limit 0 展示全部）。
+ * 命中数不超上限时原样返回数组；超出时改为信封 { total, shown, truncated, rows, note }，
+ * 明确告知「还有更多」，避免 agent 误以为已列出全部。
+ */
+function limitList(rows, flags) {
+  const raw = (flags.limit !== undefined && flags.limit !== true)
+    ? intOf(flags.limit, SEARCH_DEFAULT_LIMIT)
+    : SEARCH_DEFAULT_LIMIT;
+  if (raw <= 0 || rows.length <= raw) return rows;
+  return {
+    total: rows.length,
+    shown: raw,
+    truncated: true,
+    rows: rows.slice(0, raw),
+    note: `命中 ${rows.length} 条，仅显示前 ${raw} 条；加 --limit 0 显示全部，或用更具体的关键词 / --module 缩小范围`,
+  };
 }
 
 function cmdList(flags) {
   const { modules } = catalog.loadCatalog();
   if (bool(flags.modules)) {
-    emit(modules.map((m) => ({ moduleId: m.moduleId, module: m.moduleZh, moduleName: m.moduleName, count: m.count })), flags);
+    emit(modules.map((m) => ({ moduleId: m.moduleId, module: m.moduleZh, moduleName: m.moduleName, count: m.count })), flags, true);
     return;
   }
   const rows = catalog.listApis({ module: flags.module, keyword: flags.keyword, writes: bool(flags.writes) });
-  emit(rows, flags);
+  emit(limitList(rows, flags), flags, true);
 }
 
 function cmdSearch(positional, flags) {
   const kw = positional[1];
   if (!kw) throw new Error('用法：node shopee_skill/cli.js search <关键词>');
-  emit(catalog.listApis({ keyword: kw, writes: bool(flags.writes) }), flags);
+  emit(limitList(catalog.listApis({ keyword: kw, writes: bool(flags.writes) }), flags), flags, true);
 }
 
 function cmdDescribe(positional, flags) {
   const api = positional[1];
   if (!api) throw new Error('用法：node shopee_skill/cli.js describe <接口名|路径>');
-  emit(catalog.describe(api), flags);
+  emit(catalog.describe(api, { full: bool(flags.full) }), flags, true);
 }
 
 /** 解析 --params / --params-file / --param 得到业务参数对象（后者覆盖前者） */
@@ -264,8 +293,8 @@ async function cmdCall(positional, flags) {
   if (!api) {
     throw new Error("用法：node shopee_skill/cli.js call <接口名|路径> --shop <店铺ID|all> [--params '{...}']");
   }
-  const { apiName, apiPath } = catalog.normalizeApi(api);
-  const entry = catalog.findApi(apiName);
+  // 短名唯一时直接解析（如 get_order_list），省一次 search 往返；歧义时报错列出候选
+  const { apiName, apiPath, entry } = catalog.resolveApi(api);
   const meta = catalog.metaOf(apiName);
   const mo = (flags.method !== undefined && flags.method !== true)
     ? { method: String(flags.method).toUpperCase(), source: 'flag' }
@@ -318,6 +347,7 @@ async function cmdCall(positional, flags) {
   const failOnError = bool(flags['fail-on-error']);
   const raw = bool(flags.raw);
   const select = flags.select !== undefined && flags.select !== true ? String(flags.select) : '';
+  const fields = flags.fields !== undefined && flags.fields !== true ? String(flags.fields) : '';
 
   // --dry-run：只预览将发送的方法/路径/参数，不签名、不发包（写操作也不拦截）
   if (dryRun) {
@@ -340,7 +370,13 @@ async function cmdCall(positional, flags) {
 
   if (shopsError) throw new Error(shopsError);
   if (missingRequired.length) {
-    throw new Error(`接口 ${apiName} 缺少必填参数：${missingRequired.join(', ')}（可运行 describe ${apiName} 查看参数表）`);
+    // 报错直接内联必填参数的名称/类型/示例，省掉一次 describe 往返
+    const reqMeta = (meta && Array.isArray(meta.request) ? meta.request : [])
+      .filter((p) => missingRequired.includes(p.name))
+      .map((p) => `  ${p.name} (${p.type || '?'}${p.sample !== undefined && p.sample !== '' ? `，示例 ${p.sample}` : ''})`);
+    throw new Error(`接口 ${apiName} 缺少必填参数：${missingRequired.join(', ')}`
+      + (reqMeta.length ? `\n必填参数：\n${reqMeta.join('\n')}` : '')
+      + `\n完整参数表：node shopee_skill/cli.js describe ${apiName}`);
   }
 
   const all = bool(flags.all);
@@ -365,7 +401,11 @@ async function cmdCall(positional, flags) {
   };
   await Promise.all(Array.from({ length: Math.min(conc, targets.length) }, worker));
 
-  const pick = (v) => (select ? selectPath(v, select) : v);
+  // 输出裁剪：先按 --select 定位，再按 --fields 裁剪字段（省 token）
+  const pick = (v) => {
+    const s = select ? selectPath(v, select) : v;
+    return fields ? pickFields(s, fields) : s;
+  };
 
   // 单店：失败直接抛出（保持原语义：错误交给顶层打印并置非零退出码）
   if (targets.length === 1) {

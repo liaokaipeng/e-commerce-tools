@@ -66,4 +66,25 @@ function selectPath(value, dotted) {
   return cur;
 }
 
-module.exports = { extractPayload, print, fail, warn, selectPath };
+/**
+ * 按 --fields 裁剪输出字段（省 token）：逗号分隔字段名。
+ * 对象只保留指定字段；数组逐元素裁剪（元素非对象时原样保留）；标量原样返回。
+ * 与 --select 配合使用：--select orders --fields order_sn,total_amount。
+ */
+function pickFields(value, csv) {
+  const names = String(csv == null ? '' : csv).split(',').map((s) => s.trim()).filter(Boolean);
+  if (!names.length) return value;
+  if (Array.isArray(value)) {
+    return value.map((v) => (v && typeof v === 'object' && !Array.isArray(v) ? pickFields(v, csv) : v));
+  }
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const n of names) {
+      if (Object.prototype.hasOwnProperty.call(value, n)) out[n] = value[n];
+    }
+    return out;
+  }
+  return value;
+}
+
+module.exports = { extractPayload, print, fail, warn, selectPath, pickFields };

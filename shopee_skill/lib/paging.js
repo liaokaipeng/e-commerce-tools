@@ -6,9 +6,29 @@
 // 不翻页的接口（响应无 more / next_cursor / next_offset）直接返回首屏；循环受 maxPages 上限约束。
 // 合并后清理首页残留的翻页字段，并给出 pages / maxPages / truncated，避免调用方把
 // 「被上限截断的部分数据」误当成全量（这是 agent 场景最容易出错的地方）。
+//
+// 提速：page 风格（page_no 确定性递增）且首屏带 total_count 时，剩余页并行拉取
+// （页号由服务端换算偏移，客户端无前后依赖）；cursor / offset 的游标来自上一页响应，
+// 必须串行。并行度 PAGE_FETCH_CONCURRENCY 按店内同接口小并发，限流按店铺维度，安全。
 const { callOpenApi } = require('../../server/openapi/client');
 
 const DEFAULT_MAX_PAGES = 10;
+const PAGE_FETCH_CONCURRENCY = 4;
+
+/** 有界并发映射：保持结果顺序（按 items 下标回填） */
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  const n = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: n }, worker));
+  return out;
+}
 
 /** 取响应载荷层（response 优先，其次顶层），用于识别翻页键与列表键 */
 function responseOf(raw) {
@@ -96,22 +116,48 @@ async function callWithPaging({ apiPath, business, shopId, method, all, maxPages
   let pages = 1;
   let truncated = false;
 
-  while (pages < cap) {
-    if (!stillMore(cur, style, pageSize, lastLen)) break;
-    const params = nextParams(base, cur, style, startPage, pages);
-    if (!params) break;
-    const j = await callOpenApi(apiPath, params, { shopId, method });
-    pages++;
-    cur = responseOf(j);
-    if (Array.isArray(cur[key])) {
-      lastLen = cur[key].length;
-      collected = collected.concat(cur[key]);
-    } else {
-      lastLen = 0;
+  // page 风格提速：首页 + total_count + page_size 可算出总页数、页号确定性递增，剩余页并行拉取。
+  // 仅当从第 1 页起（startPage===1）才成立——用户显式传 page_no 时页码基线不同，退回串行更稳。
+  const totalNum = cur && Number(cur.total_count);
+  if (style === 'page' && pageSize > 0 && startPage === 1 && Number.isFinite(totalNum)) {
+    const totalPages = Math.max(1, Math.ceil(totalNum / pageSize));
+    const lastPage = Math.min(cap, totalPages);
+    if (lastPage > 1) {
+      const pageNums = [];
+      for (let p = startPage + 1; p <= lastPage; p++) pageNums.push(p);
+      const responses = await mapLimit(pageNums, PAGE_FETCH_CONCURRENCY,
+        (p) => callOpenApi(apiPath, Object.assign({}, base, { page_no: p }), { shopId, method }));
+      for (const j of responses) {
+        cur = responseOf(j);
+        if (Array.isArray(cur[key])) {
+          lastLen = cur[key].length;
+          collected = collected.concat(cur[key]);
+        } else {
+          lastLen = 0;
+        }
+        pages++;
+      }
+      // 因页数上限退出、且总页数还有富余 → 标记截断
+      truncated = lastPage >= cap && totalPages > lastPage;
     }
+  } else {
+    while (pages < cap) {
+      if (!stillMore(cur, style, pageSize, lastLen)) break;
+      const params = nextParams(base, cur, style, startPage, pages);
+      if (!params) break;
+      const j = await callOpenApi(apiPath, params, { shopId, method });
+      pages++;
+      cur = responseOf(j);
+      if (Array.isArray(cur[key])) {
+        lastLen = cur[key].length;
+        collected = collected.concat(cur[key]);
+      } else {
+        lastLen = 0;
+      }
+    }
+    // 因页数上限退出、且当前页仍显示有更多 → 标记截断（调用方据此判断「不是全量」）
+    if (pages >= cap && stillMore(cur, style, pageSize, lastLen)) truncated = true;
   }
-  // 因页数上限退出、且当前页仍显示有更多 → 标记截断（调用方据此判断「不是全量」）
-  if (pages >= cap && stillMore(cur, style, pageSize, lastLen)) truncated = true;
 
   const merged = Object.assign({}, responseOf(first));
   merged[key] = collected;

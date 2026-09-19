@@ -8,7 +8,7 @@ const path = require('path');
 const { t } = require('../helpers');
 const { parse, bool, intOf } = require('../../shopee_skill/lib/args');
 const catalog = require('../../shopee_skill/lib/catalog');
-const { extractPayload, selectPath } = require('../../shopee_skill/lib/output');
+const { extractPayload, selectPath, pickFields } = require('../../shopee_skill/lib/output');
 const { parseDuration, parseTimePoint, applyHelpers } = require('../../shopee_skill/lib/time');
 
 const META_FILE = path.join(__dirname, '..', '..', 'docs', 'shopee_api_doc', '_raw', 'api_meta_v2.json');
@@ -69,6 +69,31 @@ async function run() {
     t('describe 给出必填参数', Array.isArray(d.required) && d.required.includes('discount_name'));
     const custom = catalog.describe('v2.foo.bar');
     t('describe 未收录接口仍给推断方法', custom.inCatalog === false && custom.method === 'POST' && custom.methodSource === 'name');
+
+    // 短名解析（省一次 search 往返）：唯一短名/带模块短名直接定位，歧义报错列出候选，未收录返回 none
+    const rExact = catalog.resolveApi('v2.product.get_item_list');
+    t('resolveApi 全名精确匹配', rExact.matched === 'exact' && rExact.entry.apiName === 'v2.product.get_item_list');
+    const rBare = catalog.resolveApi('get_order_list');
+    t('resolveApi 唯一短名自动补全', rBare.matched === 'suffix' && rBare.apiName === 'v2.order.get_order_list'
+      && rBare.apiPath === '/api/v2/order/get_order_list', JSON.stringify({ n: rBare.apiName, m: rBare.matched }));
+    const rMod = catalog.resolveApi('product.get_item_list');
+    t('resolveApi 模块.方法 短名可定位',
+      (rMod.matched === 'exact' || rMod.matched === 'suffix') && rMod.apiName === 'v2.product.get_item_list',
+      JSON.stringify({ n: rMod.apiName, m: rMod.matched }));
+    let ambiguous = '';
+    try { catalog.resolveApi('get_item_list'); } catch (e) { ambiguous = e.message; }
+    t('resolveApi 歧义短名报错并列出候选',
+      ambiguous.includes('v2.product.get_item_list') && ambiguous.includes('v2.livestream.get_item_list'), ambiguous);
+    t('resolveApi 未收录返回 none（不报错）', catalog.resolveApi('v2.foo.bar').matched === 'none');
+
+    // describe 默认瘦身参数表（name/type/required/sample），--full 才带完整字段（含 description）
+    const slim = catalog.describe('v2.order.get_order_list');
+    const slimRow = slim.params.find((p) => p.name === 'time_from');
+    t('describe 默认精简参数表', slimRow && slimRow.type === 'timestamp' && slimRow.required === true
+      && slimRow.description === undefined && slim.requestParams === undefined);
+    const full = catalog.describe('v2.order.get_order_list', { full: true });
+    t('describe --full 输出完整参数（含 description）',
+      full.params.length === slim.params.length && !!full.params.find((p) => p.name === 'time_from').description);
   }
 
   // ===== 接口元数据（api_meta_v2.json）=====
@@ -129,6 +154,17 @@ async function run() {
     t('selectPath 支持数组下标', selectPath({ a: [{ b: 1 }, { b: 2 }] }, 'a.1.b') === 2);
     t('selectPath 空路径返回原值', JSON.stringify(selectPath({ a: 1 }, '')) === '{"a":1}');
     t('selectPath 取不到返回 undefined', selectPath({ a: 1 }, 'a.b') === undefined && selectPath({ a: 1 }, 'z') === undefined);
+
+    // --fields 裁剪（省 token）：对象取子集、数组逐元素裁剪、标量/空 names 原样返回
+    t('pickFields 对象取子集',
+      JSON.stringify(pickFields({ a: 1, b: 2, c: 3 }, 'a,c')) === '{"a":1,"c":3}');
+    t('pickFields 数组逐元素裁剪',
+      JSON.stringify(pickFields([{ a: 1, b: 2 }, { a: 3, b: 4 }], 'a')) === '[{"a":1},{"a":3}]');
+    t('pickFields 不存在的字段直接略过',
+      JSON.stringify(pickFields({ a: 1 }, 'a,zz')) === '{"a":1}');
+    t('pickFields 空 names 原样返回',
+      JSON.stringify(pickFields({ a: 1 }, '')) === '{"a":1}');
+    t('pickFields 标量原样返回', pickFields(5, 'a') === 5);
   }
 
   // ===== 自动翻页（注入假 callOpenApi）=====
@@ -200,6 +236,49 @@ async function run() {
     const { callWithPaging } = loadPagingWith(fake);
     const r = await callWithPaging({ apiPath: '/x', business: {}, shopId: '1', method: 'GET', all: true, maxPages: 10, meta: null });
     t('无翻页语义时不翻页、不报错', r.response.rates.join(',') === '1' && r.response.pages === undefined);
+  }
+
+  {
+    // page 风格 + total_count：页号确定性递增，剩余页并行拉取（乱序返回也要按页序拼接）
+    const meta = { paging: { style: 'page', keys: ['more', 'page_no'], listKeys: ['items'] } };
+    const all = [1, 2, 3, 4, 5, 6];
+    let calls = [];
+    const fake = async (apiPath, params) => {
+      const p = Number(params.page_no || 1);
+      calls.push(p);
+      const slice = all.slice((p - 1) * 2, (p - 1) * 2 + 2);
+      await new Promise((r) => setTimeout(r, p === 2 ? 20 : 0)); // 让靠后的页先返回，验证仍按页序拼接
+      return { response: { items: slice, more: p * 2 < all.length, page_no: p, total_count: all.length } };
+    };
+    const { callWithPaging } = loadPagingWith(fake);
+
+    calls = [];
+    const r1 = await callWithPaging({ apiPath: '/x', business: { page_size: 2 }, shopId: '1', method: 'GET', all: true, maxPages: 10, meta });
+    t('page 风格并行拉全量并按页序拼接',
+      r1.response.items.join(',') === '1,2,3,4,5,6' && r1.response.pages === 3 && r1.response.truncated === false
+      && calls.slice().sort((a, b) => a - b).join(',') === '1,2,3',
+      JSON.stringify({ items: r1.response.items, pages: r1.response.pages, calls }));
+
+    calls = [];
+    const r2 = await callWithPaging({ apiPath: '/x', business: { page_size: 2 }, shopId: '1', method: 'GET', all: true, maxPages: 2, meta });
+    t('page 风格受 --max-pages 截断并标记 truncated',
+      r2.response.pages === 2 && r2.response.truncated === true && r2.response.items.join(',') === '1,2,3,4',
+      JSON.stringify({ pages: r2.response.pages, truncated: r2.response.truncated, items: r2.response.items }));
+  }
+
+  {
+    // page 风格但首屏无 total_count：退回串行 more 判定（不因缺 total_count 出错）
+    const meta = { paging: { style: 'page', keys: ['more', 'page_no'], listKeys: ['items'] } };
+    let calls = 0;
+    const fake = async (apiPath, params) => {
+      calls++;
+      const p = Number(params.page_no || 1);
+      return { response: { items: p === 1 ? [1, 2] : [3], more: p === 1, page_no: p } };
+    };
+    const { callWithPaging } = loadPagingWith(fake);
+    const r = await callWithPaging({ apiPath: '/x', business: { page_size: 2 }, shopId: '1', method: 'GET', all: true, maxPages: 10, meta });
+    t('page 风格缺 total_count 时退回串行 more 判定',
+      r.response.items.join(',') === '1,2,3' && calls === 2, JSON.stringify({ items: r.response.items, calls }));
   }
 }
 
