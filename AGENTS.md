@@ -88,3 +88,5 @@
 压缩相关的单元用例（`test/unit/compress.test.js`）只测纯函数与扫描过滤，**不 spawn ffmpeg**（本机没装也能跑）；接口冒烟只验「参数校验 / 控制路由 / 扫描」这些不需要 ffmpeg 的分支。
 
 **测试假失败的三个坑（数据目录隔离 / 金额断言先钉汇率 / mock 网关类测试清 `require.cache`）最容易误改代码**，动手前先读 [docs/开发指南.md](docs/开发指南.md) §4 的对应说明；运行方式与新增用例同样见该节。定位后端 500 用 `KP_TEST_SERVER_LOG=1 node test/test.js`。
+
+**小改动别跑全量**：`node test/test.js` 是提交前 / 发布前的门槛，日常小改动按改动位置跑对应小批次即可（单个 `test/unit/*.test.js` / `openapi-refresh.test.js` / `api.test.js`，「改哪跑哪」对照与命令见 [docs/开发指南.md](docs/开发指南.md) §4.1）。**单独跑某批时退出码恒为 0**（`t()` 不设 exitCode），成败看输出里有没有 `✗` 行，别信 exit code。
