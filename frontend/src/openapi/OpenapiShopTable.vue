@@ -13,8 +13,6 @@ const props = defineProps({
   batchProgress: { type: String, default: '' },
   /** 正在操作中的店铺集合（Set） */
   busyShop: { type: Object, required: true },
-  /** 环境展示文案格式化函数 */
-  envLabel: { type: Function, required: true },
   /** 店铺状态标签格式化函数 */
   stateMeta: { type: Function, required: true },
   /** 时间戳格式化函数 */
@@ -57,8 +55,8 @@ const visibleShops = computed(() => (onlyImportant.value ? props.status.shops.fi
         </template>
       </el-table-column>
       <el-table-column prop="shopId" label="店铺 ID" min-width="110" />
-      <el-table-column label="环境" width="72">
-        <template #default="{ row }">{{ envLabel(row.env) }}</template>
+      <el-table-column label="店铺名" min-width="140">
+        <template #default="{ row }">{{ row.shopName || '—' }}</template>
       </el-table-column>
       <el-table-column label="access_token 到期" min-width="170">
         <template #default="{ row }">{{ fmtTime(row.accessExpireAt) }}</template>

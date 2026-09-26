@@ -48,7 +48,6 @@ const { batch, batchProgress, refreshAll, cancelRefreshAll } = useOpenapiBatchRe
         :batch="batch"
         :batch-progress="batchProgress"
         :busy-shop="busyShop"
-        :env-label="envLabel"
         :state-meta="stateMeta"
         :fmt-time="fmtTime"
         @refresh-status="refreshStatus(true)"

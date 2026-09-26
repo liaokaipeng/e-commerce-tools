@@ -24,15 +24,27 @@ const client = require('./openapi/client');
 // 批量刷新 token 链路（分组编排 + SSE + 暂停/取消）拆在子模块，这里只注册路由
 const refreshAll = require('./openapi/refresh-all');
 const { validateRedirect } = require('./openapi/redirect');
-const { authorizedStores } = require('./openapi/stores-view');
+const { authorizedStores, shopNameMap } = require('./openapi/stores-view');
 const { callbackPageHtml } = require('./openapi/callback-page');
 const { notifyMonitorAuthChanged } = require('./openapi/notify');
 
 // ============ 路由注册 ============
 function register({ get, post }) {
-  // 当前登录状态（token 一律打码）
-  get('/api/openapi/status', (req, res) => {
-    sendJson(res, 200, Object.assign({ ok: true }, store.status()));
+  // 当前登录状态（token 一律打码）。店铺名回填：与「选择店铺」同一套取名（openapi-session.json 的
+  // shopName → 监控 meta.json → 按需调 get_shop_info 补拉，失败 10 分钟冷却、不标记店铺失效），
+  // 失效店铺取不到名时留空，由页面回落展示。
+  get('/api/openapi/status', async (req, res) => {
+    const st = store.status();
+    if (st.configured && st.shops.length) {
+      try {
+        const names = await shopNameMap();
+        for (const s of st.shops) s.shopName = names[s.shopId] || '';
+      } catch (e) {
+        // 取名失败不影响状态页其余字段（页面店铺名列回落为「—」）
+        console.warn('回填店铺名失败:', e.message);
+      }
+    }
+    sendJson(res, 200, Object.assign({ ok: true }, st));
   });
 
   // 已授权店铺列表（「选择店铺」数据源）：店铺ID + 店铺名

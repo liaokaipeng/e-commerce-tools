@@ -103,4 +103,15 @@ async function authorizedStores() {
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
 }
 
-module.exports = { authorizedStores };
+/**
+ * 当前环境店铺名映射 `{ shopId: name }`：供 GET /api/openapi/status 回填「店铺名」列。
+ * 复用 authorizedStores 的同一套两级缓存 + 按需补拉（缺名时会触发 get_shop_info，失败 10 分钟冷却），
+ * 不另写取名逻辑；失效店铺不在其中（调用方对缺失键自行回落展示）。
+ */
+async function shopNameMap() {
+  const out = {};
+  for (const s of await authorizedStores()) out[s.id] = s.name;
+  return out;
+}
+
+module.exports = { authorizedStores, shopNameMap };

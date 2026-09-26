@@ -224,6 +224,18 @@ async function cases() {
   t('status 仍保留失效店铺（大屏「待重新授权」依赖它）',
     store.status().shops.some((s) => s.shopId === '222' && s.state === 're_auth'));
 
+  // 5a) GET /api/openapi/status 回填店铺名：与「选择店铺」同一套取名（缺名时按需补拉 get_shop_info）
+  reset([{ shopId: '111' }, { shopId: '222' }]);
+  store.markShopInvalid('prod', '222', '测试：凭证无效');
+  const res5a = await callRoute('GET /api/openapi/status', {});
+  const byId = Object.fromEntries(((res5a.data && res5a.data.shops) || []).map((s) => [s.shopId, s]));
+  t('status 每条店铺带 shopName（缺名时按需补拉）',
+    res5a.status === 200 && byId['111'] && byId['111'].shopName === '测试店铺',
+    JSON.stringify(res5a.data && res5a.data.shops));
+  t('失效店铺不在取名范围内，shopName 留空由页面回落展示',
+    byId['222'] && byId['222'].shopName === '',
+    JSON.stringify(byId['222']));
+
   // 5b) 重点店铺标记：写标记 / 计数 / status 回显 / 非法入参
   reset([{ shopId: '111' }, { shopId: '222' }, { shopId: '333' }]);
   const imp1 = await callRoute('POST /api/openapi/shop-important', { shopId: '111', important: true });
