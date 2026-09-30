@@ -164,6 +164,7 @@ node shopee_skill/cli.js call get_shop_info --shop 123456 --raw
 - **认证类错误**（如提示凭证无效 / refresh token 失效）：到工具的「开放平台」页面**重新授权**该店铺（或主账号授权一次恢复整组），再重试。
 - **参数报错**（`error_param` / 格式错 / `Wrong sign` / `error_unknown`）：网关文案常具误导性。**先按 `describe` 给出的参数表与官方文档链接核对参数名与必填项**，再用最小参数组合逐项验证，不要按字面改。
 - **商品评价 `get_comment` 两个口径**：① 无星级/时间过滤参数，`rating_star` 与 `create_time` 需拉取后本地过滤（评论按时间倒序，翻到早于时间窗的评论即可停页）；② 首页 `cursor` 传空串会被本地必填校验判为缺失（空串等同未传），实测 `--param cursor=0` 网关接受、语义等价首页空游标。
+- **商品评价 `get_comment` 翻页偶发重复**：游标翻页偶发把同一条评论返回两次（实测重复出现在页面边界，如 Great Change 店出现过），按 `comment_id` 去重后再做统计与导出，否则明细会出现重复行、差评率分母虚高。
 - **提示「无元数据 / 元数据文件缺失」**：运行 `node docs/shopee_api_doc/_tools/fetch-docs.js --meta-only` 刷新 `api_meta_v2.json`（需联网）；缺失时方法与必填会退回按接口名推断。
 - 接口名/参数不确定时，用 `search` + `describe` 定位；官方接口资料目录见 `docs/shopee_api_doc/`。
 
