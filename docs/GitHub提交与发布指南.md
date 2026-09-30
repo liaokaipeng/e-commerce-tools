@@ -87,7 +87,7 @@ git diff --cached | Select-String -Pattern 'SID=|spc_|SPC_|Bearer\s|Authorizatio
 |---|---|
 | 会话 / 凭证 | `server/data/`（真实店铺授权）、`*-session.json`、`settings.json`、`.env` 类文件 |
 | 抓包数据 | `*.har`、`research/`（Playwright 抓包脚本含登录态）、`har/` 目录 |
-| 本地产物 | `node_modules/`、`frontend/dist/`、`build/`、`backup/`、`*.xlsx` 导出、`bin/`（ffmpeg） |
+| 本地产物 | `node_modules/`、`frontend/dist/`、`build/`、`backup/`、`*.xlsx` 导出 |
 | 个人信息 | 真实店铺名 / shop_id 清单、代理地址与账密、邮箱、本机用户名与绝对路径、截图（浏览器/DevTools 截图常带 Cookie 与店铺后台，慎入文档） |
 
 **第四步：泄露处置**——若敏感信息**已经推上去**：
