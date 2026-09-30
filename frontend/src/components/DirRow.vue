@@ -1,5 +1,5 @@
 <!-- 目录行：目录输入 + 浏览 / 设为默认目录 / 打开目录
-     （tiktok / bidding 用作「保存目录」，compress 页用作「源文件夹」，故标签可由 label 覆盖） -->
+     （tiktok / bidding 用作「保存目录」，标签可由 label 覆盖以适配其它场景） -->
 <script setup>
 import { ref } from 'vue';
 import DirPicker from './DirPicker.vue';

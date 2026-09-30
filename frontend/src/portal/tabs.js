@@ -10,7 +10,6 @@ export const TABS = [
   { key: 'openapi', label: '开放平台', sub: 'App 授权与 Token 管理', group: 'Shopee', src: '/openapi/' },
   { key: 'monitor', label: '监控大屏', sub: '多店巡检三级告警', group: 'Shopee', src: '/monitor/' },
   { key: 'tiktok', label: '视频下载', sub: '批量无水印下载', group: 'TikTok', src: '/tiktok/' },
-  { key: 'compress', label: '视频压缩', sub: '递归压缩到 30MB / 1 分钟', group: '其他', src: '/compress/' },
 ];
 
 /** 侧栏分组展示顺序（只影响顺序；某分组下没有 Tab 时不会被渲染） */

@@ -5,8 +5,7 @@
  * 本仓库不引入额外解压依赖（见 AGENTS.md 约束 2）：Windows 10 1803+ 自带 bsdtar
  * （`%SystemRoot%\System32\tar.exe`），它同时支持 zip 与 tar。
  *
- * 调用方：一键更新（server/update/apply.js，解发布包）、ffmpeg 自动安装
- * （server/compress/ffmpeg.js，解构建包）、发布打包（pack.js，压 zip）。
+ * 调用方：一键更新（server/update/apply.js，解发布包）、发布打包（pack.js，压 zip）。
  * 此前 tarPath 在 update/archive.js 与 pack.js 各写一份，这里收敛为唯一实现。
  */
 const fs = require('fs');

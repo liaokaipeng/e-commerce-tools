@@ -2,7 +2,7 @@
 // 工具默认目录设置路由：settings.json 持久化（不入库）。
 // GET  /api/settings            读取各工具默认目录
 // POST /api/settings            设置某工具默认目录 { tool, dir }
-// 视频压缩页不记住文件夹（输出与源文件同目录），故 compress 不在允许列表内。
+// 只对需要记住目录的工具开放（tiktok / bidding）；其余工具不持久化目录。
 const { sendJson, readJsonBodySoft } = require('../lib/http-utils');
 const settings = require('../lib/settings');
 
