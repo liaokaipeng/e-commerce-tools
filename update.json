@@ -1,8 +1,8 @@
 {
-  "version": "1.2.3",
-  "builtAt": "2026-09-19T11:07:33.900Z",
-  "commit": "07129bc",
-  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.2.3/kp_tools-v1.2.3.zip",
-  "sha256": "b6e7f4d83ceb4c1bb9db42ffbdfe35041cbb776eb8fc8b6787a7d8c04751197e",
-  "notes": "开放平台授权修复与重点店铺筛选：\n\n1) 修复开放平台 token 刷新：改为按每个店铺各自的 shop_id 逐店刷新、逐店保存。此前点「刷新」会用商户级 token 做整组续期，导致所有店铺的接口集体失效（表现为：开放平台里状态显示正常、监控大屏与各工具却一直报错，点一下刷新后更严重）。本版本起，单个刷新与批量刷新都按店铺独立进行、互不影响，重新授权过的店铺会自动恢复。\n\n2) 新增「重点店铺」筛选：在「开放平台」页可逐个勾选重点店铺；监控大屏采集与数据查询只作用于重点店铺（一个都没勾选时仍为全部已授权店铺，行为与从前一致）。\n\n3) 新增 Shopee 数据查询 CLI，并优化其执行性能（跨店并发、简称直调、输出瘦身）。"
+  "version": "1.3.0",
+  "builtAt": "2026-10-11T08:48:53.336Z",
+  "commit": "02e66cf",
+  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.3.0/kp_tools-v1.3.0.zip",
+  "sha256": "cc3aa0746f2e22bffc0a3cc4731656dd92155df98eefd79993ce8f173ed939bf",
+  "notes": "新增「获取退单仓库」工具：\n\n1) 新增「获取退单仓库」工具（门户页 Shopee 分组）：粘贴含 Return ID 的表格（每行一个），批量查询对应的退货仓 whs_id，结果自动插在 Order ID 列后，可直接导出表格。复用竞价 Cookie，无需额外登录。\n\n2) 移除「视频压缩」工具：本版本起页面、后端模块与相关文档一并移除，其余工具不受影响。\n\n3) 开放平台页优化：已授权店铺表格新增「店铺名」列、删除「环境」列。\n\n4) 更新新手入门指南等文档，并补充每周差评分析流程与 Shopee 数据查询口径。"
 }
