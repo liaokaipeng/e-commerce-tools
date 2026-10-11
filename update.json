@@ -1,8 +1,8 @@
 {
-  "version": "1.3.0",
-  "builtAt": "2026-10-11T08:48:53.336Z",
-  "commit": "02e66cf",
-  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.3.0/kp_tools-v1.3.0.zip",
-  "sha256": "cc3aa0746f2e22bffc0a3cc4731656dd92155df98eefd79993ce8f173ed939bf",
-  "notes": "新增「获取退单仓库」工具：\n\n1) 新增「获取退单仓库」工具（门户页 Shopee 分组）：粘贴含 Return ID 的表格（每行一个），批量查询对应的退货仓 whs_id，结果自动插在 Order ID 列后，可直接导出表格。复用竞价 Cookie，无需额外登录。\n\n2) 移除「视频压缩」工具：本版本起页面、后端模块与相关文档一并移除，其余工具不受影响。\n\n3) 开放平台页优化：已授权店铺表格新增「店铺名」列、删除「环境」列。\n\n4) 更新新手入门指南等文档，并补充每周差评分析流程与 Shopee 数据查询口径。"
+  "version": "1.4.0",
+  "builtAt": "2026-10-11T14:26:01.820Z",
+  "commit": "4aad388",
+  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.4.0/kp_tools-v1.4.0.zip",
+  "sha256": "0f30bbd9a2a96ab25cd63faeacb1f897228bb155f65ed021d7b86d1f17fe64fc",
+  "notes": "获取退单仓库升级：1）支持多店铺——表格带「店铺id」列即可一表查多个店铺，也可以不选店铺；只选 1 个店铺时，没有店铺id 的行由它兜底。2）Order ID 列改为可选，没有时结果列插在 Return ID 列后；列名识别补充「原订单号」等写法。3）预览与日志每行显示店铺，导出可按店铺区分；表格里的店铺未授权 / 授权已失效会提前提示。其余功能不变。"
 }

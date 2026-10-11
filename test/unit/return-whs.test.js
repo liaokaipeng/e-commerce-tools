@@ -1,8 +1,8 @@
 'use strict';
-// 单元测试：获取退单仓库的 Return ID 归一化、whs_id 提取、执行分块与入参行归一化。
+// 单元测试：获取退单仓库的 Return ID / 店铺 ID 归一化、whs_id 提取、执行分块与入参行归一化。
 // 只测纯函数，不打真实网关（get_return_detail 的链路口径以 shopee_skill 实测为准）。
 const { t } = require('../helpers');
-const { normalizeReturnId, extractWhsId, splitChunks } = require('../../server/return-whs/parse');
+const { normalizeReturnId, normalizeShopId, extractWhsId, splitChunks } = require('../../server/return-whs/parse');
 const { normalizeRows, MAX_ROWS, CHUNK_SIZE } = require('../../server/return-whs/job');
 
 async function run() {
@@ -12,6 +12,11 @@ async function run() {
   t('normalizeReturnId 去零宽字符', normalizeReturnId('RTN\u200b12345\ufeffTEST0001') === 'RTN12345TEST0001');
   t('normalizeReturnId 空值返回空串', normalizeReturnId(null) === '' && normalizeReturnId(undefined) === '' && normalizeReturnId('   ') === '');
   t('normalizeReturnId 数字输入转字符串', normalizeReturnId(26101008) === '26101008');
+
+  // ===== 店铺 ID 归一化（表格「店铺id」列取值） =====
+  t('normalizeShopId 数字单元格转字符串', normalizeShopId(953673451) === '953673451');
+  t('normalizeShopId 去空白与零宽字符', normalizeShopId(' 953\u200b673451 ') === '953673451');
+  t('normalizeShopId 空值返回空串', normalizeShopId(null) === '' && normalizeShopId('') === '');
 
   // ===== whs_id 提取（实测响应结构：response.return_address.whs_id） =====
   {
@@ -34,18 +39,20 @@ async function run() {
   t('splitChunks 空数组返回空', splitChunks([], 20).length === 0 && splitChunks(null, 20).length === 0);
   t('splitChunks 非正 size 按 1 兜底不抛错', splitChunks([{ a: 1 }, { a: 2 }], 0).length === 2);
 
-  // ===== 入参行归一化（job.js） =====
+  // ===== 入参行归一化（job.js）：Return ID 与 shopId 逐行携带（店铺可来自表格） =====
   {
     const rows = normalizeRows([
-      { rowIndex: 1, returnId: ' RTN12345TEST0001 ' },
-      { rowIndex: 2, returnId: '' },          // 空 Return ID，过滤
-      { rowIndex: 3 },                         // 缺 returnId，过滤
-      { rowIndex: 4, returnId: '2610084ABCDE' },
-      { returnId: '2610085FGHIJ' },            // 缺 rowIndex，回退为下标 4
+      { rowIndex: 1, returnId: ' RTN12345TEST0001 ', shopId: '953673451' },
+      { rowIndex: 2, returnId: '' },                       // 空 Return ID，过滤
+      { rowIndex: 3 },                                      // 缺 returnId，过滤
+      { rowIndex: 4, returnId: '2610084ABCDE' },            // 缺 shopId，过滤
+      { rowIndex: 5, returnId: '2610085FGHIJ', shopId: '' }, // 空 shopId，过滤
+      { returnId: '2610086KLMNO', shopId: 2610087 },         // 缺 rowIndex 回退下标 5；shopId 数字转字符串
     ]);
-    t('normalizeRows 过滤空 Return ID 行', rows.length === 3);
+    t('normalizeRows 过滤空 Return ID / 空 shopId 行', rows.length === 2);
     t('normalizeRows 归一化 Return ID', rows[0].returnId === 'RTN12345TEST0001');
-    t('normalizeRows 保留 rowIndex', rows[0].rowIndex === 1 && rows[2].rowIndex === 4);
+    t('normalizeRows 归一化 shopId（含数字输入）', rows[0].shopId === '953673451' && rows[1].shopId === '2610087');
+    t('normalizeRows 保留 rowIndex', rows[0].rowIndex === 1 && rows[1].rowIndex === 5);
     t('normalizeRows 非数组输入返回空数组', normalizeRows(null).length === 0 && normalizeRows('x').length === 0);
   }
   t('MAX_ROWS / CHUNK_SIZE 为正整数常量', MAX_ROWS === 2000 && CHUNK_SIZE === 20);

@@ -14,7 +14,7 @@
 | 竞价导出 | `/bidding/` | Shopee 卖家中心获胜竞价数据 → Excel |
 | 取消竞价 | `/bidding-cancel/` | 批量撤销「待改进」竞价（先预览，可暂停 / 继续 / 取消） |
 | 取消Hot Listing | `/hotlisting-cancel/` | 按 SPU 批量取消注册已注册 SKU |
-| 获取退单仓库 | `/return-whs/` | 表格 Return ID 批量查退货仓 whs_id，结果作为新列插在 Order ID 列后导出 |
+| 获取退单仓库 | `/return-whs/` | 表格 Return ID 批量查退货仓 whs_id（店铺按行取，支持一表多店铺），结果作为新列插在 Order ID 列（无则 Return ID 列）后导出 |
 | 视频上传 | `/video/`（`?mode=cn` / `?mode=ph`） | Shopee 短视频批量上传，分「跨境」与「本土-菲律宾」两个入口 |
 | 开放平台 | `/openapi/` | Shopee 开放平台 App 配置与店铺 OAuth 授权，为官方 Open API 功能统一提供登录入口 |
 | 监控大屏 | `/monitor/` | 已授权店铺定时巡检六域，P0/P1/P2 三级告警大屏展示 |
