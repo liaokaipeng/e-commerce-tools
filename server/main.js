@@ -9,6 +9,7 @@
 //   /bidding/         Shopee 竞价导出
 //   /bidding-cancel/  Shopee 取消竞价
 //   /hotlisting-cancel/  Shopee 取消注册 Hot Listing
+//   /return-whs/        Shopee 获取退单仓库（Return ID → whs_id）
 //   /video/           Shopee 视频上传
 // main.js 只负责「路由注册 + 静态服务 + 服务启动」，业务路由与 SSE 由各模块 register 提供。
 const http = require('http');
@@ -20,6 +21,7 @@ const tiktok = require('./tiktok');
 const bidding = require('./bidding');
 const biddingCancel = require('./bidding-cancel');
 const hotlistingCancel = require('./hotlisting-cancel');
+const returnWhs = require('./return-whs');
 const video = require('./video');
 const openapi = require('./openapi');
 const monitor = require('./monitor');
@@ -48,6 +50,7 @@ tiktok.register({ get, post });
 bidding.register({ get, post });
 biddingCancel.register({ get, post });
 hotlistingCancel.register({ get, post });
+returnWhs.register({ get, post });
 video.register({ get, post });
 openapi.register({ get, post });
 monitor.register({ get, post });

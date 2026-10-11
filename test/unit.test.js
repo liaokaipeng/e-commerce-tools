@@ -18,6 +18,7 @@ const modules = [
   require('./unit/video.test'),
   require('./unit/tiktok.test'),
   require('./unit/bidding-cancel.test'),
+  require('./unit/return-whs.test'),
   require('./unit/openapi.test'),
   require('./unit/shared-layer.test'),
   require('./unit/http.test'),

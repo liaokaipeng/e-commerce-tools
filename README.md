@@ -14,6 +14,7 @@
 | 竞价导出 | `/bidding/` | Shopee 卖家中心获胜竞价数据 → Excel |
 | 取消竞价 | `/bidding-cancel/` | 批量撤销「待改进」竞价（先预览，可暂停 / 继续 / 取消） |
 | 取消Hot Listing | `/hotlisting-cancel/` | 按 SPU 批量取消注册已注册 SKU |
+| 获取退单仓库 | `/return-whs/` | 表格 Return ID 批量查退货仓 whs_id，结果作为新列插在 Order ID 列后导出 |
 | 视频上传 | `/video/`（`?mode=cn` / `?mode=ph`） | Shopee 短视频批量上传，分「跨境」与「本土-菲律宾」两个入口 |
 | 开放平台 | `/openapi/` | Shopee 开放平台 App 配置与店铺 OAuth 授权，为官方 Open API 功能统一提供登录入口 |
 | 监控大屏 | `/monitor/` | 已授权店铺定时巡检六域，P0/P1/P2 三级告警大屏展示 |
@@ -25,7 +26,7 @@
 ## 技术栈
 
 - **后端**：Node.js（CommonJS、无框架），运行时依赖仅 `exceljs`、`https-proxy-agent`、`socks-proxy-agent`
-- **前端**：Vue3 SFC + Element Plus + Vite 多页构建（8 个 HTML 入口），监控大屏折线图用 ECharts
+- **前端**：Vue3 SFC + Element Plus + Vite 多页构建（9 个 HTML 入口），监控大屏折线图用 ECharts
 - **扩展**：MV3（`extension/`），把网页里的 Cookie / 凭证推送到本地服务
 - 前端构建产物 `frontend/dist` 由后端托管；端口固定 `8765`
 

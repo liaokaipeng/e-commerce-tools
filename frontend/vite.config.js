@@ -30,6 +30,7 @@ export default defineConfig({
         bidding: src('bidding/index.html'),
         'bidding-cancel': src('bidding-cancel/index.html'),
         'hotlisting-cancel': src('hotlisting-cancel/index.html'),
+        'return-whs': src('return-whs/index.html'),
         video: src('video/index.html'),
         openapi: src('openapi/index.html'),
         monitor: src('monitor/index.html'),
