@@ -212,7 +212,7 @@ Invoke-RestMethod -Method Post -Uri $up -Headers $headers -ContentType 'applicat
 | PowerShell 里写 `&&` 或 heredoc | 不支持；多行提交信息用 `git commit -F <文件>` |
 | Release 创建报 422 `body is not a string` | 把 `Get-Content` 结果强转 `[string]` 再交 `ConvertTo-Json`；**若改用 Node 跑则不会遇到**（见下一行） |
 | 含中文注释的 `.ps1` 在 PS 5.1 里行接续失效 / 报 `-Headers 不是命令` | PS 5.1 按 ANSI 解码 UTF-8 无 BOM 脚本所致；**发布脚本（建 Release / 上传资产）改用 Node**：`fetch` 发字节 + `spawnSync('git',['credential','fill'],{input})` 取凭据 |
-| 上传 Release 资产 404 | 用创建响应的 `upload_url`，勿手拼 `api.github.com` 路径 |
+| 上传 Release 资产 404 / 301 | 用创建响应的 `upload_url`，勿手拼 `api.github.com` 路径；注意 `upload_url` **本身就是完整 URL**（含 `uploads.github.com` 主机名），直接 `new URL()` 解析，再拼主机名会 301 |
 | 想替换已发布版本的资产，上传报 422 `already_exists` | GitHub 不允许同名资产覆盖上传；先 `DELETE /repos/{owner}/{repo}/releases/assets/<asset_id>` 删旧资产再传（顺序见 §3.7） |
 | zip 在资源管理器里打开是空的 | tar 打包时传了 `.`，条目名带 `./` 前缀所致；显式列顶层条目（见 §3.2），重新打包并替换资产 |
 | zip 里中文文件名在 Linux / macOS / 英文 Windows 解压乱码 | bsdtar 按本机代码页（中文 Windows = GBK）写条目名且不置 UTF-8 标志位；打包加 `--options hdrcharset=UTF-8`（`pack.js` 已内置），并确认打包输出没有「⚠ 编码」警告（见 §3.2） |
