@@ -133,10 +133,10 @@ function onExport() {
         <div class="shop-row">
           <el-select
             v-model="shopId"
+            class="shop-select"
             :loading="shopsLoading"
             placeholder="选择已授权店铺"
             filterable
-            style="width: 320px"
           >
             <el-option
               v-for="s in shops"
@@ -148,11 +148,13 @@ function onExport() {
           </el-select>
           <el-button :loading="shopsLoading" @click="loadShops">刷新店铺</el-button>
         </div>
-        <div v-if="!appConfigured" class="field-tip warn">
-          尚未配置开放平台 App：请先到「开放平台」页录入 App 并完成店铺授权，再回来使用本工具。
+        <div v-if="!appConfigured" class="shop-empty-state">
+          <div class="shop-empty-tip">尚未配置开放平台 App：请先到「开放平台」页录入 App 并完成店铺授权，再回来使用本工具。</div>
+          <a href="/openapi/" target="_blank" rel="noopener">前往「开放平台」配置 / 授权 →</a>
         </div>
-        <div v-else-if="!shops.length && !shopsLoading" class="field-tip">
-          没有已授权店铺，请先到「开放平台」页授权。
+        <div v-else-if="!shops.length && !shopsLoading" class="shop-empty-state">
+          <div class="shop-empty-tip">没有已授权店铺，请先到「开放平台」页授权。</div>
+          <a href="/openapi/" target="_blank" rel="noopener">前往「开放平台」配置 / 授权 →</a>
         </div>
       </el-card>
 
@@ -162,6 +164,7 @@ function onExport() {
           <el-tag size="small" effect="light" class="pill">支持 .xlsx / .xls / .csv</el-tag>
         </template>
         <el-upload
+          class="file-upload"
           drag
           action="#"
           :auto-upload="false"
@@ -190,7 +193,7 @@ function onExport() {
             <span v-if="jobId" class="job-id">任务 {{ jobId }}</span>
           </div>
         </template>
-        <div class="btn-row">
+        <div class="actions">
           <el-button type="primary" :disabled="!canRun" :loading="running" @click="onRun">
             {{ running ? '获取中…' : '开始获取' }}
           </el-button>
@@ -198,8 +201,10 @@ function onExport() {
           <el-button v-if="running" @click="cancel">取消</el-button>
           <el-button :disabled="!results.length" @click="onExport">导出结果表格</el-button>
         </div>
-        <div class="danger-tip">{{ runningTip }}</div>
-        <LogPanel :lines="logLines" height="260px" />
+        <div class="hint exec-tip">{{ runningTip }}</div>
+        <div class="log-box">
+          <LogPanel :lines="logLines" height="260px" />
+        </div>
         <div v-if="results.length" class="preview-table">
           <el-table :data="results.slice().reverse()" size="small" max-height="320" border>
             <el-table-column type="index" label="#" width="50" />
@@ -228,10 +233,22 @@ function onExport() {
 
 <style scoped>
 .shop-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.shop-select { flex: 1 1 320px; min-width: 280px; }
 .pill { margin-left: var(--sp-2); }
-.field-tip { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--text-3); }
-.field-tip.warn { color: var(--warning); }
+.file-upload { margin-top: var(--sp-1); }
 .table-meta { margin-top: var(--sp-3); font-size: var(--fs-sm); color: var(--text-2); }
+.exec-tip { margin-top: var(--sp-3); }
 .job-id { font-size: var(--fs-xs); color: var(--text-3); }
 .whs { font-family: var(--font-mono); }
+/* 未配置 App / 没有已授权店铺时的引导块：与 StorePicker / 视频页同一写法（scoped 不跨组件，各页各持一份） */
+.shop-empty-state {
+  margin-top: var(--sp-1);
+  padding: 10px var(--sp-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.shop-empty-tip { margin-bottom: var(--sp-2); font-size: var(--fs-xs); color: var(--text-2); }
+.shop-empty-state a { font-size: var(--fs-sm); color: var(--el-color-primary); text-decoration: none; }
+.shop-empty-state a:hover { text-decoration: underline; }
 </style>
