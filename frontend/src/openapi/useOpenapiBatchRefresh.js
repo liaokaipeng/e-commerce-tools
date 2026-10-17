@@ -4,6 +4,7 @@
 import { reactive, computed } from 'vue';
 import { ElMessage } from 'element-plus';
 import { runSSE } from '../composables/useSSE.js';
+import { postJson } from '../composables/api.js';
 
 export function useOpenapiBatchRefresh({ refreshStatus }) {
   const batch = reactive({ running: false, jobId: '', done: 0, total: 0, synced: 0, failed: 0, skipped: 0 });
@@ -55,11 +56,7 @@ export function useOpenapiBatchRefresh({ refreshStatus }) {
   async function cancelRefreshAll() {
     if (!batch.jobId) return;
     try {
-      await fetch('/api/openapi/refresh-all/cancel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: batch.jobId }),
-      });
+      await postJson('/api/openapi/refresh-all/cancel', { jobId: batch.jobId });
     } catch { /* 忽略：SSE 断开后后端也会按取消收尾 */ }
   }
 

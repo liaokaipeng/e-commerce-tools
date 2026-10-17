@@ -32,7 +32,7 @@ const emit = defineEmits(['refresh']);
 }
 .status-bar.flash { animation: flashBg 0.6s ease; }
 @keyframes flashBg {
-  0% { background: #fff8e1; }
+  0% { background: var(--flash-bg); }
   100% { background: transparent; }
 }
 .dot {

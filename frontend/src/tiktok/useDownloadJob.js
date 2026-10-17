@@ -1,7 +1,8 @@
 // TikTok 下载页 · 下载任务编排：链接解析 / 发起 SSE 下载 / 事件映射 / 进度汇总 / 停止。
 import { ref, computed } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from 'element-plus';
 import { runSSE } from '../composables/useSSE.js';
+import { confirmDanger } from '../composables/confirmDanger.js';
 
 /**
  * 下载任务编排子系统。
@@ -18,7 +19,7 @@ export function useDownloadJob({ dir, hasDefault, setDefaultDir, log, clear: cle
   const downloading = ref(false);
   const abortRef = ref(null);
   const progress = ref({ show: false, done: 0, ok: 0, fail: 0, total: 0 });
-  const summary = ref({ show: false, text: '', color: '' });
+  const summary = ref({ show: false, text: '', failed: false });
 
   const validCount = computed(() => {
     return urls.value
@@ -60,7 +61,7 @@ export function useDownloadJob({ dir, hasDefault, setDefaultDir, log, clear: cle
         summary.value = {
           show: true,
           text: ev.message,
-          color: ev.failed > 0 ? '#e5484d' : '#25c16d',
+          failed: ev.failed > 0,
         };
         break;
       }
@@ -84,21 +85,21 @@ export function useDownloadJob({ dir, hasDefault, setDefaultDir, log, clear: cle
       return;
     }
     if (!hasDefault.value) {
-      try {
-        await ElMessageBox.confirm(
-          `是否将「${d}」设为默认目录？下次打开会自动使用该目录。`,
-          '默认目录',
-          { confirmButtonText: '设为默认', cancelButtonText: '暂不', type: 'info' }
-        );
-        await setDefaultDir(d);
-      } catch {
-        /* 用户取消，继续下载 */
-      }
+      const ok = await confirmDanger({
+        message: `是否将「${d}」设为默认目录？下次打开会自动使用该目录。`,
+        title: '默认目录',
+        confirmText: '设为默认',
+        cancelText: '暂不',
+        type: 'info',
+        danger: false,
+      });
+      if (ok) await setDefaultDir(d);
+      /* 用户取消，继续下载 */
     }
     downloading.value = true;
     showVpn.value = false;
     clearLog();
-    summary.value = { show: false, text: '', color: '' };
+    summary.value = { show: false, text: '', failed: false };
 
     log(`开始任务：共 ${list.length} 个链接`, 'title', '任务');
     let networkIssue = false;

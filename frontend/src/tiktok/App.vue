@@ -85,7 +85,7 @@ onMounted(() => {
             <span class="err">失败 {{ progress.fail }}</span>
           </div>
         </div>
-        <el-alert v-if="summary.show" :closable="false" :style="{ color: summary.color }" :title="summary.text" class="summary-alert" />
+        <el-alert v-if="summary.show" :closable="false" :title="summary.text" class="summary-alert" :class="summary.failed ? 'sum-err' : 'sum-ok'" />
         <LogPanel :lines="logLines" height="420px" />
       </el-card>
     </div>
@@ -122,4 +122,6 @@ onMounted(() => {
 .progress-text .ok { color: var(--success-bright); margin-left: var(--sp-2); }
 .progress-text .err { color: var(--danger-bright); margin-left: var(--sp-2); }
 .summary-alert { margin-bottom: var(--sp-3); }
+.summary-alert.sum-ok { color: var(--success-bright); }
+.summary-alert.sum-err { color: var(--danger-bright); }
 </style>

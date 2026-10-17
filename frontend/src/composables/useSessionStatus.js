@@ -1,5 +1,6 @@
 // Shopee 卖家中心登录状态：查询 /api/status 并生成提示文案（bidding 系三页共用）。
 import { ref, reactive } from 'vue';
+import { getJsonResult } from './api.js';
 
 export function useSessionStatus(readyTip = 'Cookie 已就绪，可直接选择店铺操作。') {
   const status = reactive({ loggedIn: false, cookieCount: 0, savedAt: '', tip: '', checking: true });
@@ -11,8 +12,7 @@ export function useSessionStatus(readyTip = 'Cookie 已就绪，可直接选择�
     refreshing.value = true;
     status.checking = true;
     try {
-      const r = await fetch('/api/status');
-      const s = await r.json();
+      const s = await getJsonResult('/api/status');
       if (s.loggedIn) {
         status.loggedIn = true;
         status.cookieCount = s.cookieCount;

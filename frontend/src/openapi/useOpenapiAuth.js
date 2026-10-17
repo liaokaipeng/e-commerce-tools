@@ -3,6 +3,7 @@
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { copyText } from '../utils/clipboard.js';
+import { postJsonResult } from '../composables/api.js';
 
 export function useOpenapiAuth({ form, refreshStatus }) {
   const generating = ref(false);
@@ -24,13 +25,8 @@ export function useOpenapiAuth({ form, refreshStatus }) {
   async function generateAuthUrl() {
     generating.value = true;
     try {
-      const r = await fetch('/api/openapi/auth-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ redirect: form.redirect }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) {
+      const { ok, data: j } = await postJsonResult('/api/openapi/auth-url', { redirect: form.redirect });
+      if (ok) {
         authUrl.value = j.authUrl;
         authMode.value = j.mode || 'auto';
         if (authMode.value === 'auto') ElMessage.success('授权链接已生成，授权后将自动跳回本工具');
@@ -68,13 +64,8 @@ export function useOpenapiAuth({ form, refreshStatus }) {
     }
     manualing.value = true;
     try {
-      const r = await fetch('/api/openapi/auth-callback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, shopId, mainAccountId }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) {
+      const { ok, data: j } = await postJsonResult('/api/openapi/auth-callback', { code, shopId, mainAccountId });
+      if (ok) {
         ElMessage.success(j.message || '授权成功');
         manualUrl.value = '';
         authUrl.value = '';

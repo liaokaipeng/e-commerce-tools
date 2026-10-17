@@ -3,6 +3,8 @@
 // 由 App.vue 与各子组件共同引用，避免同一份定义在多处复制。
 
 export const LEVEL_COLOR = { P0: '#FF3B30', P1: '#FF9500', P2: '#FFD60A' };
+/** 告警级别配色兜底（级别缺失/异常时；与 monitor.css 的 --d-muted 同值 #5b6272，两处需同步） */
+export const LEVEL_FALLBACK_COLOR = '#5b6272';
 export const LEVEL_NAME = { P0: '紧急', P1: '重要', P2: '提醒' };
 export const OK_COLOR = '#30D158';
 

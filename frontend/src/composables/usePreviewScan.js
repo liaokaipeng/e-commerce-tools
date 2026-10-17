@@ -1,6 +1,7 @@
 // 预览扫描组合式函数：调 preview 接口、回显店铺级日志、记录可操作条数与耗时。
 // 与批量执行（useBatchJob）职责无关，独立成文件。
 import { ref, computed } from 'vue';
+import { postJsonResult } from './api.js';
 
 /**
  * @param {object} o { url, log, summarize: (shop) => { ok, msg, count } }
@@ -16,12 +17,7 @@ export function usePreviewScan({ url, log, summarize }) {
     done.value = false;
     shops.value = [];
     try {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const j = await resp.json();
+      const { data: j } = await postJsonResult(url, body);
       if (!j || !j.shops) {
         log((j && j.msg) || '扫描请求失败', 'err');
         return false;

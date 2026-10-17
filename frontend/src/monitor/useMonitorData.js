@@ -1,6 +1,7 @@
 // 监控大屏数据访问层：HTTP 请求、加载器、趋势选择、告警操作与配置类动作。
 import { showToast } from './toast.js';
 import { levelRank } from './constants.js';
+import { postJsonResult as postJson, getJsonResult } from '../composables/api.js';
 
 /** 收到 SSE 后合并刷新的防抖延时（避免一轮采集触发多次拉取） */
 const REFRESH_DEBOUNCE_MS = 800;
@@ -8,23 +9,10 @@ const REFRESH_DEBOUNCE_MS = 800;
 export function useMonitorData(state) {
   let refreshTimer = null;
 
-  // ---------- 传输 ----------
-  /** POST JSON，返回 { ok, data }：ok = HTTP 2xx 且业务 ok；网络/解析异常抛出，由调用方统一提示 */
-  async function postJson(url, body) {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {}),
-    });
-    const data = await r.json();
-    return { ok: r.ok && !!data && data.ok === true, data: data || {} };
-  }
-
   // ---------- 加载器 ----------
   async function loadOverview() {
     try {
-      const r = await fetch('/api/monitor/overview');
-      const j = await r.json();
+      const j = await getJsonResult('/api/monitor/overview');
       if (j && j.ok) {
         Object.assign(state.overview, j);
         // 所选店铺可能已被停用监控：不在列表中则改选第一家
@@ -38,16 +26,14 @@ export function useMonitorData(state) {
 
   async function loadAlerts() {
     try {
-      const r = await fetch('/api/monitor/alerts');
-      const j = await r.json();
+      const j = await getJsonResult('/api/monitor/alerts');
       if (j && j.ok) state.alerts.value = j.alerts || [];
     } catch { /* 同上 */ }
   }
 
   async function loadRules() {
     try {
-      const r = await fetch('/api/monitor/rules');
-      const j = await r.json();
+      const j = await getJsonResult('/api/monitor/rules');
       if (j && j.ok) state.rules.value = j.rules || [];
     } catch { /* 忽略 */ }
   }
@@ -58,8 +44,7 @@ export function useMonitorData(state) {
     if (!shopId || !metric) return;
     try {
       const q = `days=${state.trendDays.value}${state.trendCompare.value ? '&compare=1' : ''}`;
-      const r = await fetch(`/api/monitor/trend?shopId=${encodeURIComponent(shopId)}&metric=${encodeURIComponent(metric)}&${q}`);
-      const j = await r.json();
+      const j = await getJsonResult(`/api/monitor/trend?shopId=${encodeURIComponent(shopId)}&metric=${encodeURIComponent(metric)}&${q}`);
       if (j && j.ok) {
         state.trend.metric = j.metric || state.trend.metric;
         state.trend.thresholds = j.thresholds;

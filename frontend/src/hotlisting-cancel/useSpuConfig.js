@@ -4,6 +4,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getJson, postJson } from '../composables/api.js';
+import { matchShopKeyword } from '../composables/useShopFilter.js';
 
 const CONFIG_URL = '/api/hotlisting-cancel/spu-config';
 
@@ -34,13 +35,11 @@ export function useSpuConfig({ stores, selected }) {
   const spuKeyword = ref('');
   const spuFilter = ref('');       // '' | 'set' | 'unset'
   const visibleSpuStores = computed(() => {
-    const kw = spuKeyword.value.trim().toLowerCase();
     return selectedStores.value.filter((s) => {
       const has = shopSpuId(s.id) !== '';
       if (spuFilter.value === 'set' && !has) return false;
       if (spuFilter.value === 'unset' && has) return false;
-      if (!kw) return true;
-      return `${s.name || ''} ${s.id}`.toLowerCase().includes(kw);
+      return matchShopKeyword(`${s.name || ''} ${s.id}`, spuKeyword.value);
     });
   });
 

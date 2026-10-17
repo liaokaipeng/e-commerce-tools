@@ -1,5 +1,6 @@
 // TikTok 下载页 · 代理/网络检测：探测系统代理状态、展示网络提示与重新检测。
 import { ref } from 'vue';
+import { getJsonResult } from '../composables/api.js';
 
 /**
  * 代理/网络检测子系统。
@@ -16,8 +17,7 @@ export function useTiktokNetwork({ log = () => {}, onStatus } = {}) {
 
   async function checkNetwork() {
     try {
-      const r = await fetch('/api/tiktok/status');
-      const data = await r.json();
+      const data = await getJsonResult('/api/tiktok/status');
       const proxyInfo = data.proxy;
       if (onStatus) onStatus(data);
       proxyConnected.value = true;

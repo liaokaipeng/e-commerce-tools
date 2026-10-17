@@ -42,6 +42,9 @@ research/
 # 自动化生成的报告（含业务数据，不入库）
 /reports/
 
+# 压缩包（报告分享产物等，含业务数据，不入库）
+*.zip
+
 .DS_Store
 Thumbs.db
 

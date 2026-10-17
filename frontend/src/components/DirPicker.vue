@@ -2,6 +2,7 @@
 <script setup>
 import { ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
+import { getJsonResult } from '../composables/api.js';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -19,8 +20,7 @@ async function load(p) {
   error.value = '';
   const q = p ? '?path=' + encodeURIComponent(p) : '';
   try {
-    const r = await fetch('/api/browse' + q);
-    const d = await r.json();
+    const d = await getJsonResult('/api/browse' + q);
     if (!d.ok) {
       error.value = '无法访问：' + (d.message || '未知错误');
       dirs.value = [];

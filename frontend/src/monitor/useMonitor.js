@@ -84,7 +84,7 @@ export function useMonitor() {
 
   return {
     // 状态
-    overview: state.overview, rules: state.rules, trend: state.trend, now: state.now,
+    overview: state.overview, trend: state.trend, now: state.now,
     selectedShop: state.selectedShop, selectedMetric: state.selectedMetric, filterLevel: state.filterLevel,
     projectMode: state.projectMode, soundOn: state.soundOn, rotateOn: state.rotateOn,
     sseOk: state.sseOk, flashIds: state.flashIds, initialLoading: state.initialLoading,

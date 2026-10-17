@@ -4,8 +4,6 @@
  *
  * 功能：批量把 Return ID 转成退货仓库 ID（whs_id）。表格解析与导出在前端完成
  * （SheetJS，与 video 页一致），后端只接收解析后的行并逐行调官方接口。
- * 支持多店铺混合表：shopId 逐行携带（表格「店铺id」列驱动；也可不选店铺），
- * 前端只在恰好选中 1 个店铺时给没有店铺id 的行兜底，后端不再要求全局单选店铺。
  *
  * 接口还原（开放平台，非 UI 自动化；2026-10 实测）：
  *   GET /api/v2/returns/get_return_detail?return_sn=<Return ID>
@@ -25,7 +23,7 @@ const { readJsonBodySoft } = require('./lib/http-utils');
 // 长任务注册中心（暂停 / 继续 / 取消 / SSE 断开即取消 / TTL 清理）：与其它批量工具共用
 const jobs = require('./lib/jobs');
 const { handleRun } = require('./return-whs/job');
-const { normalizeReturnId, normalizeShopId, extractWhsId, splitChunks } = require('./return-whs/parse');
+const { normalizeReturnId, extractWhsId, splitChunks } = require('./return-whs/parse');
 
 // ============ 路由注册 ============
 function register({ get, post }) {
@@ -39,4 +37,4 @@ function register({ get, post }) {
   jobs.registerControlRoutes(post, '/api/return-whs');
 }
 
-module.exports = { register, normalizeReturnId, normalizeShopId, extractWhsId, splitChunks };
+module.exports = { register, normalizeReturnId, extractWhsId, splitChunks };

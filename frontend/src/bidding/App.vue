@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from 'element-plus';
 import LoginCard from '../components/LoginCard.vue';
 import StorePicker from '../components/StorePicker.vue';
 import DirRow from '../components/DirRow.vue';
@@ -9,6 +9,7 @@ import { useShopeeSession } from '../composables/useShopeeSession.js';
 import { useDirSettings } from '../composables/useDirSettings.js';
 import { useLog } from '../composables/useLog.js';
 import { runSSE } from '../composables/useSSE.js';
+import { confirmDanger } from '../composables/confirmDanger.js';
 
 // ---------- 登录状态 + 店铺列表（与取消竞价共用） ----------
 const {
@@ -33,16 +34,16 @@ async function doExport() {
     return;
   }
   if (!hasDefault.value) {
-    try {
-      await ElMessageBox.confirm(
-        `是否将「${d}」设为默认目录？下次打开会自动使用该目录。`,
-        '默认目录',
-        { confirmButtonText: '设为默认', cancelButtonText: '暂不', type: 'info' }
-      );
-      await setDefaultDir(d);
-    } catch {
-      /* 用户取消，继续导出 */
-    }
+    const ok = await confirmDanger({
+      message: `是否将「${d}」设为默认目录？下次打开会自动使用该目录。`,
+      title: '默认目录',
+      confirmText: '设为默认',
+      cancelText: '暂不',
+      type: 'info',
+      danger: false,
+    });
+    if (ok) await setDefaultDir(d);
+    /* 用户取消则继续导出 */
   }
   exporting.value = true;
   clearLog();

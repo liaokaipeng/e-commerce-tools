@@ -5,7 +5,7 @@
 // 本页只做编排：SPU 配置子系统见 useSpuConfig.js，导入/导出文本见 spu-text.js，
 // 通用能力与「取消竞价」页共用：useShopeeSession / useLog / useBatchJob / PreviewTableCard。
 import { ref, computed } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from 'element-plus';
 import LoginCard from '../components/LoginCard.vue';
 import StorePicker from '../components/StorePicker.vue';
 import PreviewTableCard from '../components/PreviewTableCard.vue';
@@ -16,6 +16,7 @@ import { useLog } from '../composables/useLog.js';
 import { useBatchJob } from '../composables/useBatchJob.js';
 import { usePreviewScan } from '../composables/usePreviewScan.js';
 import { useSpuConfig } from './useSpuConfig.js';
+import { confirmDanger } from '../composables/confirmDanger.js';
 
 const {
   status, refreshing, flash, refreshStatus,
@@ -123,15 +124,12 @@ async function doCancel() {
   const hint = previewDone.value
     ? `上次扫描共发现 ${totalSkuCount.value} 个已注册 SKU。`
     : '尚未扫描，将实时拉取并取消全部已注册 SKU。';
-  try {
-    await ElMessageBox.confirm(
-      `即将对选中 ${configuredSelCount.value} 个店铺（各 1 个 SPU）取消注册全部「已注册」Hot Listing SKU，取消后需重新注册才能恢复！\n${hint}\n\n确定要继续吗？`,
-      '危险操作确认',
-      { confirmButtonText: '继续取消注册', cancelButtonText: '取消', type: 'warning', confirmButtonClass: 'el-button--danger' }
-    );
-  } catch {
-    return; // 用户取消
-  }
+  const ok = await confirmDanger({
+    message: `即将对选中 ${configuredSelCount.value} 个店铺（各 1 个 SPU）取消注册全部「已注册」Hot Listing SKU，取消后需重新注册才能恢复！\n${hint}\n\n确定要继续吗？`,
+    title: '危险操作确认',
+    confirmText: '继续取消注册',
+  });
+  if (!ok) return; // 用户取消
   clearLog();
   log(`开始取消注册，共 ${configuredSelCount.value} 个店铺…`, 'info');
   await start(previewRows.value, buildPayload());

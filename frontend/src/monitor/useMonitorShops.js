@@ -1,11 +1,11 @@
 // 监控店铺配置抽屉：读取授权店铺、勾选监控范围、保存排除名单。
 import { showToast } from './toast.js';
+import { getJsonResult } from '../composables/api.js';
 
 export function useMonitorShops({ state, data }) {
   async function openShopsConfig() {
     try {
-      const r = await fetch('/api/monitor/shops-config');
-      const j = await r.json();
+      const j = await getJsonResult('/api/monitor/shops-config');
       if (j && j.ok) {
         state.shopConfig.value = (j.shops || []).map((s) => Object.assign({}, s));
         state.shopSearch.value = '';

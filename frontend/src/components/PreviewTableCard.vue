@@ -15,7 +15,6 @@ defineProps({
   countLabel: { type: String, default: '数量' },
   countOf: { type: Function, required: true },
   /** 执行区 */
-  actionTitle: { type: String, default: '' },
   actionText: { type: String, default: '开始执行' },
   runningText: { type: String, default: '执行中…' },
   dangerTip: { type: String, default: '' },

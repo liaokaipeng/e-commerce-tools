@@ -102,29 +102,29 @@ function fmtTime(iso) {
 <style scoped>
 .upd { display: flex; flex-direction: column; gap: 14px; font-size: 13px; }
 .upd-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.upd-label { color: #909399; }
-.upd-meta { color: #909399; font-size: 12px; }
+.upd-label { color: var(--el-text-color-secondary); }
+.upd-meta { color: var(--el-text-color-secondary); font-size: 12px; }
 .upd-notes {
   margin: 0;
   padding: 10px 12px;
-  background: #f5f7fa;
+  background: var(--surface-2);
   border-radius: 6px;
   white-space: pre-wrap;
   line-height: 1.6;
-  color: #444;
+  color: var(--text-2);
 }
 .upd-actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .upd-steps {
   margin: 0;
   padding: 10px 12px 10px 28px;
-  background: #f5f7fa;
+  background: var(--surface-2);
   border-radius: 6px;
   line-height: 1.8;
-  color: #555;
+  color: var(--text-2);
   list-style: disc;
   font-size: 12px;
 }
-.upd-steps li.error { color: #d03050; }
-.upd-steps li.done { color: #18a058; }
+.upd-steps li.error { color: var(--danger); }
+.upd-steps li.done { color: var(--success); }
 .upd-steps li { word-break: break-all; }
 </style>

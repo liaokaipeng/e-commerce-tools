@@ -14,11 +14,18 @@ import VideoSteps from './VideoSteps.vue';
 import VideoUploadPanel from './VideoUploadPanel.vue';
 
 const creds = useVideoCreds();
+const {
+  site, isPh, siteLabel,
+  auth, cookie, shopId, userid, refreshingCreds,
+  selectedShopId, shopOptions, shopEmptyTip,
+  applyShop, refreshCreds, assertReady,
+} = creds;
 useVideoPageLifecycle(creds);
 
-const table = useVideoTable();
+const { rows, parseFile, downloadTemplate, exportResult } = useVideoTable();
 const pendingFile = ref(null);
-const uploadWidget = ref(null);
+// el-upload 实例的 function-ref 出口，不参与渲染，无需响应式包装
+let uploadWidget = null;
 
 function onFileChange(uploadFile) {
   if (!uploadFile) return;
@@ -27,26 +34,27 @@ function onFileChange(uploadFile) {
 
 function onFileExceed(files) {
   // 已选 1 个文件时再次选择：替换为新文件
-  uploadWidget.value?.clearFiles();
+  uploadWidget?.clearFiles();
   pendingFile.value = files[0] || null;
-  uploadWidget.value?.handleStart(files[0]);
+  uploadWidget?.handleStart(files[0]);
 }
 
 function onFileRemove() {
   pendingFile.value = null;
 }
 
-const upload = useVideoUpload({
-  site: creds.site, isPh: creds.isPh, siteLabel: creds.siteLabel,
-  // 任务结束（完成/取消）后自动导出带【状态】列的结果表格
-  onFinish: () => table.exportResult(),
-});
+const { logLines, clearLog, autoScroll, uploading, summary, currentJobId, startUpload, cancelUpload } =
+  useVideoUpload({
+    site, isPh, siteLabel,
+    // 任务结束（完成/取消）后自动导出带【状态】列的结果表格
+    onFinish: () => exportResult(),
+  });
 
 function onStart() {
-  upload.startUpload(
-    table.rows.value,
-    { auth: creds.auth.value, cookie: creds.cookie.value, shopId: creds.shopId.value, userid: creds.userid.value },
-    creds.assertReady
+  startUpload(
+    rows.value,
+    { auth: auth.value, cookie: cookie.value, shopId: shopId.value, userid: userid.value },
+    assertReady
   );
 }
 </script>
@@ -55,37 +63,37 @@ function onStart() {
   <div class="page">
     <div class="container">
       <VideoSteps
-        :is-ph="creds.isPh.value"
-        :refreshing-creds="creds.refreshingCreds.value"
-        :shop-options="creds.shopOptions.value"
-        :shop-empty-tip="creds.shopEmptyTip.value"
-        :selected-shop-id="creds.selectedShopId.value"
-        :userid="creds.userid.value"
-        :rows="table.rows.value"
+        :is-ph="isPh"
+        :refreshing-creds="refreshingCreds"
+        :shop-options="shopOptions"
+        :shop-empty-tip="shopEmptyTip"
+        :selected-shop-id="selectedShopId"
+        :userid="userid"
+        :rows="rows"
         :upload-ref="uploadWidget"
-        @refresh-creds="creds.refreshCreds"
-        @update:selected-shop-id="(v) => (creds.selectedShopId.value = v)"
-        @update:userid="(v) => (creds.userid.value = v)"
-        @apply-shop="creds.applyShop"
-        @update:upload-ref="(v) => (uploadWidget = v)"
+        @refresh-creds="refreshCreds"
+        v-model:selected-shop-id="selectedShopId"
+        v-model:userid="userid"
+        @apply-shop="applyShop"
+        @update:upload-ref="(v) => { uploadWidget = v; }"
         @file-change="onFileChange"
         @file-exceed="onFileExceed"
         @file-remove="onFileRemove"
-        @parse="() => table.parseFile(pendingFile)"
-        @download-template="table.downloadTemplate"
+        @parse="() => parseFile(pendingFile)"
+        @download-template="downloadTemplate"
       />
 
       <VideoUploadPanel
-        :has-rows="table.rows.value.length > 0"
-        :uploading="upload.uploading.value"
-        :current-job-id="upload.currentJobId.value"
-        :summary="upload.summary.value"
-        v-model:auto-scroll="upload.autoScroll.value"
-        :log-lines="upload.logLines.value"
+        :has-rows="rows.length > 0"
+        :uploading="uploading"
+        :current-job-id="currentJobId"
+        :summary="summary"
+        v-model:auto-scroll="autoScroll"
+        :log-lines="logLines"
         @start="onStart"
-        @cancel="upload.cancelUpload"
-        @clear-log="upload.clearLog"
-        @export-result="table.exportResult"
+        @cancel="cancelUpload"
+        @clear-log="clearLog"
+        @export-result="exportResult"
       />
     </div>
   </div>

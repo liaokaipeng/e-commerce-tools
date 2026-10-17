@@ -1,5 +1,6 @@
 // 规则编辑抽屉：阈值编辑副本、历史建议拉取与保存。
 import { showToast } from './toast.js';
+import { getJsonResult } from '../composables/api.js';
 
 export function useMonitorRules({ state, data }) {
   function openRules() {
@@ -20,8 +21,7 @@ export function useMonitorRules({ state, data }) {
   async function loadRuleSuggestions() {
     state.loadingSuggestions.value = true;
     try {
-      const r = await fetch('/api/monitor/rule-suggestions?days=30');
-      const j = await r.json();
+      const j = await getJsonResult('/api/monitor/rule-suggestions?days=30');
       if (j && j.ok) state.ruleSuggestions.value = j.suggest || {};
     } catch { /* 忽略：建议不可用不影响手动编辑 */ } finally {
       state.loadingSuggestions.value = false;

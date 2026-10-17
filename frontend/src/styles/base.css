@@ -37,6 +37,26 @@ html, body { margin: 0; padding: 0; }
   --danger-border: #ffd2cc;
   --info: #1e88e5;
 
+  /* ---------- 原生滚动条（浅色主题，Firefox / Chromium 双份） ---------- */
+  --scroll-thumb: #cbd1e0;
+  --scroll-thumb-hover: #aeb6c9;
+
+  /* ---------- 日志面板（终端式深色，LogPanel.vue 专用；不随浅色主题切换） ---------- */
+  --log-bg: #10131c;
+  --log-text: #c8e1ff;
+  --log-time: #7f8798;
+  --log-info: #b8c0cc;
+  --log-warn: #ffc95c;
+  --log-ok: #5fd08a;
+  --log-err: #ff7b72;
+  --log-network: #ff9d5c;
+  --log-title: #7d8aff;
+  --log-empty: #8b93a3;
+  --log-scroll: #2b3245;
+  --log-scroll-hover: #3a435c;
+  /* ---------- 登录状态闪烁底色（LoginCard.vue keyframe 用） ---------- */
+  --flash-bg: #fff8e1;
+
   /* ---------- 字体与字号 ---------- */
   --font-sans: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   --font-mono: Consolas, Menlo, "Courier New", monospace;
@@ -138,20 +158,20 @@ html, body { margin: 0; padding: 0; }
 }
 
 /* ===== 原生滚动条（浅色主题，Firefox / Chromium 双份） ===== */
-/* 日志面板是深色代码块，自带一套滚动条样式（见 LogPanel.vue），不受此处影响 */
+/* 日志面板是深色代码块，配色与滚动条均取 --log-* 令牌（见 LogPanel.vue），不受此处影响 */
 html {
   scrollbar-width: thin;
-  scrollbar-color: #cbd1e0 transparent;
+  scrollbar-color: var(--scroll-thumb) transparent;
 }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: #cbd1e0;
+  background: var(--scroll-thumb);
   background-clip: padding-box;
   border: 2px solid transparent;
   border-radius: 999px;
 }
-::-webkit-scrollbar-thumb:hover { background: #aeb6c9; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: padding-box; }
 ::-webkit-scrollbar-corner { background: transparent; }
 
 /* ===== 页面骨架 ===== */
@@ -224,3 +244,16 @@ html {
 .expand-empty { color: var(--text-3); padding: 8px; font-size: var(--fs-sm); }
 .cnt-bad { color: var(--danger); font-weight: 700; }
 .cnt-ok { color: var(--success); }
+
+/* ---------- 开放平台空态引导（StorePicker / return-whs / video 三页共用，样式收敛于此） ---------- */
+.openapi-guide {
+  margin-top: var(--sp-1);
+  padding: 10px var(--sp-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.openapi-guide-tip { margin-bottom: var(--sp-2); font-size: var(--fs-xs); color: var(--text-2); }
+.openapi-guide-actions { display: flex; align-items: center; gap: var(--sp-3); }
+.openapi-guide-actions a { font-size: var(--fs-sm); color: var(--el-color-primary); text-decoration: none; }
+.openapi-guide-actions a:hover { text-decoration: underline; }

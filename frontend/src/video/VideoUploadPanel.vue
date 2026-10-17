@@ -35,7 +35,7 @@ const emit = defineEmits(['start', 'cancel', 'clear-log', 'export-result', 'upda
       />
     </div>
     <div v-if="summary" class="hint" style="margin-top: 10px">{{ summary }}</div>
-    <LogPanel class="log-box" :lines="logLines" height="320px" fixed :auto-scroll="null" />
+    <LogPanel class="log-box" :lines="logLines" height="320px" fixed :auto-scroll="autoScroll" />
   </el-card>
 </template>
 

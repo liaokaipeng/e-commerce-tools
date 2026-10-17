@@ -3,6 +3,7 @@
 import { ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { resolveOpenapiEmptyTip } from '../composables/openapiEmptyTip.js';
+import { getJsonResult } from '../composables/api.js';
 
 /**
  * @param {object} deps 由 useVideoCreds 聚合器注入的状态与其它模块函数
@@ -43,8 +44,7 @@ export function useVideoCredSync({
 
   async function loadCredsFromServer(quiet) {
     try {
-      const r = await fetch('/api/creds');
-      const c = await r.json();
+      const c = await getJsonResult('/api/creds');
       const sites = (c && c.sites) || {};
       if (isPh.value) {
         const cur = sites.ph || null;

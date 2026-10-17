@@ -1,11 +1,10 @@
 // 「选择店铺」空缓存提示：查开放平台状态区分原因（未配置 App / 未授权店铺），
 // 返回引导用户去授权的文案。useShopeeSession 与 video/useVideoCreds 共用。
-import { ElMessage } from 'element-plus';
+import { getJsonResult } from './api.js';
 
 export async function resolveOpenapiEmptyTip() {
   try {
-    const r = await fetch('/api/openapi/status');
-    const s = await r.json();
+    const s = await getJsonResult('/api/openapi/status');
     if (!s.configured) {
       return '尚未配置开放平台 App：请先到「开放平台」页填写 partner_id / partner_key，再生成授权链接完成店铺授权。';
     }
@@ -16,9 +15,4 @@ export async function resolveOpenapiEmptyTip() {
     return '开放平台授权正常，但下拉暂无店铺：请点「重新加载」；若仍未恢复，请确认扩展已抓取上传凭证。';
   } catch { /* 状态接口不可用时给通用提示 */ }
   return '暂无已授权店铺：请先到「开放平台」Tab 完成 App 配置与店铺授权。';
-}
-
-/** 空店铺时弹一次 warning（配合空状态文案用） */
-export function warnEmptyTip(tip) {
-  ElMessage.warning(tip);
 }

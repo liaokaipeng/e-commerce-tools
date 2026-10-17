@@ -1,5 +1,5 @@
 'use strict';
-// 退单仓库查询纯函数：Return ID / 店铺 ID 归一化、whs_id 提取、执行分块。
+// 退单仓库查询纯函数：Return ID 归一化、whs_id 提取、执行分块。
 // 与 job.js（编排）分离，供单元测试直接复用，不打真实网关。
 //
 // 链路依据（2026-10 生产店铺实测，退单号已省略）：
@@ -10,14 +10,6 @@
 function normalizeReturnId(raw) {
   if (raw === null || raw === undefined) return '';
   return String(raw).replace(/[\s\u200b-\u200d\ufeff]+/g, '');
-}
-
-/**
- * 归一化店铺 ID（表格「店铺id」列取值）：同样去空白/零宽字符。
- * Excel 数字单元格会读成 number，统一转字符串；店铺 ID 仅用于选凭证，不做数值运算。
- */
-function normalizeShopId(raw) {
-  return normalizeReturnId(raw);
 }
 
 /**
@@ -39,4 +31,4 @@ function splitChunks(rows, size) {
   return out;
 }
 
-module.exports = { normalizeReturnId, normalizeShopId, extractWhsId, splitChunks };
+module.exports = { normalizeReturnId, extractWhsId, splitChunks };

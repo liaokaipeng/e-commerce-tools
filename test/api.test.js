@@ -171,15 +171,13 @@ async function run() {
 
     console.log('  -- 获取退单仓库 API --');
     {
-      // 行缺少店铺信息 / 无有效 Return ID / 超行数上限：显式 400，均不触达开放平台网关
+      // 未选店铺 / 无有效 Return ID / 超行数上限：显式 400，均不触达开放平台网关
       const r1 = await req('POST', '/api/return-whs/run', { rows: [{ rowIndex: 1, returnId: 'RTN12345TEST0001' }] });
-      t('POST /api/return-whs/run 行无店铺id返回 400', r1.status === 400 && JSON.parse(r1.text).msg.includes('店铺'), r1.text);
-      const r1b = await req('POST', '/api/return-whs/run', { rows: [{ rowIndex: 1, shopId: '953673451' }] });
-      t('POST /api/return-whs/run 行无 Return ID 返回 400', r1b.status === 400 && JSON.parse(r1b.text).msg.includes('Return ID'), r1b.text);
-      const r2 = await req('POST', '/api/return-whs/run', { rows: [] });
+      t('POST /api/return-whs/run 未选店铺返回 400', r1.status === 400, `status=${r1.status}`);
+      const r2 = await req('POST', '/api/return-whs/run', { shopId: '953673451', rows: [] });
       t('POST /api/return-whs/run 无有效 Return ID 返回 400', r2.status === 400 && JSON.parse(r2.text).msg.includes('Return ID'), r2.text);
-      const big = Array.from({ length: 2001 }, (_, i) => ({ rowIndex: i + 1, returnId: 'R' + i, shopId: '953673451' }));
-      const r3 = await req('POST', '/api/return-whs/run', { rows: big });
+      const big = Array.from({ length: 2001 }, (_, i) => ({ rowIndex: i + 1, returnId: 'R' + i }));
+      const r3 = await req('POST', '/api/return-whs/run', { shopId: '953673451', rows: big });
       t('POST /api/return-whs/run 超过行数上限返回 400', r3.status === 400, `status=${r3.status}`);
       // 暂停/继续/取消：不存在的 jobId 返回 404；非法 JSON 显式 400（与其它批量任务同一语义）
       const p1 = await req('POST', '/api/return-whs/pause', { jobId: 'job_not_exist' });

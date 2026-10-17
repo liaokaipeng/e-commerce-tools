@@ -21,15 +21,16 @@ const { ver, upd, updateDrawer, checking, applying, steps, doneInfo, checkUpdate
       <nav>
         <template v-for="g in GROUP_ORDER" :key="g">
           <span class="g-label">{{ g }}</span>
-          <button
+          <a
             v-for="t in tabs.filter((x) => x.group === g)"
             :key="t.key"
+            :href="'#/' + t.key"
             :class="{ active: isActive(t.key) }"
             :title="t.sub"
-            @click="show(t.key)"
+            @click.prevent="show(t.key)"
           >
             {{ t.label }}<small>{{ t.sub }}</small>
-          </button>
+          </a>
         </template>
       </nav>
       <div class="ver-bar" title="版本与更新" @click="openUpdate">
@@ -68,7 +69,7 @@ const { ver, upd, updateDrawer, checking, applying, steps, doneInfo, checkUpdate
 .portal {
   /* 深色侧栏令牌：与监控大屏（monitor.css 的 --d-*）同源，两处深色观感一致 */
   --p-bg: #f4f6fb;          /* 内容区（iframe 之外的留白） */
-  --p-sidebar: #111527;     /* 与监控大屏顶栏一致 */
+  --p-sidebar: #111527;     /* 与监控大屏顶栏一致：与 monitor.css 的 --d-surface 同值，两处需同步 */
   --p-border: #1e2440;
   --p-text-1: #eef1f8;      /* 标题 */
   --p-text-2: #d3d9e8;      /* 正文 / 菜单项 */
@@ -78,12 +79,28 @@ const { ver, upd, updateDrawer, checking, applying, steps, doneInfo, checkUpdate
   --p-rest: rgba(255, 255, 255, 0.08);
   --p-radius-sm: 8px;
   --p-radius-md: 10px;
+  /* 侧栏滚动条：与 monitor.css 的深色滚动条同值，两处需同步 */
+  --p-scroll: #2f3a5c;
+  --p-scroll-hover: #3d4a72;
+  --p-warn: #e6a23c;        /* 更新检查失败（.ver-warn） */
+  --p-on-brand: #fff;       /* 导航 hover/active 文字、.ver-badge、.logo */
+  --p-on-brand-dim: rgba(255, 255, 255, 0.82); /* active 按钮内 small */
+  --p-text-body: #23262f;   /* 内容区正文（.portal 的 color） */
+  --p-frame-bg: #fff;       /* iframe 背景 */
+  --p-brand-glow: rgba(238, 77, 45, 0.45);
+  --p-brand-glow-strong: rgba(238, 77, 45, 0.5);
+  /* UpdateDrawer（el-drawer 就地渲染，可继承 .portal 上的令牌）复用浅色语义色：
+     门户页不加载 styles/base.css，这里按同值补齐，与 base.css 两处需同步 */
+  --surface-2: #f7f8fc;
+  --text-2: #4b5266;
+  --danger: #c62828;
+  --success: #2e7d32;
 
   font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   background: var(--p-bg);
-  color: #23262f;
+  color: var(--p-text-body);
   height: 100vh;
   display: flex;
   flex-direction: row;
@@ -102,17 +119,17 @@ const { ver, upd, updateDrawer, checking, applying, steps, doneInfo, checkUpdate
   /* 深色侧栏的原生滚动条也要跟着变深，否则 Windows 上会露出一条浅灰滚动条 */
   color-scheme: dark;
   scrollbar-width: thin;
-  scrollbar-color: #2f3a5c transparent;
+  scrollbar-color: var(--p-scroll) transparent;
 }
 .sidebar::-webkit-scrollbar { width: 10px; }
 .sidebar::-webkit-scrollbar-track { background: transparent; }
 .sidebar::-webkit-scrollbar-thumb {
-  background: #2f3a5c;
+  background: var(--p-scroll);
   background-clip: padding-box;
   border: 2px solid transparent;
   border-radius: 999px;
 }
-.sidebar::-webkit-scrollbar-thumb:hover { background: #3d4a72; background-clip: padding-box; }
+.sidebar::-webkit-scrollbar-thumb:hover { background: var(--p-scroll-hover); background-clip: padding-box; }
 .brand {
   display: flex;
   align-items: center;
@@ -131,8 +148,8 @@ const { ver, upd, updateDrawer, checking, applying, steps, doneInfo, checkUpdate
   justify-content: center;
   font-size: 16px;
   font-weight: 700;
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(238, 77, 45, 0.45);
+  color: var(--p-on-brand);
+  box-shadow: 0 2px 8px var(--p-brand-glow);
 }
 .brand b { font-size: 16px; font-weight: 600; color: var(--p-text-1); display: block; line-height: 1.2; }
 .brand small {
@@ -156,7 +173,7 @@ nav {
   white-space: nowrap;
 }
 .g-label:first-child { margin-top: 0; }
-nav button {
+nav a {
   border: none;
   background: var(--p-rest);
   color: var(--p-text-2);
@@ -169,22 +186,23 @@ nav button {
   font-family: inherit;
   white-space: nowrap;
   text-align: left;
+  text-decoration: none;
 }
-nav button:hover { background: var(--p-hover); color: #fff; }
-nav button.active {
+nav a:hover { background: var(--p-hover); color: var(--p-on-brand); }
+nav a.active {
   background: var(--p-brand);
-  color: #fff;
-  box-shadow: 0 2px 10px rgba(238, 77, 45, 0.5);
+  color: var(--p-on-brand);
+  box-shadow: 0 2px 10px var(--p-brand-glow-strong);
   transform: translateX(2px);
 }
-nav button small {
+nav a small {
   display: block;
   font-size: 11px;
   font-weight: 400;
   color: var(--p-text-3);
   transition: color 0.15s;
 }
-nav button.active small, nav button:hover small { color: rgba(255, 255, 255, 0.82); }
+nav a.active small, nav a:hover small { color: var(--p-on-brand-dim); }
 .frame-wrap { flex: 1; position: relative; }
 
 /* ============ 侧栏底部：版本与更新入口 ============ */
@@ -207,27 +225,27 @@ nav button.active small, nav button:hover small { color: rgba(255, 255, 255, 0.8
 .ver-text { font-variant-numeric: tabular-nums; }
 .ver-badge {
   background: var(--p-brand);
-  color: #fff;
+  color: var(--p-on-brand);
   font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
 }
-.ver-warn { color: #e6a23c; }
+.ver-warn { color: var(--p-warn); }
 iframe {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   border: none;
-  background: #fff;
+  background: var(--p-frame-bg);
   visibility: hidden;
 }
 iframe.active { visibility: visible; }
 @media (max-width: 640px) {
   .brand-text b { font-size: 12px; }
   .sidebar { width: 64px; padding: 12px 8px; }
-  nav button { padding: 8px; font-size: 12px; }
-  nav button small, .g-label { display: none; }
+  nav a { padding: 8px; font-size: 12px; }
+  nav a small, .g-label { display: none; }
 }
 </style>

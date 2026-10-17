@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { runSSE } from '../composables/useSSE.js';
+import { getJsonResult } from '../composables/api.js';
 
 export function useAppUpdate() {
   const ver = ref({ version: '', commit: null, builtAt: null });
@@ -14,8 +15,7 @@ export function useAppUpdate() {
 
   async function loadVersion() {
     try {
-      const r = await fetch('/api/version');
-      const s = await r.json();
+      const s = await getJsonResult('/api/version');
       if (s.ok) ver.value = s;
     } catch { /* 服务不可达时侧栏显示占位符即可 */ }
   }
@@ -24,8 +24,7 @@ export function useAppUpdate() {
   async function checkUpdate(manual = false) {
     checking.value = true;
     try {
-      const r = await fetch('/api/update/check');
-      const s = await r.json();
+      const s = await getJsonResult('/api/update/check');
       if (s.ok) upd.value = s;
       if (manual) {
         if (s.error) ElMessage.warning('检查更新失败：' + s.error);

@@ -2,6 +2,8 @@
 // 从 openapi/App.vue 抽出；操作完成后统一 refreshStatus 拉取最新状态。
 import { reactive } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { postJsonResult } from '../composables/api.js';
+import { shopStateMeta } from '../composables/shopState.js';
 
 export function useOpenapiShops({ refreshStatus }) {
   const busyShop = reactive(new Set()); // 正在操作中的店铺
@@ -20,39 +22,24 @@ export function useOpenapiShops({ refreshStatus }) {
 
   async function testShop(shopId) {
     await withShop(shopId, async () => {
-      const r = await fetch('/api/openapi/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopId }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) ElMessage.success(j.message || '登录有效');
+      const { ok, data: j } = await postJsonResult('/api/openapi/test', { shopId });
+      if (ok) ElMessage.success(j.message || '登录有效');
       else ElMessage.error(j.message || '测试失败');
     });
   }
 
   async function refreshShop(shopId) {
     await withShop(shopId, async () => {
-      const r = await fetch('/api/openapi/refresh', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopId }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) ElMessage.success(j.message || '刷新成功');
+      const { ok, data: j } = await postJsonResult('/api/openapi/refresh', { shopId });
+      if (ok) ElMessage.success(j.message || '刷新成功');
       else ElMessage.error(j.message || '刷新失败');
     });
   }
 
   async function toggleImportant(shopId, important) {
     await withShop(shopId, async () => {
-      const r = await fetch('/api/openapi/shop-important', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopId, important }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) ElMessage.success(j.message || '已更新重点店铺');
+      const { ok, data: j } = await postJsonResult('/api/openapi/shop-important', { shopId, important });
+      if (ok) ElMessage.success(j.message || '已更新重点店铺');
       else ElMessage.error(j.message || '更新重点店铺失败');
     });
   }
@@ -68,22 +55,14 @@ export function useOpenapiShops({ refreshStatus }) {
       return; // 用户取消
     }
     await withShop(shopId, async () => {
-      const r = await fetch('/api/openapi/remove-shop', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopId }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) ElMessage.success(j.message || '已删除');
+      const { ok, data: j } = await postJsonResult('/api/openapi/remove-shop', { shopId });
+      if (ok) ElMessage.success(j.message || '已删除');
       else ElMessage.error(j.message || '删除失败');
     });
   }
 
   function stateMeta(s) {
-    if (s.state === 'valid') return { type: 'success', label: '有效' };
-    if (s.state === 'expiring') return { type: 'warning', label: '即将过期' };
-    if (s.state === 're_auth') return { type: 'danger', label: '需重新授权' };
-    return { type: 'danger', label: '已过期' };
+    return shopStateMeta(s);
   }
 
   function fmtTime(t) {

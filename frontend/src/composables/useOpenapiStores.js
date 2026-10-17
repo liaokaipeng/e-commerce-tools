@@ -3,6 +3,7 @@
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { resolveOpenapiEmptyTip } from './openapiEmptyTip.js';
+import { getJsonResult } from './api.js';
 
 /**
  * @param {{ emptyTip?: boolean, errorToast?: boolean }} [opts]
@@ -17,8 +18,7 @@ export function useOpenapiStores({ emptyTip = false, errorToast = false } = {}) 
   async function loadStores() {
     storesLoading.value = true;
     try {
-      const r = await fetch('/api/openapi/stores');
-      const d = await r.json();
+      const d = await getJsonResult('/api/openapi/stores');
       stores.value = Array.isArray(d) ? d : [];
       if (emptyTip) {
         if (stores.value.length) {

@@ -2,6 +2,7 @@
 // 从 openapi/App.vue 抽出（原单文件混了状态 / 授权 / 逐店操作 / 批量刷新四块职责）。
 import { ref, reactive, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
+import { getJsonResult, postJsonResult } from '../composables/api.js';
 
 export function useOpenapiStatus() {
   const status = reactive({ configured: false, env: '', partnerId: '', partnerKeyMasked: '', shops: [], loading: true });
@@ -16,8 +17,7 @@ export function useOpenapiStatus() {
   async function refreshStatus(manual = false) {
     status.loading = true;
     try {
-      const r = await fetch('/api/openapi/status');
-      const s = await r.json();
+      const s = await getJsonResult('/api/openapi/status');
       if (s && s.ok) {
         Object.assign(status, s);
         if (s.configured && !form.partnerId) {
@@ -39,13 +39,8 @@ export function useOpenapiStatus() {
   async function saveApp() {
     saving.value = true;
     try {
-      const r = await fetch('/api/openapi/app', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ partnerId: form.partnerId, partnerKey: form.partnerKey, env: form.env }),
-      });
-      const j = await r.json();
-      if (r.ok && j.ok) {
+      const { ok, data: j } = await postJsonResult('/api/openapi/app', { partnerId: form.partnerId, partnerKey: form.partnerKey, env: form.env });
+      if (ok) {
         ElMessage.success(j.message || '已保存');
         form.partnerKey = '';
         await refreshStatus();

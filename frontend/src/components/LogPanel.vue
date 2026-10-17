@@ -10,8 +10,8 @@ const props = defineProps({
   height: { type: String, default: '320px' },
   fixed: { type: Boolean, default: false },
   emptyText: { type: String, default: '等待操作…' },
-  /** 可选 ref<boolean>：false 时暂停自动滚动（video 页用） */
-  autoScroll: { type: Object, default: null },
+  /** false 时暂停自动滚动（video 页开关用） */
+  autoScroll: { type: Boolean, default: true },
 });
 
 const { logEl } = useLogScroll(() => props.lines.length, props.autoScroll);
@@ -36,8 +36,8 @@ const boxStyle = computed(() => ({
 
 <style scoped>
 .log-panel {
-  background: #10131c;
-  color: #c8e1ff;
+  background: var(--log-bg);
+  color: var(--log-text);
   font-family: var(--font-mono);
   font-size: var(--fs-code);
   line-height: 1.8;
@@ -46,11 +46,11 @@ const boxStyle = computed(() => ({
   overflow-y: auto;
   word-break: break-all;
   scrollbar-width: thin; /* Firefox 细滚动条 */
-  scrollbar-color: #2b3245 transparent;
+  scrollbar-color: var(--log-scroll) transparent;
 }
 .log-panel::-webkit-scrollbar { width: 8px; height: 8px; }
-.log-panel::-webkit-scrollbar-thumb { background: #2b3245; border-radius: 4px; }
-.log-panel::-webkit-scrollbar-thumb:hover { background: #3a435c; }
+.log-panel::-webkit-scrollbar-thumb { background: var(--log-scroll); border-radius: 4px; }
+.log-panel::-webkit-scrollbar-thumb:hover { background: var(--log-scroll-hover); }
 .log-panel::-webkit-scrollbar-track { background: transparent; }
 .log-line {
   display: flex;
@@ -58,12 +58,12 @@ const boxStyle = computed(() => ({
   word-break: break-all;
 }
 .log-line + .log-line { margin-top: 3px; }
-.log-time { color: #7f8798; flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.log-info { color: #b8c0cc; }
-.log-warn { color: #ffc95c; }
-.log-ok { color: #5fd08a; }
-.log-err { color: #ff7b72; }
-.log-network { color: #ff9d5c; font-weight: 600; }
-.log-title { color: #7d8aff; font-weight: 600; }
-.log-empty { color: #8b93a3; }
+.log-time { color: var(--log-time); flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.log-info { color: var(--log-info); }
+.log-warn { color: var(--log-warn); }
+.log-ok { color: var(--log-ok); }
+.log-err { color: var(--log-err); }
+.log-network { color: var(--log-network); font-weight: 600; }
+.log-title { color: var(--log-title); font-weight: 600; }
+.log-empty { color: var(--log-empty); }
 </style>

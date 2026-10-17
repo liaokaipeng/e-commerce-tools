@@ -1,14 +1,10 @@
 // 批量任务组合式函数：预览表格行状态 + SSE 执行 + 暂停/继续/取消。
 // bidding-cancel / hotlisting-cancel 两页原先各写一份同源代码（行状态映射、SSE 事件分流、
 // 进度统计、任务控制按钮），现统一到本文件，页面只保留各自的事件文案差异（overrides）。
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { runSSE } from './useSSE.js';
 import { postJson } from './api.js';
-
-/** 行状态：'' 等待 | 'run' 进行中 | 'ok' 成功 | 'err' 失败 */
-export const STATUS_TAG = { '': 'info', run: 'warning', ok: 'success', err: 'danger' };
-export const STATUS_TEXT = { '': '等待', run: '进行中', ok: '成功', err: '失败' };
 
 /**
  * @param {object} o
@@ -29,16 +25,11 @@ export function useBatchJob({ runUrl, controlBase, log, rowKeyOf, overrides = {}
   const cancelled = ref(false);
   const progress = ref({ done: 0, ok: 0, fail: 0, total: 0 });
 
-  const totalCount = computed(() => progress.value.total);
-  const isBusy = computed(() => running.value);
-
-  function reset() {
-    rows.value = [];
-    progress.value = { done: 0, ok: 0, fail: 0, total: 0 };
-    cancelled.value = false;
-  }
-
-  /** 按事件里的 shopId 找到预览行并置状态（预览行与执行行按 rowKeyOf 对齐） */
+  /**
+   * 按事件里的 shopId 找到预览行并置状态（预览行与执行行按 rowKeyOf 对齐）。
+   * hotlisting 页的行键是「店铺ID-SPU ID」，依赖 SSE 事件同时带 shopId 与 spuId，
+   * rowKeyOf 才能算出与预览行一致的键。
+   */
   function markRow(ev, status) {
     if (!ev || ev.shopId === undefined) return;
     const key = rowKeyOf ? rowKeyOf(ev) : String(ev.shopId);
@@ -146,5 +137,5 @@ export function useBatchJob({ runUrl, controlBase, log, rowKeyOf, overrides = {}
     }
   }
 
-  return { running, rows, jobId, paused, pausing, cancelled, progress, totalCount, isBusy, start, togglePause, cancel, reset };
+  return { running, progress, paused, pausing, jobId, start, togglePause, cancel };
 }

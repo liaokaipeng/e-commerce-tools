@@ -3,7 +3,7 @@
 // 通用能力：登录/店铺（useShopeeSession）、日志（useLog）、预览扫描与批量任务（useBatchJob）、
 // 预览表格卡片（PreviewTableCard）——与「取消注册 Hot Listing」页共用同一套实现。
 import { ref, computed } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from 'element-plus';
 import LoginCard from '../components/LoginCard.vue';
 import StorePicker from '../components/StorePicker.vue';
 import PreviewTableCard from '../components/PreviewTableCard.vue';
@@ -11,6 +11,7 @@ import { useShopeeSession } from '../composables/useShopeeSession.js';
 import { useLog } from '../composables/useLog.js';
 import { useBatchJob } from '../composables/useBatchJob.js';
 import { usePreviewScan } from '../composables/usePreviewScan.js';
+import { confirmDanger } from '../composables/confirmDanger.js';
 
 const {
   status, refreshing, flash, refreshStatus,
@@ -67,15 +68,12 @@ async function doCancel() {
   const hint = previewDone.value
     ? `上次扫描共发现 ${totalBidCount.value} 条待改进竞价。`
     : '尚未扫描，将实时拉取并撤销全部待改进竞价。';
-  try {
-    await ElMessageBox.confirm(
-      `即将对选中的 ${selected.size} 个店铺撤销所有「待改进」竞价，撤销后不可恢复！\n${hint}\n\n确定要继续吗？`,
-      '危险操作确认',
-      { confirmButtonText: '继续撤销', cancelButtonText: '取消', type: 'warning', confirmButtonClass: 'el-button--danger' }
-    );
-  } catch {
-    return; // 用户取消
-  }
+  const ok = await confirmDanger({
+    message: `即将对选中的 ${selected.size} 个店铺撤销所有「待改进」竞价，撤销后不可恢复！\n${hint}\n\n确定要继续吗？`,
+    title: '危险操作确认',
+    confirmText: '继续撤销',
+  });
+  if (!ok) return; // 用户取消
   clearLog();
   log(`开始撤销，共 ${selected.size} 个店铺…`, 'info');
   await start([], { shopIds: [...selected] });

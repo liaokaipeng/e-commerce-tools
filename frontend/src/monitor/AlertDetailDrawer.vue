@@ -2,7 +2,7 @@
 // 告警详情抽屉：生命周期信息 + 结构化明细清单（如断货商品 / 待发货订单 / 退货申请）。
 import { ref, computed, watch } from 'vue';
 import { ElMessage } from 'element-plus';
-import { LEVEL_COLOR, LEVEL_NAME, fmtTime } from './constants.js';
+import { LEVEL_COLOR, LEVEL_NAME, LEVEL_FALLBACK_COLOR, shopName, fmtTime } from './constants.js';
 import { copyText } from '../utils/clipboard.js';
 
 const detailDrawer = defineModel('detailDrawer', { type: Boolean });
@@ -27,11 +27,7 @@ function shopNameOf(shopId) {
   const found = (props.shops || []).find((s) => s.shopId === shopId)
     || (props.shopConfig || []).find((s) => s.shopId === shopId);
   if (found && found.name) return found.name;
-  return shopNameOfCache(shopId);
-}
-// 店铺名缺失时兜底给 ID 后四位
-function shopNameOfCache(shopId) {
-  return shopId ? '店铺…' + String(shopId).slice(-4) : '';
+  return shopName({ shopId }); // 兜底「店铺…后四位」，与 constants.shopName 同口径
 }
 
 /** 明细行（按关键词过滤：ID / 主内容 / 补充信息，大小写不敏感） */
@@ -56,7 +52,7 @@ async function copyRows() {
   <el-drawer v-model="detailDrawer" title="告警详情" size="560px" direction="rtl">
     <template v-if="detailAlert">
       <div class="ad-head">
-        <i class="ai-level" :style="{ background: LEVEL_COLOR[detailAlert.level] || '#5b6272' }">
+        <i class="ai-level" :style="{ background: LEVEL_COLOR[detailAlert.level] || LEVEL_FALLBACK_COLOR }">
           {{ detailAlert.level }} {{ LEVEL_NAME[detailAlert.level] || '' }}
         </i>
         <b>{{ detailAlert.title }}</b>

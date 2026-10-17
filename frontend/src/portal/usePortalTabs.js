@@ -1,17 +1,33 @@
 // 门户页 Tab 与 iframe 常驻逻辑：切换 Tab 只改 visibility，首次激活才赋 src。
-import { ref, reactive, onMounted } from 'vue';
+// 地址栏以 hash（#/<tab key>）同步当前 Tab：菜单项即链接，可收藏、可前进后退。
+import { ref, reactive, onMounted, onUnmounted } from 'vue';
 import { TABS } from './tabs.js';
 
+const DEFAULT_KEY = 'bidding';
+
+/** 从 location.hash 解析 Tab key（兼容 #/bidding 与 #/bidding/），非法值返回 null */
+function keyFromHash() {
+  const key = location.hash.replace(/^#\/?/, '').replace(/\/+$/, '');
+  return TABS.some((t) => t.key === key) ? key : null;
+}
+
 export function usePortalTabs() {
-  const active = ref('bidding');
+  const active = ref(DEFAULT_KEY);
   // 用 reactive 包裹，add/delete 会触发视图更新（否则首次挂载后 iframe src 不会刷新）
   const loaded = reactive(new Set());
 
-  function show(key) {
-    active.value = key;
+  function show(key, { pushHistory = true } = {}) {
     const tab = TABS.find((t) => t.key === key);
-    if (tab && !loaded.has(key)) {
+    if (!tab) return;
+    active.value = key;
+    if (!loaded.has(key)) {
       loaded.add(key);
+    }
+    // 点击菜单时把 hash 写进地址栏（pushHistory=false 用于前进后退，避免重复入栈）；
+    // 初始挂载与纠正非法 hash 走 replaceState，不堆历史记录
+    if (keyFromHash() !== key) {
+      if (pushHistory) history.pushState({ tab: key }, '', `#/${key}`);
+      else history.replaceState({ tab: key }, '', `#/${key}`);
     }
     notifyTabs(key);
   }
@@ -22,6 +38,19 @@ export function usePortalTabs() {
       try {
         f.contentWindow && f.contentWindow.postMessage({ type: 'portal-tab', key }, location.origin);
       } catch { /* 忽略跨源 iframe */ }
+    }
+  }
+
+  /** 浏览器前进/后退或用户手改地址栏后，按 hash 激活对应 Tab；非法 hash 纠正回当前 Tab */
+  function onPopState() {
+    const key = keyFromHash();
+    if (key) {
+      if (key !== active.value) {
+        show(key, { pushHistory: false });
+      }
+    } else {
+      // replaceState 不会再触发 hashchange，不会死循环
+      history.replaceState({ tab: active.value }, '', `#/${active.value}`);
     }
   }
 
@@ -47,10 +76,28 @@ export function usePortalTabs() {
     }
   }
 
-  // 首次打开即加载默认 Tab（竞价导出），否则其 iframe 无 src 显示空白
+  // 首次打开：有合法 hash 就激活对应 Tab，否则回落默认 Tab；两种情况都把地址栏规范成 #/<key>
   onMounted(() => {
-    show(active.value);
-    window.addEventListener('message', onMessage);
+    const key = keyFromHash();
+    if (key) {
+      active.value = key;
+      loaded.add(key);
+      if (location.hash !== `#/${key}`) {
+        history.replaceState({ tab: key }, '', `#/${key}`);
+      }
+    } else {
+      active.value = DEFAULT_KEY;
+      loaded.add(DEFAULT_KEY);
+      history.replaceState({ tab: DEFAULT_KEY }, '', `#/${DEFAULT_KEY}`);
+    }
+    notifyTabs(active.value);
+    window.addEventListener('popstate', onPopState);
+    window.addEventListener('hashchange', onPopState);
+  });
+
+  onUnmounted(() => {
+    window.removeEventListener('popstate', onPopState);
+    window.removeEventListener('hashchange', onPopState);
   });
 
   return { tabs: TABS, active, show, isActive, iframeSrc };

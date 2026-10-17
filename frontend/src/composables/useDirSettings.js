@@ -1,6 +1,7 @@
 // 保存目录设置组合式函数：读取 / 设置默认目录、打开目录。
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import { getJsonResult, postJsonResult } from './api.js';
 
 /**
  * 保存目录相关（读取/设置默认目录、打开目录）
@@ -13,8 +14,7 @@ export function useDirSettings(tool, log = () => {}) {
 
   async function loadSettings() {
     try {
-      const r = await fetch('/api/settings');
-      const s = await r.json();
+      const s = await getJsonResult('/api/settings');
       const d = s.defaults && s.defaults[tool];
       if (d) {
         dir.value = d;
@@ -25,13 +25,8 @@ export function useDirSettings(tool, log = () => {}) {
 
   async function setDefaultDir(d) {
     try {
-      const r = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tool, dir: d }),
-      });
-      const res = await r.json();
-      if (res.ok) {
+      const { ok, data: res } = await postJsonResult('/api/settings', { tool, dir: d });
+      if (ok) {
         hasDefault.value = true;
         log('已设为默认目录：' + d, 'ok');
         return true;
@@ -52,13 +47,8 @@ export function useDirSettings(tool, log = () => {}) {
       return;
     }
     try {
-      const r = await fetch('/api/open-dir', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dir: d }),
-      });
-      const res = await r.json();
-      if (!res.ok) {
+      const { ok, data: res } = await postJsonResult('/api/open-dir', { dir: d });
+      if (!ok) {
         ElMessage.warning('无法打开目录：' + res.message);
         log('无法打开目录：' + res.message, 'err');
       }

@@ -14,7 +14,7 @@ export function readFirstSheetRows(arrayBuffer) {
 }
 
 /** 把二维数组（AOA）包成单工作表 workbook */
-export function buildWorkbook(aoa, sheetName) {
+function buildWorkbook(aoa, sheetName) {
   const ws = window.XLSX.utils.aoa_to_sheet(aoa);
   const wb = window.XLSX.utils.book_new();
   window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -22,7 +22,7 @@ export function buildWorkbook(aoa, sheetName) {
 }
 
 /** 下载 workbook 为 xlsx 文件 */
-export function downloadWorkbook(wb, filename) {
+function downloadWorkbook(wb, filename) {
   window.XLSX.writeFile(wb, filename);
 }
 
