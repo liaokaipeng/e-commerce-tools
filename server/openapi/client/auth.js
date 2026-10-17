@@ -1,17 +1,14 @@
 'use strict';
 // 开放平台授权与 App 解析：生成卖家授权链接、授权码换 token，以及测试用 get_shop_info。
-const { ENV_HOSTS, API_PATH } = require('../constants');
+const { API_PATH, hostOf } = require('../constants');
 const { nowSec } = require('../../lib/openapi-utils');
 const { commonParams, qsOf } = require('./sign');
 const { signedCall } = require('./transport');
 const { pickPayload } = require('./parse');
 
-/** 取 App 配置，未配置直接抛出可执行中文提示 */
+/** 取 App 配置，未配置直接抛出可执行中文提示（与 transport / refresh 同一文案） */
 function resolveApp() {
-  const store = require('../store');
-  const app = store.getApp();
-  if (!app) throw new Error('尚未配置开放平台 App，请先在「开放平台」页面保存 partner_id / partner_key');
-  return app;
+  return require('../store').requireApp();
 }
 
 /**
@@ -21,8 +18,7 @@ function resolveApp() {
  */
 function getAuthUrl(env, redirect) {
   const app = resolveApp();
-  const host = ENV_HOSTS[env];
-  if (!host) throw new Error('无效的环境：' + env);
+  const host = hostOf(env);
   const timestamp = nowSec();
   const common = commonParams({ partnerId: app.partnerId, partnerKey: app.partnerKey, apiPath: API_PATH.authPartner, timestamp });
   const params = Object.assign({}, common, { redirect });

@@ -9,7 +9,8 @@
  * 被取消则抛 CancelledError）→ 执行体结束时 finish 收尾。
  * 除显式取消外，「SSE 客户端断开」也视为取消：本地单人工具里用户关掉页面即代表不想继续。
  */
-const { sendJson, readRouteBody, sse } = require('./http-utils');
+const { sendJson, readJsonBodySoft, sse } = require('./http-utils');
+const { sleep } = require('./sleep');
 
 const TTL_MS = 30 * 60 * 1000;   // 任务最长存活时间（防执行体异常后残留）
 const SWEEP_MS = 60 * 1000;      // 僵尸任务巡检间隔
@@ -25,6 +26,11 @@ class CancelledError extends Error {
 /** jobId -> { paused, cancelled, createdAt, onCancel } */
 const jobs = new Map();
 let sweepTimer = null;
+
+/** 归一化 jobId 取任务（各函数共用同一查找口径） */
+function findJob(jobId) {
+  return jobs.get(String(jobId || ''));
+}
 
 function ensureSweeper() {
   if (sweepTimer) return;
@@ -66,17 +72,17 @@ function create(onCancel = null) {
 }
 
 function get(jobId) {
-  return jobs.get(String(jobId || ''));
+  return findJob(jobId);
 }
 
 /** 是否存在该任务（发取消指令前判断「任务不存在或已结束」用） */
 function has(jobId) {
-  return jobs.has(String(jobId || ''));
+  return !!findJob(jobId);
 }
 
 /** @returns {boolean} 任务是否存在 */
 function setPaused(jobId, paused) {
-  const job = jobs.get(String(jobId || ''));
+  const job = findJob(jobId);
   if (!job) return false;
   job.paused = !!paused;
   return true;
@@ -88,7 +94,7 @@ function setPaused(jobId, paused) {
  * @returns {boolean} 任务是否存在
  */
 function cancel(jobId, reason = '用户取消') {
-  const job = jobs.get(String(jobId || ''));
+  const job = findJob(jobId);
   if (!job) return false;
   job.cancelled = true;
   job.cancelReason = reason;
@@ -98,7 +104,7 @@ function cancel(jobId, reason = '用户取消') {
 
 /** 取消后供执行体查询的取消原因（如「任务取消」「SSE 连接断开」） */
 function cancelReason(jobId) {
-  const job = jobs.get(String(jobId || ''));
+  const job = findJob(jobId);
   return (job && job.cancelReason) || '任务已取消';
 }
 
@@ -109,9 +115,8 @@ function cancelReason(jobId) {
  * @param {() => boolean} [isAborted] 可选的额外中断条件（如 SSE 连接已断开且未来得及取消）
  */
 async function checkpoint(jobId, isAborted) {
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   for (;;) {
-    const job = jobs.get(String(jobId || ''));
+    const job = findJob(jobId);
     if (!job) throw new CancelledError('任务已结束');
     if (job.cancelled) throw new CancelledError(job.cancelReason || '任务已取消');
     if (isAborted && isAborted()) throw new CancelledError('SSE 连接已断开');
@@ -125,51 +130,36 @@ function finish(jobId) {
   jobs.delete(String(jobId || ''));
 }
 
-/** 当前任务数（测试与诊断用） */
-function size() {
-  return jobs.size;
-}
-
 /**
  * 注册「暂停 / 继续 / 取消」三个控制路由（body { jobId }，jobId 由 run 的 start 事件下发）。
  * 供各批量任务模块在 register({ post }) 内一行接入，避免复制同一段样板
  * （取消竞价 / 取消 Hot Listing / 视频上传等）。
  *
- * 语义：请求体非法 → readRouteBody 回 400；任务不存在或已结束 → 404。
+ * 语义：请求体非法 → readJsonBodySoft 回 400；任务不存在或已结束 → 404。
  * @param {(p: string, fn: Function) => void} post 路由注册函数（main.js 注入）
  * @param {string} basePath 接口前缀，如 '/api/bidding-cancel'（内部拼 /pause /resume /cancel）
- * @param {object} [deps] { sendJson, readRouteBody } 依赖注入（默认取 lib/http-utils）
  */
-function registerControlRoutes(post, basePath, deps) {
-  const { sendJson: sj, readRouteBody: rrb } = deps || { sendJson, readRouteBody };
+function registerControlRoutes(post, basePath) {
   const notFound = { ok: false, msg: '任务不存在或已结束' };
-  const reply = (res, ok) => sj(res, ok ? 200 : 404, ok ? { ok: true } : notFound);
+  const reply = (res, ok) => sendJson(res, ok ? 200 : 404, ok ? { ok: true } : notFound);
 
   post(`${basePath}/pause`, async (req, res) => {
-    const parsed = await rrb(req, `${basePath}/pause`, { res });
+    const parsed = await readJsonBodySoft(req, `${basePath}/pause`, { res });
     if (!parsed) return;
     reply(res, setPaused(parsed.jobId, true));
   });
 
   post(`${basePath}/resume`, async (req, res) => {
-    const parsed = await rrb(req, `${basePath}/resume`, { res });
+    const parsed = await readJsonBodySoft(req, `${basePath}/resume`, { res });
     if (!parsed) return;
     reply(res, setPaused(parsed.jobId, false));
   });
 
   post(`${basePath}/cancel`, async (req, res) => {
-    const parsed = await rrb(req, `${basePath}/cancel`, { res });
+    const parsed = await readJsonBodySoft(req, `${basePath}/cancel`, { res });
     if (!parsed) return;
     reply(res, cancel(parsed.jobId, '用户取消'));
   });
-}
-
-/**
- * SSE 响应安全收尾：客户端可能已断开，res.end() 会抛错，统一吞掉。
- * 供各流式接口在任务结束时收尾（避免各处复制 try { res.end() } catch {}）。
- */
-function safeEnd(res) {
-  try { if (!res.writableEnded) res.end(); } catch { /* 连接已断开，忽略 */ }
 }
 
 /**
@@ -261,8 +251,8 @@ function runShopBatch(opts) {
 }
 
 module.exports = {
-  create, get, has, setPaused, cancel, cancelReason, checkpoint, finish, size, CancelledError,
-  registerControlRoutes, safeEnd, runShopBatch,
+  create, get, has, setPaused, cancel, cancelReason, checkpoint, finish, CancelledError,
+  registerControlRoutes, runShopBatch,
   _ttlMs: TTL_MS,
   _test: { sweepJobs },
 };

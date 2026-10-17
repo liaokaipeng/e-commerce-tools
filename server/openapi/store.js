@@ -41,6 +41,16 @@ function getApp() {
 }
 
 /**
+ * 取 App 配置，未配置直接抛可执行中文提示。
+ * client 各模块（auth / transport / refresh）共用同一文案，避免各处措辞漂移。
+ */
+function requireApp() {
+  const app = getApp();
+  if (!app) throw new Error('尚未配置开放平台 App，请先在「开放平台」页面保存 partner_id / partner_key');
+  return app;
+}
+
+/**
  * 保存 App 配置：字段校验通过才写入。
  * **partner_id 变化（换 App）时清空该环境下的店铺凭证**：旧 token 与新 partner 不匹配，
  * 留着只会在店铺列表里变成必然失败的幽灵店铺；返回值带 shopsCleared 供上层提示与刷新大屏。
@@ -167,6 +177,6 @@ function status() {
 }
 
 module.exports = {
-  getApp, setApp, getShop, getShopsRaw, setShop, removeShop, clearShops,
+  getApp, requireApp, setApp, getShop, getShopsRaw, setShop, removeShop, clearShops,
   markShopInvalid, clearShopInvalid, setShopImportant, getImportantIds, status,
 };

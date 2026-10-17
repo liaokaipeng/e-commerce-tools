@@ -124,11 +124,11 @@ function probeVideoFile(filePath) {
       moov = findBox(bigHead, 0, wideLen, 'moov');
     }
     if (!moov && size > PROBE_SAMPLE) {
-      const tailLen = Math.min(PROBE_SAMPLE, size);
-      const tail = Buffer.alloc(tailLen);
-      fs.readSync(fd, tail, 0, tailLen, size - tailLen);
-      moov = findMoovInTail(tail, size - tailLen, size);
-      if (!moov && wideLen > tailLen) {
+      // size > PROBE_SAMPLE 时 tailLen 必为 PROBE_SAMPLE，无需再 Math.min
+      const tail = Buffer.alloc(PROBE_SAMPLE);
+      fs.readSync(fd, tail, 0, PROBE_SAMPLE, size - PROBE_SAMPLE);
+      moov = findMoovInTail(tail, size - PROBE_SAMPLE, size);
+      if (!moov && wideLen > PROBE_SAMPLE) {
         const bigTail = Buffer.alloc(wideLen);
         fs.readSync(fd, bigTail, 0, wideLen, size - wideLen);
         moov = findMoovInTail(bigTail, size - wideLen, size);

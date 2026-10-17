@@ -64,8 +64,8 @@ function handleRefreshAll(res) {
     return;
   }
 
-  let refreshed = 0; // 成功店铺数
-  let synced = 0;    // 实际续期店铺数（逐店刷新时与 refreshed 相等）
+  let refreshed = 0; // 成功店铺数（含冷却期内复用 token 的店）
+  let synced = 0;    // 实际续期店铺数（冷却复用的店 synced=0，故可能小于 refreshed）
   let failed = 0;
   let cooled = 0;    // 冷却期内被跳过重复刷新的店铺数（刚刷过且 token 仍有效）
   const failedItems = [];

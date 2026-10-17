@@ -83,4 +83,4 @@ async function checkNow() {
   }
 }
 
-module.exports = { fetchJson, snapshot, checkNow };
+module.exports = { checkNow };

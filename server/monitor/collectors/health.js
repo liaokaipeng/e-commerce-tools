@@ -20,7 +20,8 @@ async function collectHealthDomain(shopId) {
     metrics['health.late_shipment_rate'] = h.late_shipment_rate;
     metrics['health.non_fulfilment_rate'] = h.non_fulfilment_rate;
     metrics['health.rating'] = h.rating;
-    if (Object.values(h).every((v) => v == null)) throw new Error('账户健康返回缺少可用指标');
+    // 全空不等于接口失败：直接记一条 errors（原实现用 throw 穿到 catch 拼同样文案，属用异常做控制流）
+    if (Object.values(h).every((v) => v == null)) errors.push('健康指标：账户健康返回缺少可用指标');
   } catch (e) {
     errors.push('健康指标：' + e.message);
   }

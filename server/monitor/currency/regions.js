@@ -1,6 +1,9 @@
 'use strict';
 // 地区 ↔ 货币映射：店铺地区代码 → 当地货币代码，以及大屏金额展示用的币种符号。
 
+// 默认币种：店铺地区未识别 / meta 无 currency 时按人民币处理（阈值口径也固定人民币）
+const DEFAULT_CURRENCY = 'CNY';
+
 // 店铺地区代码 → 当地货币（get_shop_info 返回的 region 字段；未知地区按人民币处理）
 const REGION_CURRENCY = {
   CN: 'CNY', TH: 'THB', PH: 'PHP', ID: 'IDR', VN: 'VND', MY: 'MYR', SG: 'SGD',
@@ -24,8 +27,8 @@ function regionCurrency(region) {
 
 /** 币种显示符号（无符号用代码） */
 function symbolOf(currency) {
-  const c = String(currency || 'CNY').toUpperCase();
+  const c = String(currency || DEFAULT_CURRENCY).toUpperCase();
   return CURRENCY_SYMBOLS[c] || c;
 }
 
-module.exports = { REGION_CURRENCY, CURRENCY_SYMBOLS, regionCurrency, symbolOf };
+module.exports = { DEFAULT_CURRENCY, REGION_CURRENCY, CURRENCY_SYMBOLS, regionCurrency, symbolOf };

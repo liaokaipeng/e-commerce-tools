@@ -1,13 +1,13 @@
 'use strict';
 /**
  * 解压与包校验：
- *   - tarPath / probeTar / extractZip：复用共享层 lib/archive.js（系统自带 tar，不新增依赖）；
+ *   - probeTar / extractZip：复用共享层 lib/archive.js（系统自带 tar，不新增依赖）；
  *   - resolvePkgRoot / assertLooksLikePackage：识别真正的包根并确认是安装包。
  */
 const fs = require('fs');
 const path = require('path');
 
-const { tarPath, probeTar, extractZip } = require('../lib/archive');
+const { probeTar, extractZip } = require('../lib/archive');
 
 /** 压缩包可能把内容裹在一层顶层目录里（取决于打包方式），这里自动识别真正的包根 */
 function resolvePkgRoot(dir) {
@@ -26,4 +26,4 @@ function assertLooksLikePackage(dir) {
   }
 }
 
-module.exports = { tarPath, probeTar, extractZip, resolvePkgRoot, assertLooksLikePackage };
+module.exports = { probeTar, extractZip, resolvePkgRoot, assertLooksLikePackage };

@@ -5,7 +5,7 @@ const {
   evaluateRule, isMoreSevere, mergeRules, levelOf,
 } = require('../../server/monitor/rules');
 const {
-  listOf, orderAgeBuckets, stockOfModel, stockSummary, itemStockState, itemStockTotal,
+  listOf, orderAgeBuckets, stockOfModel, itemStockState, itemStockTotal,
   normalizeHealth, totalOf, orderSnDate, formatDdMmYyyy, normalizeAdsHourly, normalizeBalance,
   normalizePunishments, violationBreakdown, walletSummary, returnSummary, commentSummary,
   negativeCommentItems, isPermissionDenied,
@@ -74,8 +74,7 @@ async function run() {
         { stock: 2 },
         {},
       ];
-      const s = stockSummary(items, 5);
-      t('stockSummary 断货/低库存统计', s.out_of_stock === 2 && s.low_stock === 2, JSON.stringify(s));
+      // 商品粒度库存口径（型号粒度的 stockSummary 已随采集器改造删除，见 parse/product.js）
       t('stockOfModel 读 summary_info', stockOfModel(items[0]) === 0 && stockOfModel(items[1]) === 3);
       t('stockOfModel 无库存字段返回 null', stockOfModel(items[5]) === null);
       // 商品粒度：全型号合计（停产变体不撑爆断货数）

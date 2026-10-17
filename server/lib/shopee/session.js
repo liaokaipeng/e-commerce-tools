@@ -6,14 +6,14 @@
  * 三个模块共用同一份登录 Cookie（server/data/bidding-session.json，由浏览器扩展推送保存）。
  * 本模块只负责会话读取、按目标域匹配 Cookie、组装请求头与登录态断言。
  */
-const fs = require('fs');
 const { readJson } = require('../json-file');
 const { SESSION_FILE } = require('./constants');
 
-/** 读取会话文件（不存在 / 损坏返回 null） */
+/** 读取会话文件（不存在 / 损坏返回 null；除不存在外告警） */
 function readSession() {
-  if (!fs.existsSync(SESSION_FILE)) return null;
-  return readJson(SESSION_FILE, null, (e) => console.warn('读取会话文件失败:', e.message));
+  return readJson(SESSION_FILE, null, (e) => {
+    if (e.code !== 'ENOENT') console.warn('读取会话文件失败:', e.message);
+  });
 }
 
 /** 按目标域过滤会话里的 Cookie（无会话 / 无匹配均抛友好错误） */
@@ -29,22 +29,26 @@ function matchCookies(targetDomain) {
     return targetDomain === base || targetDomain.endsWith('.' + base);
   });
   if (matched.length === 0) {
-    throw new Error('没有匹配 seller.shopee.cn 的 Cookie，请重新点扩展推送');
+    throw new Error(`没有匹配 ${targetDomain} 的 Cookie，请重新点扩展推送`);
   }
   return matched;
 }
 
+/** 组装 Cookie 请求头字符串（name=value; …） */
+function cookieHeaderOf(cookies) {
+  return cookies.map(c => `${c.name}=${c.value}`).join('; ');
+}
+
 /** 组装 Cookie 请求头字符串（bidding / bidding-cancel 用） */
 function loadCookieHeader(targetDomain = 'seller.shopee.cn') {
-  return matchCookies(targetDomain).map(c => `${c.name}=${c.value}`).join('; ');
+  return cookieHeaderOf(matchCookies(targetDomain));
 }
 
 /** 组装 Cookie 并附带 SPC_CDS 值：{ header, spcCds }（hotlisting-cancel 用） */
 function loadCookie(targetDomain = 'seller.shopee.cn') {
   const matched = matchCookies(targetDomain);
-  const header = matched.map(c => `${c.name}=${c.value}`).join('; ');
   const spcCds = (matched.find(c => c.name === 'SPC_CDS') || {}).value || '';
-  return { header, spcCds };
+  return { header: cookieHeaderOf(matched), spcCds };
 }
 
 /** 登录态断言：403 或响应体含 token not found，统一抛出重新登录提示 */

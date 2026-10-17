@@ -1,6 +1,6 @@
 'use strict';
 // 人工操作 + 查询投影 + 容量淘汰 + 清空：对告警内存态的人工干预与读取。
-const { ALERT_CAP, LEVEL_ORDER } = require('../constants');
+const { ALERT_CAP, LEVEL_ORDER, zeroLevelCounts } = require('../constants');
 const { isMoreSevere } = require('../rules');
 const { broadcast } = require('./sse');
 const state = require('./state');
@@ -92,13 +92,13 @@ function getAlerts({ level, shopId, status, limit } = {}) {
 
 /** 汇总：各店各级别未关闭告警数与最高级别，以及全局总数。可传 onlyShopIds（Set）只统计启用监控的店铺。 */
 function summary(onlyShopIds) {
-  const totals = { P0: 0, P1: 0, P2: 0 };
+  const totals = zeroLevelCounts();
   const byShop = {};
   for (const a of state.alerts) {
     if (a.status === 'closed') continue;
     if (onlyShopIds && !onlyShopIds.has(a.shopId)) continue;
     totals[a.level] += 1;
-    if (!byShop[a.shopId]) byShop[a.shopId] = { P0: 0, P1: 0, P2: 0, maxLevel: null };
+    if (!byShop[a.shopId]) byShop[a.shopId] = Object.assign(zeroLevelCounts(), { maxLevel: null });
     byShop[a.shopId][a.level] += 1;
     if (!byShop[a.shopId].maxLevel || isMoreSevere(a.level, byShop[a.shopId].maxLevel)) {
       byShop[a.shopId].maxLevel = a.level;

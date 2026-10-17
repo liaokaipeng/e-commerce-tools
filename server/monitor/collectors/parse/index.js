@@ -28,6 +28,7 @@ module.exports = {
   firstOf: c.firstOf,
   round2: c.round2,
   listOf: c.listOf,
+  countByDesc: c.countByDesc,
   totalOf: c.totalOf,
   // 日期（datetime.js）
   fmtSec: dt.fmtSec,
@@ -39,7 +40,6 @@ module.exports = {
   orderAgeBuckets: order.orderAgeBuckets,
   // 商品域（product.js）
   stockOfModel: product.stockOfModel,
-  stockSummary: product.stockSummary,
   itemStockTotal: product.itemStockTotal,
   itemStockState: product.itemStockState,
   // 账户健康域（health.js）
@@ -50,9 +50,9 @@ module.exports = {
   normalizeAdsHourly: ads.normalizeAdsHourly,
   normalizeBalance: ads.normalizeBalance,
   // 资金域（funds.js）
+  sumAmountRows: funds.sumAmountRows,
   walletSummary: funds.walletSummary,
   // 售后评价域（aftersale.js）
-  recentReturns: aftersale.recentReturns,
   returnSummary: aftersale.returnSummary,
   negativeCommentItems: aftersale.negativeCommentItems,
   commentSummary: aftersale.commentSummary,

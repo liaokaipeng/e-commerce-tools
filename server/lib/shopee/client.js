@@ -24,7 +24,7 @@ function buildShopeeUrl(apiPath, { shopId, region, spcCds, business } = {}) {
   }
   params.set('SPC_CDS_VER', '2');
   if (spcCds) params.set('SPC_CDS', spcCds);
-  if (shopId !== null && shopId !== undefined && String(shopId) !== '') params.set('cnsc_shop_id', String(shopId));
+  if (shopId !== null && shopId !== undefined && shopId !== '') params.set('cnsc_shop_id', String(shopId));
   if (region) params.set('cbsc_shop_region', String(region));
   return `${HOST}${apiPath}?${params.toString()}`;
 }
@@ -102,11 +102,10 @@ async function fetchShopRegion(cookieHeader, shopId) {
   return '';
 }
 
+// 对外只暴露调用入口（buildShopeeUrl / apiGet / apiPost / fetchShopRegion）：
+// shopeeHeaders / assertApiOk / parseApiResponse 仅本文件内部使用，不对外导出
 module.exports = {
   buildShopeeUrl,
-  shopeeHeaders,
-  assertApiOk,
-  parseApiResponse,
   apiGet,
   apiPost,
   fetchShopRegion,

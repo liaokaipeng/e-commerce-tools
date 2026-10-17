@@ -11,6 +11,7 @@ const fs = require('fs');
 const { execFile } = require('child_process');
 const { sendJson, sse, readJsonBodySoft } = require('./lib/http-utils');
 const { getDefault } = require('./lib/settings');
+const version = require('./lib/version');
 const { detectProxy } = require('./tiktok/proxy');
 const { extractUrls } = require('./tiktok/parse');
 const { runBatch } = require('./tiktok/job');
@@ -23,7 +24,8 @@ function handleStatus(req, res) {
     ok: true,
     proxy: detectProxy() || null,
     defaultDir: getDefault('tiktok'), // 未设置过时为 null，前端提示用户自选目录
-    version: '1.0.0',
+    // 版本号单一来源：仓库根 package.json（与门户页 / 更新比对一致，不另写一份）
+    version: version.currentVersion(),
   });
 }
 

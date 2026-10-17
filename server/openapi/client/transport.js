@@ -1,11 +1,11 @@
 'use strict';
 // 开放平台 HTTP 传输层：签名并发送 signedCall 请求（网络错误 / 5xx 退避重试，业务错误不重试）。
-// 只负责「把一次签名请求发出去并按错误文案抛错」，刷新分组 / token 有效期等策略不在此层。
+// 只负责「把一次签名请求发出去并按错误文案抛错」，刷新策略 / token 有效期等不在此层。
 const http = require('../../lib/http');
-const { ENV_HOSTS } = require('../constants');
+const { hostOf } = require('../constants');
 const { nowSec } = require('../../lib/openapi-utils');
 const { commonParams, qsOf } = require('./sign');
-const { hintOf } = require('./errors');
+const { gatewayError, nonJsonError } = require('./errors');
 // 重试 / 退避统一走 lib/retry.js（与视频上传、TikTok 解析等链路共用同一骨架）
 const { retry, fixedBackoff } = require('../../lib/retry');
 
@@ -18,11 +18,9 @@ const { retry, fixedBackoff } = require('../../lib/retry');
  * @param {object} opts { env, apiPath, business, accessToken, shopId, signal, method = 'POST' }
  */
 async function signedCall({ env, apiPath, business = {}, accessToken = '', shopId = '', signal, method = 'POST' }) {
-  const store = require('../store'); // 延迟 require：测试按缓存清理隔离凭证实例，此处必须取最新实例
-  const app = store.getApp();
-  if (!app) throw new Error('尚未配置开放平台 App，请先在「开放平台」页面保存 partner_id / partner_key');
-  const host = ENV_HOSTS[env];
-  if (!host) throw new Error('无效的环境：' + env);
+  // 延迟 require：测试按缓存清理隔离凭证实例，此处必须取最新实例
+  const app = require('../store').requireApp();
+  const host = hostOf(env);
 
   const timestamp = nowSec();
   const common = commonParams({ partnerId: app.partnerId, partnerKey: app.partnerKey, apiPath, timestamp, accessToken, shopId });
@@ -54,11 +52,10 @@ async function signedCall({ env, apiPath, business = {}, accessToken = '', shopI
     if (!j || typeof j !== 'object') {
       // 5xx 多为网关瞬时故障，交给 retry；其余（含 4xx 非 JSON）视为终态错误
       if (resp.status >= 500 && resp.status < 600) throw new Error(`开放平台网关返回 HTTP ${resp.status}`);
-      throw new Error(`开放平台返回异常（HTTP ${resp.status}）: ${(resp.text || '').slice(0, 200)}`);
+      throw nonJsonError(resp.status, resp.text);
     }
     if (j.error) {
-      const hint = hintOf(j.error, j.message);
-      throw new Error(`开放平台错误 ${j.error}${j.message ? '：' + j.message : ''}${hint ? '（' + hint + '）' : ''}`);
+      throw gatewayError(j.error, j.message);
     }
     return j;
   }, {

@@ -1,7 +1,7 @@
 'use strict';
 // 取消竞价接口调用层（URL 拼接与请求层见 lib/shopee-session.js）。
 const { apiPost, buildShopeeUrl } = require('../lib/shopee-session');
-const { PAGE_TAB_IMPROVE } = require('./constants');
+const { PAGE_TAB_IMPROVE, PAGE_SIZE, MAX_PAGES } = require('./constants');
 const { extractImprovementItems } = require('./parse');
 
 /**
@@ -15,14 +15,14 @@ async function fetchImprovementBids(cookieHeader, shopId, region) {
   while (true) {
     const j = await apiPost(url, cookieHeader, {
       filter: { page_tab: PAGE_TAB_IMPROVE },
-      page_info: { page_num: pageNum, page_size: 100 },
+      page_info: { page_num: pageNum, page_size: PAGE_SIZE },
       option: { with_performance: true },
     }, { label: '获取待改进列表' });
     const d = j.data;
     rows.push(...extractImprovementItems(d));
     if (!d.has_more) break;
     pageNum += 1;
-    if (pageNum > 200) throw new Error('翻页超过 200 页，疑似死循环，已停止');
+    if (pageNum > MAX_PAGES) throw new Error(`翻页超过 ${MAX_PAGES} 页，疑似死循环，已停止`);
   }
   return rows;
 }

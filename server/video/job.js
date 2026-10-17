@@ -89,7 +89,6 @@ module.exports = {
   jobEvents,
   jobControllers,
   abortedJobs,
-  keepJobEvents,
   broadcast,
   finishJob,
   processJob,

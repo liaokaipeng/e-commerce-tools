@@ -12,10 +12,10 @@ function nowSec() {
  * 拼签名字符串（v2 规则）：
  * - 无 access_token：partner_id + api_path + timestamp
  * - 带 access_token：partner_id + api_path + timestamp + access_token + shop_id
+ *   （只有其一也按序拼上，缺失侧视为空串——与两者齐全时同一分支，无需特判）
  */
 function buildBaseString(partnerId, apiPath, timestamp, accessToken, shopId) {
   const base = `${partnerId}${apiPath}${timestamp}`;
-  if (accessToken && shopId) return `${base}${accessToken}${shopId}`;
   if (accessToken || shopId) return base + (accessToken || '') + (shopId || '');
   return base;
 }

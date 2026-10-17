@@ -1,6 +1,6 @@
 'use strict';
 // 告警生命周期：快照指标入库 → 规则评估 → 去重/升级/回稳移除/关闭重开；系统自检告警。
-const { METRICS } = require('../constants');
+const { METRICS, SYSTEM_COLLECT_FAIL_ID } = require('../constants');
 const { evaluateRule, isMoreSevere } = require('../rules');
 const store = require('../store');
 const { broadcast } = require('./sse');
@@ -11,6 +11,21 @@ const { prune } = require('./actions');
 // 时间触发升级窗口：P2 持续 24h 升 P1；P1 每 2h 重闪（大屏重新置顶提醒）
 const ESCALATE_P2_MS = 24 * 3600 * 1000;
 const REFLASH_P1_MS = 2 * 3600 * 1000;
+
+/** 新建告警基座：业务告警与系统自检告警共用同一组基础字段（id/seq/status/时间戳） */
+function newAlert(shopId, ruleId, now) {
+  return {
+    id: shopId + ':' + ruleId,
+    shopId,
+    ruleId,
+    seq: 1,
+    status: 'open',
+    count: 1,
+    firstAt: now,
+    lastAt: now,
+    updatedAt: now,
+  };
+}
 
 /**
  * 指标快照入库：逐指标评估规则，触发/升级/去重计数。
@@ -36,25 +51,16 @@ function ingest(shopId, domain, metrics, at, details) {
       continue;
     }
     if (!existing) {
-      const a = {
-        id: shopId + ':' + rule.id,
-        seq: 1,
-        shopId,
-        ruleId: rule.id,
+      const a = Object.assign(newAlert(shopId, rule.id, now), {
         domain: rule.domain,
         metric: rule.metric,
         title: rule.title,
         unit: (METRICS[rule.metric] || {}).unit || '',
         level,
-        status: 'open',
         current: v,
-        count: 1,
-        firstAt: now,
-        lastAt: now,
-        updatedAt: now,
         suggest: rule.suggest,
         message: '',
-      };
+      });
       applyDetail(a, details);
       alerts.push(a);
       changed.push(Object.assign({}, a, { change: 'new' }));
@@ -128,15 +134,17 @@ function maintain(now) {
 
 /**
  * 采集失败记录（系统自检告警）：
- * 连续失败 1 次 P2 / 2 次 P1 / ≥5 次 P0（P0 留给「长时间失联」，
+ * 连续失败按规则阈值定级（默认 1→P2、2→P1、≥5→P0，P0 留给「长时间失联」，
  * 避免店铺统一失效时第一波 3 个域同时失败就把全场刷成红色）；
  * 成功采集后调用 systemOk 移除告警。
+ * 阈值以规则数据（rules-data 的 system.collect_fail）为单一来源，面板可改；
+ * 某级阈值被用户清空（留空 = 该级别不触发）则跳过该级。
  */
 function systemFail(shopId, domain, message, at) {
   const alerts = state.alerts;
   const now = at || Date.now();
-  const rule = store.getRulesById()['system.collect_fail'];
-  const existing = state.findAlert(shopId, 'system.collect_fail');
+  const rule = store.getRulesById()[SYSTEM_COLLECT_FAIL_ID];
+  const existing = state.findAlert(shopId, SYSTEM_COLLECT_FAIL_ID);
   // 规则被用户关闭：不再产生系统自检告警；已开着的直接从告警流移除（否则会永远挂在那里，
   // 因为 maintain 的回稳检测只对业务域生效，system 域没有别的清理信号）。
   if (!rule || rule.enabled === false) {
@@ -149,28 +157,23 @@ function systemFail(shopId, domain, message, at) {
     return null;
   }
   const count = (existing && existing.status !== 'closed' ? existing.count : 0) + 1;
-  const level = count >= 5 ? 'P0' : count >= 2 ? 'P1' : 'P2';
+  const th = rule.thresholds || {};
+  const hit = (t) => typeof t === 'number' && isFinite(t) && count >= t;
+  const level = hit(th.p0) ? 'P0' : hit(th.p1) ? 'P1' : 'P2';
   const text = `店铺最近一次采集失败（${domain}）：${message || '未知错误'}（连续 ${count} 次）`;
   if (!existing || existing.status === 'closed') {
-    const a = {
-      id: shopId + ':system.collect_fail',
+    const a = Object.assign(newAlert(shopId, SYSTEM_COLLECT_FAIL_ID, now), {
       seq: existing ? (existing.seq || 1) + 1 : 1,
-      shopId,
-      ruleId: 'system.collect_fail',
       domain: 'system',
-      metric: 'system.collect_fail',
-      title: rule ? rule.title : '采集连续失败',
+      metric: SYSTEM_COLLECT_FAIL_ID,
+      title: rule.title,
       unit: '次',
       level,
-      status: 'open',
       current: count,
       count,
-      firstAt: now,
-      lastAt: now,
-      updatedAt: now,
-      suggest: rule ? rule.suggest : '',
+      suggest: rule.suggest,
       message: text,
-    };
+    });
     alerts.push(a);
     broadcast('alert', Object.assign({}, a, { change: 'new' }));
   } else {
@@ -190,7 +193,7 @@ function systemFail(shopId, domain, message, at) {
 /** 采集成功：直接从告警流移除系统自检告警 */
 function systemOk(shopId) {
   const alerts = state.alerts;
-  const a = state.findAlert(shopId, 'system.collect_fail');
+  const a = state.findAlert(shopId, SYSTEM_COLLECT_FAIL_ID);
   if (a && (a.status === 'open' || a.status === 'ack')) {
     const i = state.indexOfAlert(a);
     if (i >= 0) alerts.splice(i, 1);

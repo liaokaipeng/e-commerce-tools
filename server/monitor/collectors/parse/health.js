@@ -1,10 +1,13 @@
 'use strict';
 // 账户健康域解析（纯函数）：履约指标、扣分、处罚、问题商品原因分布。
+const { countByDesc } = require('./common');
 const { PUNISHMENT_TIER_NAMES, VIOLATION_REASON_NAMES } = require('../constants');
 
 /** 账户健康归一化（纯函数）：metric_list 按 metric_name 取值，缺失记 null */
 function normalizeHealth(json) {
-  const out = { late_shipment_rate: null, non_fulfilment_rate: null, rating: null, penalty_points: null };
+  // 只输出被调用方读取的字段（late_shipment_rate / non_fulfilment_rate / rating）；
+  // 扣分数走 totalOf（collectors/health.js），不经过本函数
+  const out = { late_shipment_rate: null, non_fulfilment_rate: null, rating: null };
   const resp = json && json.response && typeof json.response === 'object' ? json.response : null;
   const ml = resp && Array.isArray(resp.metric_list) ? resp.metric_list : [];
   const num = (names) => {
@@ -36,25 +39,15 @@ function normalizePunishments(json) {
   const list = resp && Array.isArray(resp.punishment_list) ? resp.punishment_list : [];
   const total = resp && resp.total_count != null ? Number(resp.total_count) : NaN;
   const count = isFinite(total) ? total : list.length;
-  const cnt = {};
-  for (const p of list) {
-    if (!p || typeof p !== 'object') continue;
-    const name = PUNISHMENT_TIER_NAMES[p.reason] || (p.reason != null ? '类型' + p.reason : '未知');
-    cnt[name] = (cnt[name] || 0) + 1;
-  }
-  const detail = Object.entries(cnt).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}×${v}`).join('/');
+  const byTier = countByDesc(list, (p) => PUNISHMENT_TIER_NAMES[p.reason] || (p.reason != null ? '类型' + p.reason : '未知'));
+  const detail = byTier.map(([k, v]) => `${k}×${v}`).join('/');
   return { count, detail };
 }
 
 /** 问题商品明细聚合（纯函数）：按 reason 中文分布 → 「违禁商品2/假冒商品1」 */
 function violationBreakdown(list) {
-  const cnt = {};
-  for (const it of list || []) {
-    if (!it || typeof it !== 'object' || it.reason == null) continue;
-    const name = VIOLATION_REASON_NAMES[it.reason] || '其他(' + it.reason + ')';
-    cnt[name] = (cnt[name] || 0) + 1;
-  }
-  return Object.entries(cnt).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}${v}`).join('/');
+  return countByDesc(list, (it) => (it.reason == null ? null : (VIOLATION_REASON_NAMES[it.reason] || '其他(' + it.reason + ')')))
+    .map(([k, v]) => `${k}${v}`).join('/');
 }
 
 module.exports = { normalizeHealth, normalizePunishments, violationBreakdown };

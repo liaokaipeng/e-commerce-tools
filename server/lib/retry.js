@@ -8,7 +8,7 @@
  * 现收敛到本文件：重试语义（哪些错误可重试、退避多久）由调用方按场景选择，
  * 循环骨架与本文件统一，新增链路不再各写一份。
  */
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const { sleep } = require('./sleep');
 
 /** 指数退避：1s / 2s / 4s… 上限 maxMs（适合网络抖动、5xx） */
 function exponentialBackoff(baseMs = 1000, maxMs = 8000) {
@@ -59,4 +59,4 @@ async function retry(fn, { attempts = 3, waitOf = exponentialBackoff(), shouldRe
   throw lastErr;
 }
 
-module.exports = { sleep, retry, exponentialBackoff, fixedBackoff, jitteredLinearBackoff };
+module.exports = { retry, exponentialBackoff, fixedBackoff, jitteredLinearBackoff };

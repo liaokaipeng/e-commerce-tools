@@ -21,15 +21,21 @@ const { collectFundsDomain } = require('./funds');
 const { collectAftersaleDomain } = require('./aftersale');
 const { fetchShopInfo } = require('./shop-info');
 
+// 域 -> 采集函数映射表（新增域只加条目，不改分发逻辑）
+const DOMAIN_COLLECTORS = {
+  order: collectOrderDomain,
+  product: collectProductDomain,
+  health: collectHealthDomain,
+  ads: collectAdsDomain,
+  funds: collectFundsDomain,
+  aftersale: collectAftersaleDomain,
+};
+
 /** 采集一个域：返回 { domain, metrics, details?, errors }；子调用独立容错，全失败才抛错 */
 async function collectDomain(shopId, domain) {
-  if (domain === 'order') return collectOrderDomain(shopId);
-  if (domain === 'product') return collectProductDomain(shopId);
-  if (domain === 'health') return collectHealthDomain(shopId);
-  if (domain === 'ads') return collectAdsDomain(shopId);
-  if (domain === 'funds') return collectFundsDomain(shopId);
-  if (domain === 'aftersale') return collectAftersaleDomain(shopId);
-  throw new Error('未知采集域：' + domain);
+  const collect = DOMAIN_COLLECTORS[domain];
+  if (!collect) throw new Error('未知采集域：' + domain);
+  return collect(shopId);
 }
 
 module.exports = {
@@ -62,7 +68,6 @@ module.exports = {
   orderAgeGroups: parse.orderAgeGroups,
   orderAgeBuckets: parse.orderAgeBuckets,
   stockOfModel: parse.stockOfModel,
-  stockSummary: parse.stockSummary,
   itemStockTotal: parse.itemStockTotal,
   itemStockState: parse.itemStockState,
   normalizeHealth: parse.normalizeHealth,
@@ -72,7 +77,6 @@ module.exports = {
   normalizePunishments: parse.normalizePunishments,
   violationBreakdown: parse.violationBreakdown,
   walletSummary: parse.walletSummary,
-  recentReturns: parse.recentReturns,
   returnSummary: parse.returnSummary,
   negativeCommentItems: parse.negativeCommentItems,
   commentSummary: parse.commentSummary,

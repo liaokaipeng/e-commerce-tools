@@ -5,7 +5,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { t } = require('../helpers');
-const { parseJsonText, readRouteBody, createDispatcher } = require('../../server/lib/http-utils');
+const { parseJsonText, readJsonBodySoft, createDispatcher } = require('../../server/lib/http-utils');
 const {
   buildShopeeUrl, DEFAULT_REGION, HOST, loadStoreNames, storeNameOf,
 } = require('../../server/lib/shopee-session');
@@ -14,7 +14,7 @@ const jobs = require('../../server/lib/jobs');
 const {
   retry, exponentialBackoff, fixedBackoff, jitteredLinearBackoff,
 } = require('../../server/lib/retry');
-const { isAllowedOrigin } = require('../../server/main');
+const { isAllowedOrigin } = require('../../server/lib/cors');
 
 async function run() {
   // ===== 共享层：请求体解析 / 卖家中心 URL 拼接 / 导出工具（三模块收敛后的公共契约） =====
@@ -190,7 +190,7 @@ async function run() {
       && JSON.stringify(waits) === JSON.stringify([[1, 5], [2, 5]]), JSON.stringify(waits));
   }
 
-  // ===== 共享层：路由控制体解析（readRouteBody） =====
+  // ===== 共享层：路由控制体解析（readJsonBodySoft） =====
   {
     const { Readable } = require('stream');
     const bodyReq = (text) => {
@@ -206,13 +206,13 @@ async function run() {
       return r;
     };
 
-    t('readRouteBody：合法 JSON 原样解析', (await readRouteBody(bodyReq('{"jobId":"a"}'))).jobId === 'a');
+    t('readJsonBodySoft：合法 JSON 原样解析', (await readJsonBodySoft(bodyReq('{"jobId":"a"}'))).jobId === 'a');
     const res400 = fakeRes();
-    const bad = await readRouteBody(bodyReq('not-json'), '/api/x/pause', { res: res400 });
-    t('readRouteBody：带 res 时非法 JSON 回 400 并返回 null', bad === null && res400.status === 400
+    const bad = await readJsonBodySoft(bodyReq('not-json'), '/api/x/pause', { res: res400 });
+    t('readJsonBodySoft：带 res 时非法 JSON 回 400 并返回 null', bad === null && res400.status === 400
       && JSON.parse(res400.body).ok === false, JSON.stringify({ status: res400.status, body: res400.body }));
-    const soft = await readRouteBody(bodyReq('not-json'), '/api/x/pause');
-    t('readRouteBody：不带 res 时非法 JSON 宽容返回 {}', soft && typeof soft === 'object' && Object.keys(soft).length === 0);
+    const soft = await readJsonBodySoft(bodyReq('not-json'), '/api/x/pause');
+    t('readJsonBodySoft：不带 res 时非法 JSON 宽容返回 {}', soft && typeof soft === 'object' && Object.keys(soft).length === 0);
   }
 
   // ===== 共享层：zip 条目名编码自检（发布包跨平台不乱码） =====
@@ -289,7 +289,7 @@ async function run() {
     }
   }
 
-  // ===== 共享层：CORS 白名单（main.js isAllowedOrigin） =====
+  // ===== 共享层：CORS 白名单（lib/cors.js isAllowedOrigin） =====
   {
     t('CORS：本机 http/https（含任意端口）放行',
       isAllowedOrigin('http://127.0.0.1:8765') && isAllowedOrigin('http://localhost:5173')

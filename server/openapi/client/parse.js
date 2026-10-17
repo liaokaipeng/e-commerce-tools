@@ -1,7 +1,7 @@
 'use strict';
 // 开放平台网关响应解析：统一「载荷层口径」（顶层 / response / data）与 token 响应校验，
 // 换 token、刷新 token 共用同一份解析，避免同一响应出现两套读法。
-const { hintOf } = require('./errors');
+const { gatewayError, nonJsonError } = require('./errors');
 
 /**
  * 取网关响应中的有效载荷：多数接口把结果放顶层，少数接口/网关版本会包一层 response / data。
@@ -20,11 +20,10 @@ function pickPayload(j, keys) {
 function parseTokenResponse(resp) {
   const raw = resp.json;
   if (!raw || typeof raw !== 'object') {
-    throw new Error(`开放平台返回异常（HTTP ${resp.status}）: ${(resp.text || '').slice(0, 200)}`);
+    throw nonJsonError(resp.status, resp.text);
   }
   if (raw.error) {
-    const hint = hintOf(raw.error, raw.message);
-    throw new Error(`开放平台错误 ${raw.error}${raw.message ? '：' + raw.message : ''}${hint ? '（' + hint + '）' : ''}`);
+    throw gatewayError(raw.error, raw.message);
   }
   const j = pickPayload(raw, ['access_token', 'refresh_token']);
   if (!j.access_token || !j.refresh_token) {

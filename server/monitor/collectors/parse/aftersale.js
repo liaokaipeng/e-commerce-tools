@@ -1,5 +1,6 @@
 'use strict';
 // 售后评价域解析（纯函数）：退货申请窗口过滤与原因分布、差评窗口过滤与关键词命中。
+const { countByDesc } = require('./common');
 const {
   AFTERSALE_WINDOW_MS,
   NEGATIVE_STAR_MAX,
@@ -7,17 +8,16 @@ const {
   RETURN_REASON_NAMES,
 } = require('../constants');
 
+/** 近 24h 窗口判定（create_time 秒；未来时间与超窗记录都不算） */
+function withinWindow(createTimeSec, nowMs) {
+  const ct = createTimeSec != null ? Number(createTimeSec) * 1000 : NaN;
+  return isFinite(ct) && ct <= nowMs && nowMs - ct <= AFTERSALE_WINDOW_MS;
+}
+
 /** 近 24h 内的退货申请原始记录（create_time 秒；与 returnSummary 同口径） */
 function recentReturns(returns, nowMs) {
   const now = nowMs || Date.now();
-  const out = [];
-  for (const r of returns || []) {
-    if (!r || typeof r !== 'object') continue;
-    const ct = r.create_time != null ? Number(r.create_time) * 1000 : NaN;
-    if (!isFinite(ct) || ct > now || now - ct > AFTERSALE_WINDOW_MS) continue;
-    out.push(r);
-  }
-  return out;
+  return (returns || []).filter((r) => r && typeof r === 'object' && withinWindow(r.create_time, now));
 }
 
 /**
@@ -26,13 +26,8 @@ function recentReturns(returns, nowMs) {
  */
 function returnSummary(returns, nowMs) {
   const list = recentReturns(returns, nowMs);
-  const byReason = {};
-  for (const r of list) {
-    const name = RETURN_REASON_NAMES[r.reason] || String(r.reason || '未知原因');
-    byReason[name] = (byReason[name] || 0) + 1;
-  }
-  const detail = Object.entries(byReason).sort((a, b) => b[1] - a[1]).slice(0, 5)
-    .map(([k, v]) => `${k}${v}`).join('/');
+  const byReason = countByDesc(list, (r) => RETURN_REASON_NAMES[r.reason] || String(r.reason || '未知原因'));
+  const detail = byReason.slice(0, 5).map(([k, v]) => `${k}${v}`).join('/');
   return { count: list.length, detail, items: list };
 }
 
@@ -42,8 +37,7 @@ function negativeCommentItems(items, nowMs) {
   const out = [];
   for (const c of items || []) {
     if (!c || typeof c !== 'object') continue;
-    const ct = c.create_time != null ? Number(c.create_time) * 1000 : NaN;
-    if (!isFinite(ct) || ct > now || now - ct > AFTERSALE_WINDOW_MS) continue;
+    if (!withinWindow(c.create_time, now)) continue;
     const star = Number(c.rating_star);
     if (!isFinite(star) || star > NEGATIVE_STAR_MAX) continue;
     out.push(c);
@@ -57,16 +51,10 @@ function negativeCommentItems(items, nowMs) {
  */
 function commentSummary(items, keywords, nowMs) {
   const kws = Array.isArray(keywords) && keywords.length ? keywords : COMMENT_KEYWORDS;
-  const now = nowMs || Date.now();
-  let count = 0;
+  // 计数口径与 negativeCommentItems 完全一致（同一过滤函数），不再各自实现一遍窗口/星级判断
+  const list = negativeCommentItems(items, nowMs);
   const hits = {};
-  for (const c of items || []) {
-    if (!c || typeof c !== 'object') continue;
-    const ct = c.create_time != null ? Number(c.create_time) * 1000 : NaN;
-    if (!isFinite(ct) || ct > now || now - ct > AFTERSALE_WINDOW_MS) continue;
-    const star = Number(c.rating_star);
-    if (!isFinite(star) || star > NEGATIVE_STAR_MAX) continue;
-    count += 1;
+  for (const c of list) {
     const text = String(c.comment || '');
     for (const kw of kws) {
       if (text.includes(kw)) hits[kw] = (hits[kw] || 0) + 1;
@@ -74,7 +62,7 @@ function commentSummary(items, keywords, nowMs) {
   }
   const detail = Object.entries(hits).sort((a, b) => b[1] - a[1]).slice(0, 5)
     .map(([k, v]) => `「${k}」${v}`).join('/');
-  return { count, detail };
+  return { count: list.length, detail };
 }
 
-module.exports = { recentReturns, returnSummary, negativeCommentItems, commentSummary };
+module.exports = { returnSummary, negativeCommentItems, commentSummary };

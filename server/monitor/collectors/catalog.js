@@ -1,7 +1,7 @@
 'use strict';
 // 商品清单查询：拉取在售商品 ID（商品域与降级差评扫描共用）。
 const { callOpenApi } = require('../../openapi/client');
-const { MAX_PAGES, PAGE_SIZE, ITEM_SCAN_WINDOW_DAYS } = require('./constants');
+const { MAX_PAGES, PAGE_SIZE, ITEM_SCAN_WINDOW_DAYS, SEC_PER_DAY } = require('./constants');
 
 /** 拉取在售商品 ID 清单（更新时间窗内，offset/has_next_page 翻页；商品域与降级差评扫描共用） */
 async function collectItemIds(shopId) {
@@ -11,7 +11,7 @@ async function collectItemIds(shopId) {
   for (let page = 0; page < MAX_PAGES; page++) {
     const j = await callOpenApi('/api/v2/product/get_item_list', {
       item_status: 'NORMAL',
-      update_time_from: nowSec - ITEM_SCAN_WINDOW_DAYS * 86400,
+      update_time_from: nowSec - ITEM_SCAN_WINDOW_DAYS * SEC_PER_DAY,
       update_time_to: nowSec,
       offset,
       page_size: PAGE_SIZE,

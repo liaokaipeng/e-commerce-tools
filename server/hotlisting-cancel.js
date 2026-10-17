@@ -31,14 +31,13 @@ const { loadSpuConfig, saveSpuConfig } = require('./hotlisting-cancel/config');
 const {
   parseSpuList, extractEnrolledSkus, normalizeSpuMap, resolvePerShopSpus,
 } = require('./hotlisting-cancel/parse');
-const { fetchEnrolledSkus, unenrollSku } = require('./hotlisting-cancel/api');
 const { handlePreview } = require('./hotlisting-cancel/preview');
 const { handleRun } = require('./hotlisting-cancel/job');
 
 // ============ 路由注册 ============
 function register({ get, post }) {
   // 各店铺 SPU 配置：读取 / 保存（前端编辑后自动保存）
-  get('/api/hotlisting-cancel/spu-config', async (req, res, query) => {
+  get('/api/hotlisting-cancel/spu-config', (req, res) => {
     sendJson(res, 200, { ok: true, map: loadSpuConfig() });
   });
 
@@ -68,4 +67,4 @@ function register({ get, post }) {
   jobs.registerControlRoutes(post, '/api/hotlisting-cancel');
 }
 
-module.exports = { register, parseSpuList, extractEnrolledSkus, fetchEnrolledSkus, unenrollSku, normalizeSpuMap, resolvePerShopSpus };
+module.exports = { register, parseSpuList, extractEnrolledSkus, normalizeSpuMap, resolvePerShopSpus };

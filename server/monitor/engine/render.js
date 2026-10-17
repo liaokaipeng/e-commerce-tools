@@ -1,7 +1,7 @@
 'use strict';
 // 告警展示渲染：明细归一化、告警消息生成（金额按全局模式换算）、按模式重渲染。
 const { METRICS, isMoneyMetric } = require('../constants');
-const { toRmb, moneyText } = require('../currency');
+const { toRmb, moneyText, DEFAULT_CURRENCY } = require('../currency');
 const store = require('../store');
 
 // 单条告警结构化明细行数上限（防止异常数据撑爆内存 / alerts.json / 接口响应）
@@ -44,7 +44,7 @@ function msgOf(alert) {
 function shopCurrency(shopId) {
   const meta = store.getMeta();
   const m = (meta.shops && meta.shops[shopId]) || {};
-  return String(m.currency || 'CNY');
+  return String(m.currency || DEFAULT_CURRENCY);
 }
 
 /** 规则比较值：金额指标按人民币阈值比较，先换算；其余指标原值 */
@@ -76,9 +76,8 @@ function renderAlertMessage(a) {
   return a.message || base;
 }
 
+// normalizeDetail / msgOf 仅本文件内部使用（applyDetail / renderAlertMessage 调用），不对外导出
 module.exports = {
-  normalizeDetail,
-  msgOf,
   shopCurrency,
   compareValue,
   applyDetail,

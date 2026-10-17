@@ -23,7 +23,6 @@ const { readJsonBodySoft } = require('./lib/http-utils');
 // 长任务注册中心（暂停 / 继续 / 取消 / SSE 断开即取消 / TTL 清理）：与其它批量工具共用
 const jobs = require('./lib/jobs');
 const { handleRun } = require('./return-whs/job');
-const { normalizeReturnId, extractWhsId, splitChunks } = require('./return-whs/parse');
 
 // ============ 路由注册 ============
 function register({ get, post }) {
@@ -37,4 +36,4 @@ function register({ get, post }) {
   jobs.registerControlRoutes(post, '/api/return-whs');
 }
 
-module.exports = { register, normalizeReturnId, extractWhsId, splitChunks };
+module.exports = { register };

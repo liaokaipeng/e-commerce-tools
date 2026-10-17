@@ -67,11 +67,13 @@ async function collectProductDomain(shopId) {
     metrics['product.violations'] = total != null ? total : items.length;
     const breakdown = violationBreakdown(items);
     if (breakdown || items.length) {
-      details['product.violations'] = detail('明细 ' + breakdown, items.map((it) => ({
-        id: String(it && it.item_id != null ? it.item_id : ''),
-        title: String(it && it.item_id != null ? it.item_id : '未知商品'),
-        sub: VIOLATION_REASON_NAMES[it && it.reason] || (it && it.reason != null ? '其他(' + it.reason + ')' : '未知原因'),
-      })));
+      details['product.violations'] = detail('明细 ' + breakdown, items.map((it) => {
+        const o = it || {};
+        const id = o.item_id != null ? String(o.item_id) : '';
+        const title = o.item_id != null ? String(o.item_id) : '未知商品';
+        const sub = VIOLATION_REASON_NAMES[o.reason] || (o.reason != null ? '其他(' + o.reason + ')' : '未知原因');
+        return { id, title, sub };
+      }));
     }
   } catch (e) {
     errors.push('问题商品：' + e.message);

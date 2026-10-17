@@ -77,6 +77,8 @@
 - **冒烟 `/monitor/` 前必须屏蔽 `POST /api/monitor/presence`**（CDP `Network.setBlockedURLs`）：该接口触发按需巡检，不屏蔽等于替用户对全部已授权店铺发起一轮真实采集；其余监控接口是只读的，照常请求即可。
 - **改后端后必须重启服务，否则「改了没生效」（踩过最大的一次坑）**：`启动.bat` 先 `netstat` 探 8765，占用则只开浏览器然后退出（设计使然，方便二次双击），所以**双击不会重启已在跑的服务**——必须先关掉旧的黑窗口再双击，否则会误判「改了没生效」。**「新前端 + 旧后端」的典型症状**：页面 UI 是新的（`dist` 每次请求从磁盘读），行为却是旧的（后端模块只在进程启动时加载一次）——曾出现「页面明明有新选项，点了没用、行为还是旧的」，排查半天才发现 8765 上跑的还是几小时前启动的旧进程。**怀疑没生效时先对版本**：`GET /api/<模块>/status` 看响应里有没有已被删掉的旧字段，再用 `Get-Process -Id <pid> | Select StartTime` 看进程启动时间是否早于本次改动。想验证新代码而不动用户服务：`PORT=8899 node server/main.js` 另起一个实例，别去杀用户的进程。
 - **新增工具页后不重启的典型症状 = 该页 404、其它工具全正常**：`/xxx/` → `/xxx/index.html` 的映射表在 `lib/http-utils.js` 的 `DIR_INDEX`，旧进程内存里没有新条目，而静态文件本身已能从磁盘读到（所以直接访问 `/xxx/index.html` 反而 200，很容易误判成「文件没构建」）。看到这个组合先怀疑后端没重启，不要去查 dist。顺带：`/xxx`（无尾斜杠）对所有工具页一律 404，这是既有行为，不是 bug。
+- **终端工具（RunCommand）可能整体不可用**：曾出现每次调用都报 `Toolhost terminal commands must be routed through the agent runtime`（连 `node --version` 都跑不了）。此时改用 `integrated_code_mode` MCP 的 `Exec` 工具，在其沙箱里用 `await tools.Shell({ command, cwd, description })` 执行命令（`ALL_TOOLS` 可查看可用工具；沙箱本身没有 `require`/`fs`，别在 Exec 里直接写 node 脚本）。
+- **Exec 的 Shell 跑长命令会被审批卡死**：超过约 15 秒的命令（如 `node test/test.js`）会走人工审批，而自动审批曾持续报 `auto review source state is not ready, reason=target_not_pending`，命令直接失败。解法：`run_in_background: true` 后台跑，并让命令自己写日志（`node test/test.js *>&1 | Out-File -FilePath .tmp_xxx.log -Encoding utf8`），完成后用 Read 工具读日志；短命令（`node --check`、`Start-Sleep`）不受影响。注意 `cmd /c` 被 Shell 工具禁用，PowerShell 5 也不支持 `&&`，串行用 `;`。
 
 ## 测试
 

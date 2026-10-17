@@ -2,6 +2,11 @@
 // 默认规则数据：threshold 型按 thresholds 分级比较（direction 决定方向），
 // thresholds 某项缺省表示该级别不触发（如扣分 P2 不报）。
 // 只做「开箱即用」基线，用户在大屏规则面板修改后覆盖值存 rules.json（store 合并）。
+
+// 系统自检规则 id（采集连续失败）：engine.lifecycle 与 scheduler.registry 共用，
+// 不各自硬编码字符串（改 id 时只改这一处）。
+const SYSTEM_COLLECT_FAIL_ID = 'system.collect_fail';
+
 const DEFAULT_RULES = [
   {
     id: 'order.pending_24h', domain: 'order', metric: 'order.pending_24h',
@@ -135,9 +140,10 @@ const DEFAULT_RULES = [
     thresholds: { p2: 3, p1: 5, p0: 10 },
     suggest: '差评突增，检查商品质量与客服响应，及时回复差评（告警消息含关键词命中明细）',
   },
-  // 系统自检：采集连续失败（engine 按连续失败次数定级：1→P2、2→P1、≥5→P0，不走常规阈值比较）
+  // 系统自检：采集连续失败（engine 按连续失败次数定级，阈值以本规则数据为单一来源：
+  // count>=p0 → P0、count>=p1 → P1、否则 P2；某级阈值被用户清空（留空=不触发）则跳过该级）
   {
-    id: 'system.collect_fail', domain: 'system', metric: 'system.collect_fail',
+    id: SYSTEM_COLLECT_FAIL_ID, domain: 'system', metric: SYSTEM_COLLECT_FAIL_ID,
     title: '采集连续失败', type: 'threshold',
     thresholds: { p2: 1, p1: 2, p0: 5 },
     suggest: '检查店铺授权是否有效、网络与开放平台连通性',
@@ -147,4 +153,4 @@ const DEFAULT_RULES = [
 const RULES_BY_ID = {};
 for (const r of DEFAULT_RULES) RULES_BY_ID[r.id] = r;
 
-module.exports = { DEFAULT_RULES, RULES_BY_ID };
+module.exports = { DEFAULT_RULES, RULES_BY_ID, SYSTEM_COLLECT_FAIL_ID };

@@ -66,4 +66,4 @@ function copyWhitelist(pkgRoot) {
   return copied;
 }
 
-module.exports = { COPY_ITEMS, mergeCopy, backupData, copyWhitelist };
+module.exports = { COPY_ITEMS, backupData, copyWhitelist };

@@ -27,25 +27,21 @@
 //   error_param: There is no partner_id in query）。
 // - 签名 base：无 token 时 = partner_id + api_path + timestamp；
 //   带 token 时 = partner_id + api_path + timestamp + access_token + shop_id。
-const { getAuthUrl, exchangeToken, getShopInfo } = require('./auth');
-const { refreshToken } = require('./refresh');
-const { saveRefreshResult } = require('./persist');
-const { ensureFresh, refreshShopNow } = require('./ensure');
+const { getAuthUrl, exchangeToken } = require('./auth');
+const { refreshShopNow } = require('./ensure');
 const { callOpenApi } = require('./call');
 const { signedCall } = require('./transport');
 const { pickPayload } = require('./parse');
 const { isAuthDead, isAuthRetryable, isAuthFatalAfterRefresh } = require('./errors');
 const { REFRESH_COOLDOWN_MS } = require('../constants');
 
+// 门面只导出被消费的入口（refreshToken / saveRefreshResult / ensureFresh / getShopInfo
+// 均由 client 内部子模块相互调用，无外部消费者，需要时直接 require 对应子模块）。
 module.exports = {
   getAuthUrl,
   exchangeToken,
-  refreshToken,
-  saveRefreshResult,
-  getShopInfo,
   callOpenApi,
   signedCall,
-  ensureFresh,
   refreshShopNow,
   pickPayload,
   // 纯函数（单测覆盖）

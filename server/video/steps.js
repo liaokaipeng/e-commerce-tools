@@ -9,6 +9,7 @@
  * 通过参数传入或保留在各自文件，本模块不替它们做主。
  */
 const { call } = require('./request');
+const { UPLOAD_SERVICE_ID } = require('./constants');
 const { probeVideoFile, validateUploadRow, skipError } = require('../lib/video-utils');
 
 // 行基础校验（路径/文件大小/caption 等），先于一切网络请求执行
@@ -54,10 +55,10 @@ function throwProductNotFound(product, log, text) {
   throw skipError(`未找到商品编码 ${product} 对应的商品，已跳过上传`);
 }
 
-// preupload 返回体里挑出 shopeeuss 服务（无则退首个，再无则空对象）
+// preupload 返回体里挑出上传服务（无则退首个，再无则空对象）
 function pickService(preData) {
   const services = preData.services || [];
-  return services.find((s) => s.serviceid === 'shopeeuss') || services[0] || {};
+  return services.find((s) => s.serviceid === UPLOAD_SERVICE_ID) || services[0] || {};
 }
 
 // preupload 请求：MMS 域不带 Cookie（含 jar 罐，见各自文件注释），站点仅 url/headers/payload 不同

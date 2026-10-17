@@ -2,7 +2,7 @@
 // 指标趋势视图：采样点 + 阈值（画参考线用）的查询与金额换算。
 // 金额模式换算与阈值反向换算集中在此（阈值口径固定人民币，展示按当前模式换算）。
 const { METRICS, isMoneyMetric } = require('../constants');
-const { toRmb, fromRmb, roundMoney, symbolOf } = require('../currency');
+const { toRmb, fromRmb, roundMoney, symbolOf, DEFAULT_CURRENCY } = require('../currency');
 const store = require('../store');
 
 /**
@@ -19,7 +19,7 @@ function buildTrendPayload(shopId, metric, days, compare) {
   const rule = store.getRulesById()[metric];
   const meta = store.getMeta();
   const shopMeta = (meta.shops && meta.shops[shopId]) || {};
-  const currency = String(shopMeta.currency || 'CNY');
+  const currency = String(shopMeta.currency || DEFAULT_CURRENCY);
   const mode = store.getCurrencyMode();
   let points = store.readTrend(shopId, metric, days);
   let prevPoints = compare ? store.readTrend(shopId, metric, days, days) : [];

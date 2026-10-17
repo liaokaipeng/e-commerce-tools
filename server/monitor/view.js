@@ -3,7 +3,7 @@
 // 金额指标按全局展示模式换算展示、按人民币定级（阈值口径固定人民币）。
 const { MATRIX_METRICS, isMoneyMetric } = require('./constants');
 const { levelOf } = require('./rules');
-const { toRmb, roundMoney } = require('./currency');
+const { toRmb, roundMoney, DEFAULT_CURRENCY } = require('./currency');
 const store = require('./store');
 
 /** 单店大屏数据：最新指标 + 矩阵定级（金额指标按全局模式换算展示、按人民币定级） */
@@ -13,7 +13,7 @@ function shopView(shopId, name) {
   const latest = m.latest || {};
   const rulesById = store.getRulesById();
   const mode = store.getCurrencyMode();
-  const currency = String(m.currency || 'CNY');
+  const currency = String(m.currency || DEFAULT_CURRENCY);
   const matrix = MATRIX_METRICS.map((metric) => {
     const p = latest[metric];
     const v = p && typeof p.v === 'number' ? p.v : null;

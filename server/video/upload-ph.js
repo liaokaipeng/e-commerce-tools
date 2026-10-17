@@ -2,7 +2,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const { call } = require('./request');
-const { UA, SITES } = require('./constants');
+const { UA, SITES, UPLOAD_SERVICE_ID } = require('./constants');
 const {
   streamHashes,
   decryptVodToken,
@@ -191,7 +191,7 @@ async function reportResult({ S, mmsH, creds, vid, uploaddomain, extendid, fsize
     payload: {
       vid,
       mid: '',
-      serviceid: 'shopeeuss',
+      serviceid: UPLOAD_SERVICE_ID,
       updomain: uploaddomain,
       biz: S.biz,
       region: S.region,

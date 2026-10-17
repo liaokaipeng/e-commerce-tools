@@ -15,7 +15,7 @@
 const http = require('http');
 const path = require('path');
 const { sendJson, serveStatic, createDispatcher } = require('./lib/http-utils');
-const { isAllowedOrigin, applyCors } = require('./lib/cors');
+const { applyCors } = require('./lib/cors');
 const version = require('./lib/version');
 const tiktok = require('./tiktok');
 const bidding = require('./bidding');
@@ -70,8 +70,7 @@ const dispatch = createDispatcher(routes, (e, method, pathname) => {
   console.error(`[路由错误] ${method} ${pathname}: ${e && e.message ? e.message : e}`);
 });
 
-// 只有直接运行 main.js（node server/main.js / 启动.bat）才监听端口；
-// 被 require（单元测试验 isAllowedOrigin）时不启动服务。
+// 只有直接运行 main.js（node server/main.js / 启动.bat）才监听端口；被 require 时不启动服务。
 const isMain = require.main === module;
 
 const server = http.createServer((req, res) => {
@@ -120,5 +119,3 @@ if (isMain) {
     update.startAutoCheck();
   });
 }
-
-module.exports = { isAllowedOrigin };

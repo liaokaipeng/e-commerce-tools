@@ -1,5 +1,6 @@
 'use strict';
 // 店铺注册表：从开放平台凭证读取已授权店铺，维护监控/授权状态与最近执行时间。
+const { SYSTEM_COLLECT_FAIL_ID } = require('../constants');
 const engine = require('../engine');
 const store = require('../store');
 const openapiStore = require('../../openapi/store');
@@ -39,7 +40,7 @@ function refreshShops() {
       if (authBroken) {
         // 凭证已死透的店铺停止采集；旧的「采集连续失败」告警关闭（界面以「待重新授权」呈现），
         // 重新授权后 collection 成功会重新开新告警（如有需要）
-        engine.closeAlert(s.shopId + ':system.collect_fail');
+        engine.closeAlert(s.shopId + ':' + SYSTEM_COLLECT_FAIL_ID);
       }
       return {
         shopId: s.shopId,

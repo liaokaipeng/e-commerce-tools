@@ -8,7 +8,7 @@
 // merchant_id 刷新得到的是**商户级 token**，只能调商户级接口（get_merchant_info 等），
 // 拿它去调店铺级接口一律报 invalid_acceess_token。因此每个店铺必须用各自 shop_id 刷新并分别保存。
 const http = require('../../lib/http');
-const { ENV_HOSTS, API_PATH } = require('../constants');
+const { API_PATH, hostOf } = require('../constants');
 const { nowSec } = require('../../lib/openapi-utils');
 const { commonParams, qsOf } = require('./sign');
 const { parseTokenResponse } = require('./parse');
@@ -23,11 +23,9 @@ const { parseTokenResponse } = require('./parse');
  * - 旧 refresh_token 调用后立即失效
  */
 async function refreshToken(env, shopId, refreshToken) {
-  const store = require('../store'); // 延迟 require：测试按缓存清理隔离凭证实例
-  const app = store.getApp();
-  if (!app) throw new Error('尚未配置开放平台 App');
-  const host = ENV_HOSTS[env];
-  if (!host) throw new Error('无效的环境：' + env);
+  // 延迟 require：测试按缓存清理隔离凭证实例（requireApp 内部取最新 store）
+  const app = require('../store').requireApp();
+  const host = hostOf(env);
   // 官方要求这两个 id 在 body 里必须是数字类型：缺失/非数字时 Number() 会得到 NaN、
   // JSON 序列化成 null，网关只会回误导性的格式错——这里提前明确报错，避免静默发出坏请求
   const pid = String(app.partnerId == null ? '' : app.partnerId).trim();

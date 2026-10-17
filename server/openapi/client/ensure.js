@@ -105,4 +105,6 @@ function refreshShopNow(env, shopId) {
   return ensureFresh(env, shopId, { force: true, cooldown: true });
 }
 
-module.exports = { REFRESH_COOLDOWN_MS, performRefresh, ensureFresh, refreshShopNow };
+// 对外只暴露 ensureFresh / refreshShopNow：performRefresh 与 REFRESH_COOLDOWN_MS
+// 均只在本文件（及 constants）内部使用，不对外导出。
+module.exports = { ensureFresh, refreshShopNow };

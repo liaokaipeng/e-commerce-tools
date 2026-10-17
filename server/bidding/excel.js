@@ -12,9 +12,8 @@ async function writeExcel(rows, outPath) {
   for (const r of rows) {
     ws.addRow([r['商品编号'], r['编号'], r['系统竞价价格'], r['最终价格'], r['我的最佳价格'], r['我的活动价格']]);
   }
-  ws.columns.forEach(col => { col.width = 20; });
-  ws.getColumn(1).width = 18;
-  ws.getColumn(2).width = 18;
+  // 列宽一次到位：前两列（商品编号 / 编号）18，其余 20
+  ws.columns.forEach((col, i) => { col.width = i < 2 ? 18 : 20; });
   styleExcelHeader(ws);
   await wb.xlsx.writeFile(outPath);
   return outPath;

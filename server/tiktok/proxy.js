@@ -50,4 +50,4 @@ function createAgent(proxy) {
   return new HttpsProxyAgent(p);
 }
 
-module.exports = { getSystemProxyFromRegistry, detectProxy, createAgent };
+module.exports = { detectProxy, createAgent };

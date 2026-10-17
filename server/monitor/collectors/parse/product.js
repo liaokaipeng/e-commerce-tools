@@ -1,5 +1,7 @@
 'use strict';
 // 商品域库存解析（纯函数）。
+// 口径为商品粒度（一个商品的库存 = 全部型号库存之和，见 itemStockState）——
+// 型号粒度的 stockSummary 已随采集器改造删除，无生产调用方。
 const { LOW_STOCK_LINE } = require('../constants');
 
 /** 型号库存（stock_info_v2.summary_info.total_available_stock / stock 字段兜底），无则 null */
@@ -21,20 +23,6 @@ function stockOfModel(model) {
   }
   if (typeof model.stock === 'number' && isFinite(model.stock)) return model.stock;
   return null;
-}
-
-/** 库存汇总（纯函数）：断货（=0）与低库存（1..安全线）SKU 数（型号粒度） */
-function stockSummary(items, lowLine) {
-  const line = typeof lowLine === 'number' ? lowLine : LOW_STOCK_LINE;
-  let out = 0;
-  let low = 0;
-  for (const it of items || []) {
-    const s = stockOfModel(it);
-    if (s == null) continue;
-    if (s <= 0) out += 1;
-    else if (s <= line) low += 1;
-  }
-  return { out_of_stock: out, low_stock: low };
 }
 
 /** 商品库存合计（纯函数）：全部型号库存求和，无任何库存数据返回 null */
@@ -63,4 +51,4 @@ function itemStockState(models, lowLine) {
   return 'ok';
 }
 
-module.exports = { stockOfModel, stockSummary, itemStockTotal, itemStockState };
+module.exports = { stockOfModel, itemStockTotal, itemStockState };

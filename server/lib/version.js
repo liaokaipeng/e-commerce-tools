@@ -6,17 +6,12 @@
  * 避免各写一份造成漂移。`server/build-info.json`（由 `npm run pack` 生成，不入库）只补充
  * commit 与构建时间，开发树里没有该文件属正常情况（返回 null）。
  */
-const fs = require('fs');
 const path = require('path');
+const { readJson } = require('./json-file');
 
 const ROOT = path.join(__dirname, '..', '..');
 const PKG_FILE = path.join(ROOT, 'package.json');
 const BUILD_INFO_FILE = path.join(__dirname, '..', 'build-info.json');
-
-function readJson(file) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); }
-  catch { return null; }
-}
 
 /** 当前版本号（package.json 的 version；读不到时回退 0.0.0，便于比对永远判为「有新版」） */
 function currentVersion() {
@@ -63,4 +58,4 @@ function compareVersions(a, b) {
   return 0;
 }
 
-module.exports = { ROOT, currentVersion, buildInfo, info, compareVersions, parseVersion };
+module.exports = { ROOT, currentVersion, info, compareVersions };

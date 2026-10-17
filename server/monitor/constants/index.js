@@ -14,11 +14,10 @@ module.exports = {
   SNAPSHOT_CAP_PER_DAY: infra.SNAPSHOT_CAP_PER_DAY,
   ALERT_CAP: infra.ALERT_CAP,
   EVENT_LOG_CAP: infra.EVENT_LOG_CAP,
-  // 告警级别与展示样式（constants/levels.js）
+  // 告警级别与排序（constants/levels.js；展示样式在前端 monitor.css）
   LEVELS: levels.LEVELS,
   LEVEL_ORDER: levels.LEVEL_ORDER,
-  LEVEL_STYLE: levels.LEVEL_STYLE,
-  OK_COLOR: levels.OK_COLOR,
+  zeroLevelCounts: levels.zeroLevelCounts,
   // 采集任务定义（constants/jobs.js）
   JOBS: jobs.JOBS,
   // 指标目录与展示列（constants/metrics.js）
@@ -28,4 +27,6 @@ module.exports = {
   // 默认规则数据（constants/rules-data.js）
   DEFAULT_RULES: rulesData.DEFAULT_RULES,
   RULES_BY_ID: rulesData.RULES_BY_ID,
+  // 系统自检规则 id（采集连续失败；engine 与调度器共用同一字面量）
+  SYSTEM_COLLECT_FAIL_ID: rulesData.SYSTEM_COLLECT_FAIL_ID,
 };

@@ -1,7 +1,7 @@
 'use strict';
 // 规则持久化：默认规则 + 用户覆盖（rules.json）的合并与读写。
 const { RULES_BY_ID } = require('../constants');
-const { mergeRules, indexRules } = require('../rules');
+const { mergeRules, indexRules, sanitizeThresholds } = require('../rules');
 const { RULES_FILE, readJson, writeJson } = require('./paths');
 
 let ruleOverrides = readJson(RULES_FILE, {});
@@ -27,12 +27,9 @@ function setRuleOverrides(overrides) {
     const entry = {};
     if (typeof o.enabled === 'boolean') entry.enabled = o.enabled;
     if (o.thresholds && typeof o.thresholds === 'object') {
-      const th = {};
-      for (const [k, v] of Object.entries(o.thresholds)) {
-        // null = 显式留空（该级别不触发），需原样保留给 mergeRules 删除默认阈值
-        if (v === null) th[k] = null;
-        else if (typeof v === 'number' && isFinite(v)) th[k] = v;
-      }
+      // 清洗口径与 rules.sanitizeThresholds 一致：null = 显式留空（该级别不触发），
+      // 需原样保留给 mergeRules 删除默认阈值；其余类型丢弃
+      const th = sanitizeThresholds(o.thresholds);
       if (Object.keys(th).length) entry.thresholds = th;
     }
     if (Object.keys(entry).length) clean[id] = entry;

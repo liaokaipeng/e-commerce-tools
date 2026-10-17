@@ -1,7 +1,7 @@
 'use strict';
 // 大屏总览视图投影：店铺列表（仅启用监控的店铺；含告警计数/最高级别/矩阵定级/授权状态）+ 全局统计。
 // 供 monitor.js 的 GET /api/monitor/overview 直接取用，路由层只负责 sendJson。
-const { METRICS } = require('../constants');
+const { METRICS, zeroLevelCounts } = require('../constants');
 const store = require('../store');
 const engine = require('../engine');
 const scheduler = require('../scheduler');
@@ -15,7 +15,7 @@ function buildOverview() {
   const monitoredSet = new Set(sched.shops.filter((s) => s.monitored).map((s) => s.shopId));
   const sum = engine.summary(monitoredSet);
   const shops = sched.shops.filter((s) => s.monitored).map((s) => {
-    const alerts = sum.byShop[s.shopId] || { P0: 0, P1: 0, P2: 0, maxLevel: null };
+    const alerts = sum.byShop[s.shopId] || Object.assign(zeroLevelCounts(), { maxLevel: null });
     return Object.assign(shopView(s.shopId, s.name), { alerts, authBroken: !!s.authBroken });
   });
   return {

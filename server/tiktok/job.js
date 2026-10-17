@@ -2,7 +2,7 @@
 // 批量下载编排（代理检测、逐条解析下载、进度事件、取消）
 const fs = require('fs');
 const path = require('path');
-const { sleep } = require('./constants');
+const { sleep, REQUEST_DELAY_MS, REQUEST_DELAY_JITTER_MS } = require('./constants');
 const { detectProxy, createAgent } = require('./proxy');
 const { parseVideo, downloadFile, isNetworkError } = require('./parse');
 
@@ -95,7 +95,7 @@ async function runBatch(urls, saveDir, emit, signal) {
       });
     }
     // 间隔请求 + 随机抖动，降低被风控识别为批量脚本的概率
-    if (i < urls.length - 1) await sleep(3000 + Math.floor(Math.random() * 1500));
+    if (i < urls.length - 1) await sleep(REQUEST_DELAY_MS + Math.floor(Math.random() * REQUEST_DELAY_JITTER_MS));
     if (isAborted()) break;
   }
 

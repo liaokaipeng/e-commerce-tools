@@ -12,9 +12,12 @@ const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0';
 
 // ------- 跨境 .cn 上传固定参数（服务标识 / 地区 / SDK 版本等，供 upload-cn 复用） -------
+// 上传服务标识：preupload 的 services 里按它挑选（ph 的 reportupload 也用同一个值）
+const UPLOAD_SERVICE_ID = 'shopeeuss';
+
 const CN = {
   region: 'CN',
-  serviceid: 'shopeeuss',
+  serviceid: UPLOAD_SERVICE_ID,
   sdkversion: '3.4.5',
   appversion: '3.4.5',
   ostype: 'web',
@@ -37,4 +40,4 @@ const SITES = {
   },
 };
 
-module.exports = { CHUNK_SIZE, BIZ, MMS, UPLOAD, SOLUTIONS, UA, CN, SITES };
+module.exports = { CHUNK_SIZE, BIZ, MMS, UPLOAD, SOLUTIONS, UA, UPLOAD_SERVICE_ID, CN, SITES };

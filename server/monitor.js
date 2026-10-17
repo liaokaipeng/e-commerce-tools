@@ -28,6 +28,11 @@ const configView = require('./monitor/view/config');
 const { buildRuleSuggestions, SUGGEST_DAYS_DEFAULT } = require('./monitor/suggest');
 const openapiStore = require('./openapi/store');
 
+// 趋势 / 建议接口的 days 参数钳制范围（前端趋势图只展示近 90 天；建议至少 7 天样本）
+const DAYS_MAX = 90;
+const DAYS_MIN = 1;
+const SUGGEST_DAYS_MIN = 7;
+
 // ============ 路由注册 ============
 function register({ get, post }) {
   // 大屏总览：店铺列表（仅启用监控的店铺；含告警计数/最高级别/矩阵定级/授权状态）+ 全局统计
@@ -80,7 +85,7 @@ function register({ get, post }) {
       sendJson(res, 400, { ok: false, message: '缺少 shopId 或 metric' });
       return;
     }
-    const days = Math.min(90, Math.max(1, Number(q.get('days')) || 7));
+    const days = Math.min(DAYS_MAX, Math.max(DAYS_MIN, Number(q.get('days')) || 7));
     const compare = q.get('compare') === '1';
     sendJson(res, 200, buildTrendPayload(shopId, metric, days, compare));
   });
@@ -99,7 +104,7 @@ function register({ get, post }) {
   // 阈值建议（?days=30）：按监控店铺历史样本算分位数建议 + 当前阈值历史命中率。
   // 只读快照、不落盘、不自动应用；用户可在规则面板「采用」后再手动保存。
   get('/api/monitor/rule-suggestions', (req, res, url) => {
-    const days = Math.min(90, Math.max(7, Number(url.searchParams.get('days')) || SUGGEST_DAYS_DEFAULT));
+    const days = Math.min(DAYS_MAX, Math.max(SUGGEST_DAYS_MIN, Number(url.searchParams.get('days')) || SUGGEST_DAYS_DEFAULT));
     sendJson(res, 200, Object.assign({ ok: true }, buildRuleSuggestions(days)));
   });
 

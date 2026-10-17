@@ -4,6 +4,7 @@
 // 供 signedCall / parseTokenResponse（文案）与 ensureFresh / callOpenApi（分类）共用，避免同一判定两套口径。
 
 // 常见业务错误 -> 中文提示（响应 error 字段非空即失败；v2 成功时 error 为空字符串）
+// 仅 hintOf 内部查表，不对外导出
 const ERROR_HINTS = {
   error_invalid_sign: '签名校验失败，请检查 partner_key 是否正确、本机时间是否准确',
   error_invalid_timestamp: '时间戳校验失败，请先校准本机系统时间',
@@ -29,6 +30,21 @@ function hintOf(error, message) {
     return 'access_token 对当前店铺无效，请刷新或重新授权该店铺';
   }
   return ERROR_HINTS[error] || '';
+}
+
+/**
+ * 网关业务错误文案（error + message + hint）。
+ * parse.parseTokenResponse 与 transport.signedCall 共用同一构造点，避免两处措辞漂移；
+ * 文案以「开放平台错误」开头，transport 的 shouldRetry 依此前缀判定「业务错误不重试」。
+ */
+function gatewayError(error, message) {
+  const hint = hintOf(error, message);
+  return new Error(`开放平台错误 ${error}${message ? '：' + message : ''}${hint ? '（' + hint + '）' : ''}`);
+}
+
+/** 非 JSON 响应文案（parse / transport 共用；截断 200 字符防刷屏） */
+function nonJsonError(status, text) {
+  return new Error(`开放平台返回异常（HTTP ${status}）: ${(text || '').slice(0, 200)}`);
 }
 
 // 网关对「凭证已死透、刷新也救不回来」的报错文案集合（官方 FAQ138：access_token 4 小时有效、
@@ -59,4 +75,4 @@ function isAuthFatalAfterRefresh(message) {
   return isAuthDead(message) || AUTH_FATAL_AFTER_REFRESH_RE.test(String(message || ''));
 }
 
-module.exports = { ERROR_HINTS, hintOf, isAuthDead, isAuthRetryable, isAuthFatalAfterRefresh };
+module.exports = { hintOf, gatewayError, nonJsonError, isAuthDead, isAuthRetryable, isAuthFatalAfterRefresh };

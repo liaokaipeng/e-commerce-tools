@@ -20,7 +20,6 @@ const { readJsonBodySoft } = require('./lib/http-utils');
 const jobs = require('./lib/jobs');
 const { toAmount } = require('./lib/shopee-session');
 const { extractImprovementItems } = require('./bidding-cancel/parse');
-const { fetchImprovementBids, withdrawBid } = require('./bidding-cancel/api');
 const { handlePreview } = require('./bidding-cancel/preview');
 const { handleRun } = require('./bidding-cancel/job');
 
@@ -41,4 +40,4 @@ function register({ post }) {
   jobs.registerControlRoutes(post, '/api/bidding-cancel');
 }
 
-module.exports = { register, fetchImprovementBids, withdrawBid, extractImprovementItems, toAmount };
+module.exports = { register, extractImprovementItems, toAmount };

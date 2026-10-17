@@ -6,11 +6,14 @@ const { EVENT_LOG_CAP } = require('../constants');
 const clients = new Set();
 const eventLog = [];
 
+/** SSE 数据行（广播与回放共用同一拼装口径） */
+const sseLine = (ev) => `data: ${JSON.stringify(ev)}\n\n`;
+
 function broadcast(type, data) {
   const ev = { type, data, at: Date.now() };
   eventLog.push(ev);
   if (eventLog.length > EVENT_LOG_CAP) eventLog.splice(0, eventLog.length - EVENT_LOG_CAP);
-  const line = `data: ${JSON.stringify(ev)}\n\n`;
+  const line = sseLine(ev);
   for (const res of clients) {
     try { res.write(line); } catch { /* 连接已断 */ }
   }
@@ -26,7 +29,7 @@ function removeClient(res) {
 
 function replayTo(res) {
   for (const ev of eventLog) {
-    try { res.write(`data: ${JSON.stringify(ev)}\n\n`); } catch { /* 忽略 */ }
+    try { res.write(sseLine(ev)); } catch { /* 忽略 */ }
   }
 }
 

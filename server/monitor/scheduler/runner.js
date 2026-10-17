@@ -1,19 +1,29 @@
 'use strict';
 // 单域采集执行：调用采集器 → 快照入库 / 引擎评估 / meta 更新 / 系统自检 / SSE 广播。
 const { collectDomain, fetchShopInfo } = require('../collectors');
-const { regionCurrency } = require('../currency');
+const { regionCurrency, DEFAULT_CURRENCY } = require('../currency');
 const engine = require('../engine');
 const store = require('../store');
 const { state } = require('./state');
 const { metaShop } = require('./registry');
 
-/** 权限不足：该店该域不支持（App 未开通对应模块权限），按正常间隔退避、不计数失败、不触发系统自检告警 */
-function handleUnsupported(shopId, domain, now, result) {
+/** 记内存 lastRun（重启后避免立刻重复采集；与 meta.lastRun 双写，读时互补） */
+function markLastRun(shopId, domain, now) {
   state.lastRun[shopId] = state.lastRun[shopId] || {};
   state.lastRun[shopId][domain] = now;
+}
+
+/** 取（并按需建）meta 里的店铺条目：各收尾函数共用的「确保 shops[shopId] 存在」样板 */
+function shopMetaEntry(meta, shopId) {
+  if (!meta.shops[shopId]) meta.shops[shopId] = {};
+  return meta.shops[shopId];
+}
+
+/** 权限不足：该店该域不支持（App 未开通对应模块权限），按正常间隔退避、不计数失败、不触发系统自检告警 */
+function handleUnsupported(shopId, domain, now, result) {
+  markLastRun(shopId, domain, now);
   store.patchMeta((meta) => {
-    if (!meta.shops[shopId]) meta.shops[shopId] = {};
-    const m = meta.shops[shopId];
+    const m = shopMetaEntry(meta, shopId);
     if (!m.lastRun) m.lastRun = {};
     m.lastRun[domain] = now;
     if (!m.unsupported) m.unsupported = {};
@@ -22,24 +32,22 @@ function handleUnsupported(shopId, domain, now, result) {
   engine.broadcast('collection', { shopId, domain, ok: true, skipped: 'unsupported', at: now, note: result.reason });
 }
 
-/** 指标入库：过滤数值 → 快照落盘 → meta 最新值 → 引擎评估 */
+/** 指标入库：过滤数值 → 快照落盘 → meta 最新值 → 引擎评估（单遍完成，不过滤后再遍历一遍） */
 function persistMetrics(shopId, domain, now, result) {
-  const metrics = {};
+  const entries = [];
   for (const [k, v] of Object.entries(result.metrics || {})) {
     if (typeof v === 'number' && isFinite(v)) {
-      metrics[k] = v;
       store.appendSample(shopId, k, v, now);
+      entries.push([k, v]);
     }
   }
-  if (Object.keys(metrics).length) {
-    store.patchMeta((meta) => {
-      if (!meta.shops[shopId]) meta.shops[shopId] = {};
-      const m = meta.shops[shopId];
-      if (!m.latest) m.latest = {};
-      for (const [k, v] of Object.entries(metrics)) m.latest[k] = { v, at: now };
-    });
-    engine.ingest(shopId, domain, metrics, now, result.details);
-  }
+  if (!entries.length) return;
+  store.patchMeta((meta) => {
+    const m = shopMetaEntry(meta, shopId);
+    if (!m.latest) m.latest = {};
+    for (const [k, v] of entries) m.latest[k] = { v, at: now };
+  });
+  engine.ingest(shopId, domain, Object.fromEntries(entries), now, result.details);
 }
 
 /** 首次采集时补店铺名与当地币种（get_shop_info 的 region → 货币代码；失败不阻断） */
@@ -49,40 +57,35 @@ async function ensureShopInfo(shopId) {
   const info = await fetchShopInfo(shopId);
   if (!info) return;
   store.patchMeta((meta) => {
-    if (!meta.shops[shopId]) meta.shops[shopId] = {};
-    const m = meta.shops[shopId];
+    const m = shopMetaEntry(meta, shopId);
     if (info.name) {
       m.name = info.name;
       const s = state.shops.find((x) => x.shopId === shopId);
       if (s) s.name = info.name;
     }
-    if (info.region) m.currency = regionCurrency(info.region) || 'CNY';
-    else if (!m.currency) m.currency = 'CNY'; // 接口无地区字段：按人民币处理，避免每轮重复拉取
+    if (info.region) m.currency = regionCurrency(info.region) || DEFAULT_CURRENCY;
+    else if (!m.currency) m.currency = DEFAULT_CURRENCY; // 接口无地区字段：按人民币处理，避免每轮重复拉取
   });
 }
 
 /** 采集成功收尾：清失败计数、记 lastRun、广播 */
 function recordSuccess(shopId, domain, now, result) {
   store.patchMeta((meta) => {
-    if (!meta.shops[shopId]) meta.shops[shopId] = {};
-    const m = meta.shops[shopId];
+    const m = shopMetaEntry(meta, shopId);
     if (!m.lastRun) m.lastRun = {};
     m.lastRun[domain] = now;
     if (m.failCount) m.failCount[domain] = 0;
     m.consecutiveFails = 0;
   });
-  state.lastRun[shopId] = state.lastRun[shopId] || {};
-  state.lastRun[shopId][domain] = now;
+  markLastRun(shopId, domain, now);
   engine.broadcast('collection', { shopId, domain, ok: true, at: now, errors: result.errors || [] });
 }
 
 /** 采集失败收尾：记 lastRun（按正常间隔退避重试）、累计失败计数、触发系统自检告警、广播 */
 function recordFailure(shopId, domain, now, e) {
-  state.lastRun[shopId] = state.lastRun[shopId] || {};
-  state.lastRun[shopId][domain] = now;
+  markLastRun(shopId, domain, now);
   store.patchMeta((meta) => {
-    if (!meta.shops[shopId]) meta.shops[shopId] = {};
-    const m = meta.shops[shopId];
+    const m = shopMetaEntry(meta, shopId);
     if (!m.lastRun) m.lastRun = {};
     m.lastRun[domain] = now;
     if (!m.failCount) m.failCount = {};

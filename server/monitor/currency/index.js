@@ -10,6 +10,7 @@ const regions = require('./regions');
 const convert = require('./convert');
 
 module.exports = {
+  DEFAULT_CURRENCY: regions.DEFAULT_CURRENCY,
   STATIC_RMB_RATES: rates.STATIC_RMB_RATES,
   REGION_CURRENCY: regions.REGION_CURRENCY,
   CURRENCY_SYMBOLS: regions.CURRENCY_SYMBOLS,

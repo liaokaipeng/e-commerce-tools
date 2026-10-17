@@ -3,6 +3,7 @@
 // 各域接口形态见对应采集器（order/product/health/ads/funds/aftersale）头注释。
 const PAGE_SIZE = 100;
 const MAX_PAGES = 10; // 单接口翻页上限
+const SEC_PER_DAY = 86400; // 秒/天（各域时间窗参数用，避免 86400 散落各处）
 const ORDER_WINDOW_DAYS = 14; // 订单查询时间窗（官方要求 ≤15 天）
 const ITEM_SCAN_WINDOW_DAYS = 30; // 商品列表更新时间窗
 const ITEMS_PER_SCAN = 50; // 每轮抽查库存的商品数（控制 67 店的调用量，按更新时间倒序抽查）
@@ -39,6 +40,7 @@ const RETURN_REASON_NAMES = {
 module.exports = {
   PAGE_SIZE,
   MAX_PAGES,
+  SEC_PER_DAY,
   ORDER_WINDOW_DAYS,
   ITEM_SCAN_WINDOW_DAYS,
   ITEMS_PER_SCAN,

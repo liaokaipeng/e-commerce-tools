@@ -32,12 +32,12 @@ function stop() {
 /** 手动触发采集：指定店铺或全部店铺，强制立即入队（正在执行的跳过；未启用监控/授权失效的店铺跳过；隐含在场） */
 function collectNow(shopId) {
   setPresence(true); // 手动采集必然发生在大屏打开时，顺便续期在场租约
+  // 取一次凭证状态：下面「无店铺」分支与目标店铺复核复用（原实现调了两次 status()）
+  const st = openapiStore.status();
   if (!state.shops.length) {
-    const st = openapiStore.status();
     if (!st.configured) throw new Error('尚未配置开放平台 App，请先在「开放平台」页面完成配置与店铺授权');
     throw new Error('当前没有已授权的店铺');
   }
-  const st = openapiStore.status();
   const targets = state.shops.filter((s) => {
     if (shopId && s.shopId !== shopId) return false;
     if (!s.monitored) return false; // 未启用监控的店铺不采集

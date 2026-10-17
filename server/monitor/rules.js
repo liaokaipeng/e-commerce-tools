@@ -32,6 +32,19 @@ function isMoreSevere(a, b) {
 }
 
 /**
+ * 阈值清洗（纯函数）：仅保留数值与 null（null = 显式留空），其余类型丢弃。
+ * rules-store 保存用户覆盖与 mergeRules 应用覆盖共用同一口径。
+ */
+function sanitizeThresholds(input) {
+  const th = {};
+  for (const [k, v] of Object.entries(input || {})) {
+    if (v === null) th[k] = null;
+    else if (typeof v === 'number' && isFinite(v)) th[k] = v;
+  }
+  return th;
+}
+
+/**
  * 合并用户覆盖到默认规则：rules.json 存 { [ruleId]: { enabled, thresholds } }，
  * 未覆盖的规则保持默认。返回合并后的规则数组（含全部字段）。
  *
@@ -47,9 +60,9 @@ function mergeRules(overrides) {
     const merged = Object.assign({}, r, { enabled: o.enabled !== false });
     if (o.thresholds && typeof o.thresholds === 'object') {
       const th = Object.assign({}, r.thresholds);
-      for (const [k, v] of Object.entries(o.thresholds)) {
+      for (const [k, v] of Object.entries(sanitizeThresholds(o.thresholds))) {
         if (v === null) delete th[k];
-        else if (typeof v === 'number' && isFinite(v)) th[k] = v;
+        else th[k] = v;
       }
       merged.thresholds = th;
     }
@@ -74,4 +87,4 @@ function levelOf(metricId, value, rulesById) {
   return { level, rule };
 }
 
-module.exports = { evaluateRule, isMoreSevere, mergeRules, indexRules, levelOf };
+module.exports = { evaluateRule, isMoreSevere, sanitizeThresholds, mergeRules, indexRules, levelOf };

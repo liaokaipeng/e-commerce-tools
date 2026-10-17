@@ -11,7 +11,7 @@ const {
   detail, firstOf, snippet, fmtSec, returnSummary, commentSummary, negativeCommentItems, allPermissionDenied,
 } = require('./parse');
 const {
-  PAGE_SIZE, AFTERSALE_WINDOW_MS, COMMENT_SCAN_ITEMS, RETURN_REASON_NAMES,
+  PAGE_SIZE, AFTERSALE_WINDOW_MS, COMMENT_SCAN_ITEMS, COMMENT_KEYWORDS, RETURN_REASON_NAMES,
 } = require('./constants');
 
 /** 全店差评扫描（官方 get_comment 的 item_id 可选，不带则按游标返回全店评论；语义未实测，失败/为空则降级逐商品） */
@@ -40,6 +40,18 @@ async function scanCommentsByItems(shopId, nowMs) {
     }
   }
   return Object.assign(commentSummary(all, COMMENT_KEYWORDS, nowMs), { items: negativeCommentItems(all, nowMs) });
+}
+
+/**
+ * 差评扫描：全店游标模式优先，失败/为空则降级逐商品抽查。
+ * 收敛「try 全店 catch 里再 try 逐商品」的双层嵌套，调用方只处理最终失败。
+ */
+async function scanComments(shopId, nowMs) {
+  try {
+    return await scanCommentsShopWide(shopId, nowMs);
+  } catch {
+    return scanCommentsByItems(shopId, nowMs);
+  }
 }
 
 async function collectAftersaleDomain(shopId) {
@@ -89,13 +101,9 @@ async function collectAftersaleDomain(shopId) {
     anyOk = true;
   };
   try {
-    applyCommentResult(await scanCommentsShopWide(shopId, nowMs));
+    applyCommentResult(await scanComments(shopId, nowMs));
   } catch (e) {
-    try {
-      applyCommentResult(await scanCommentsByItems(shopId, nowMs));
-    } catch (e2) {
-      errors.push('差评扫描：' + e2.message);
-    }
+    errors.push('差评扫描：' + e.message);
   }
   if (!anyOk) {
     if (allPermissionDenied(errors)) return { domain: 'aftersale', metrics, errors, unsupported: true, reason: errors.join('；') };

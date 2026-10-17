@@ -75,12 +75,10 @@ async function authorizedStores() {
       const hasName = !!(s.shopName || mNames[s.shopId]);
       const hasRegion = !!s.shopRegion;
       if (hasName && hasRegion) return false;
+      // 名字/地区各自有 10 分钟失败冷却；缺的那项被冷却挡住才跳过（两项都缺则都要被挡）
       const nameBlocked = s.shopNameFailedAt && now - s.shopNameFailedAt < SHOP_NAME_RETRY_MS;
       const regionBlocked = s.shopRegionFailedAt && now - s.shopRegionFailedAt < SHOP_NAME_RETRY_MS;
-      // 名字/地区各自有 10 分钟失败冷却，两项都被冷却挡住时才跳过
-      if (!hasName && !hasRegion) return !(nameBlocked && regionBlocked);
-      if (!hasName) return !nameBlocked;
-      return !regionBlocked;
+      return (!hasName && !nameBlocked) || (!hasRegion && !regionBlocked);
     });
   if (pending.length) {
     if (!shopNameTask) {

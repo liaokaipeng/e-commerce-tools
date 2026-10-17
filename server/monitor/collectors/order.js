@@ -7,7 +7,7 @@
 //   first_mile.get_unbind_order_list  返回 response.order_list + more/next_cursor
 const { collectByCursor } = require('./paging');
 const { detail, snDateText, orderAgeBuckets, orderAgeGroups } = require('./parse');
-const { PAGE_SIZE, ORDER_WINDOW_DAYS } = require('./constants');
+const { PAGE_SIZE, ORDER_WINDOW_DAYS, SEC_PER_DAY } = require('./constants');
 
 /** cursor 翻页收集订单列表（order_sn 列表） */
 function collectOrdersByStatus(shopId, orderStatus) {
@@ -15,7 +15,7 @@ function collectOrdersByStatus(shopId, orderStatus) {
   return collectByCursor(shopId, '/api/v2/order/get_order_list', {
     order_status: orderStatus,
     time_range_field: orderStatus === 'IN_CANCEL' ? 'update_time' : 'create_time',
-    time_from: nowSec - ORDER_WINDOW_DAYS * 86400,
+    time_from: nowSec - ORDER_WINDOW_DAYS * SEC_PER_DAY,
     time_to: nowSec,
     page_size: PAGE_SIZE,
   }, 'order_list');

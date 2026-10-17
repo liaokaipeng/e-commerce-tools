@@ -8,8 +8,8 @@
  * 链路拆分到 openapi/ 子模块：
  *   constants.js     常量（API 路径 / 默认 redirect / 本机回调域名白名单）
  *   store.js         App 与店铺 token 持久化
- *   client.js        签名调用 / token 刷新（含分组续期）
- *   refresh-all.js   批量刷新编排（SSE + 暂停/取消）
+ *   client/          签名调用 / token 刷新（按 shop_id 逐店刷新，见其 ensure.js）
+ *   refresh-all/     批量刷新编排（SSE + 暂停/取消）
  *   redirect.js      授权回调地址校验
  *   stores-view.js   已授权店铺列表（选择店铺数据源）
  *   callback-page.js 授权回调内联页
@@ -129,7 +129,8 @@ function register({ get, post }) {
     const app = store.getApp();
     if (!app) throw new Error('尚未配置 App，请先保存 partner_id / partner_key');
     const t = await client.exchangeToken(app.env, { code, shopId, mainAccountId });
-    const shops = t.authorizedShopIds.length ? t.authorizedShopIds : [];
+    // exchangeToken 保证返回数组（无 shop_id_list 时回落请求里的 shopId，再不行为空数组）
+    const shops = t.authorizedShopIds;
     if (!shops.length) throw new Error('官方未返回店铺列表，请重新生成授权链接并授权');
     const accessExpireAt = nowSec() + t.expireIn;
     for (const id of shops) {
@@ -185,8 +186,8 @@ function register({ get, post }) {
     });
   }));
 
-  // 批量刷新全部已授权店铺的 token（SSE 流式进度）：内部按共享 token 分组去重，
-  // 每组只刷一次（逐店刷新会作废旧 refresh_token、把同组店铺拖成「需重新授权」，见 refresh-all.js）
+  // 批量刷新全部已授权店铺的 token（SSE 流式进度）：逐店刷新、只写回本店
+  // （官方要求 shop_id / merchant_id「必须分别刷新」，归组续期已被实测证伪，见 refresh-all/run.js）
   refreshAll.register({ post });
 
   // 删除某店铺授权（幂等）

@@ -20,9 +20,11 @@ const RETRY_MS = 10 * 60 * 1000; // 在线拉取失败后 10 分钟内不重试
 
 let liveRates = null; // { fetchedAt, rates: { CUR: 1 单位 = 人民币数 } }
 let lastAttempt = 0;
+let ratesLockedForTest = false; // 起测时钉死内置静态表：不读磁盘缓存、不在线拉取
 
-/** 读磁盘缓存（24h 内有效），失败/过期返回 null */
-let loadCachedRates = function () {
+/** 读磁盘缓存（24h 内有效），失败/过期返回 null；测试锁定期间直接返回 null */
+function loadCachedRates() {
+  if (ratesLockedForTest) return null;
   try {
     if (!fs.existsSync(RATES_FILE)) return null;
     const j = JSON.parse(fs.readFileSync(RATES_FILE, 'utf8'));
@@ -31,7 +33,7 @@ let loadCachedRates = function () {
   } catch (e) {
     return null;
   }
-};
+}
 
 function saveCachedRates(j) {
   try {
@@ -119,8 +121,8 @@ function ratesInfo() {
  */
 function lockStaticRatesForTest() {
   liveRates = null;
-  loadCachedRates = () => null;   // 覆盖为永远返回 null：不读磁盘缓存
-  lastAttempt = Date.now();       // 落在 RETRY_MS 窗口内：ensureRates 不发外部请求
+  ratesLockedForTest = true;   // loadCachedRates 直接返回 null：不读磁盘缓存
+  lastAttempt = Date.now();    // 落在 RETRY_MS 窗口内：ensureRates 不发外部请求
 }
 
 // 汇率缓存每日自动续期（unref 不阻塞进程退出；无缓存时不主动拉取，由 ensureRates 在有店铺时触发）

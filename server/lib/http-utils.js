@@ -25,6 +25,11 @@ const DIR_INDEX = {
   '/monitor/': '/monitor/index.html',
 };
 
+// SSE 断线重连间隔（毫秒）：写进响应头，浏览器断开后按该间隔重连
+const SSE_RETRY_MS = 2000;
+// 请求体默认上限（字节）：超限直接拒绝而非静默截断
+const BODY_MAX_BYTES = 2 * 1024 * 1024;
+
 /** 统一 JSON 响应 */
 function sendJson(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -66,14 +71,14 @@ function sse(res, extraHeaders = {}) {
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
   }, extraHeaders));
-  res.write('retry: 2000\n\n');
+  res.write('retry: ' + SSE_RETRY_MS + '\n\n');
   return (data) => {
     try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* client gone */ }
   };
 }
 
 /** 读取请求体（默认上限 2MB）：按字节计数，超限直接拒绝而非静默截断 */
-function readBody(req, maxBytes = 2 * 1024 * 1024) {
+function readBody(req, maxBytes = BODY_MAX_BYTES) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
@@ -99,18 +104,6 @@ function parseJsonText(text) {
 }
 
 /**
- * 读取并解析 JSON 请求体（严格）：请求体非法即抛错，由 createDispatcher 兜底为 500。
- * 供「请求体必须合法」的接口使用（monitor / openapi）。
- */
-async function readJsonBody(req) {
-  try {
-    return parseJsonText(await readBody(req));
-  } catch (e) {
-    throw new Error('请求体不是合法 JSON：' + e.message);
-  }
-}
-
-/**
  * 读取路由请求体（宽容）：解析失败只记一条 warn 并返回 {}，
  * 供「空请求体也应正常处理」的批量操作接口使用（由各路由自行判定缺字段并回 400）。
  *
@@ -121,7 +114,7 @@ async function readJsonBody(req) {
  * @param {object} [ctx] { res } 传入时解析失败自动回 400 并返回 null
  * @returns {Promise<object|null>} 解析结果（回 400 后为 null，调用方应直接 return）
  */
-async function readRouteBody(req, label = '', ctx) {
+async function readJsonBodySoft(req, label = '', ctx) {
   try {
     return parseJsonText(await readBody(req));
   } catch (e) {
@@ -134,13 +127,10 @@ async function readRouteBody(req, label = '', ctx) {
   }
 }
 
-/** readJsonBodySoft 与 readRouteBody 行为完全一致，保留为别名以免调用方大改 */
-const readJsonBodySoft = readRouteBody;
-
 /**
  * 包装「请求体必须合法 JSON」的 POST 处理器：内部异常统一回 400 { ok:false, message }。
  * 供 monitor / openapi 等以 body 为业务参数的接口使用，省去每个路由重复的
- * `try { body = await readJsonBody(req) } catch (e) { sendJson(res, 400, ...) }` 样板。
+ * 「解析请求体 → 失败回 400」样板。
  * @param {string} label 日志与前端提示中标识来源的接口路径
  * @param {(body: object, req: object, res: object, url: URL) => any} handler 业务处理器
  * @returns {Function} 可直接传给 post(label, fn) 的处理器
@@ -184,4 +174,4 @@ function serveStatic(res, urlPath, publicDir) {
   });
 }
 
-module.exports = { sendJson, createDispatcher, sse, readBody, parseJsonText, readJsonBody, readJsonBodySoft, readRouteBody, jsonAction, serveStatic };
+module.exports = { sendJson, createDispatcher, sse, readBody, parseJsonText, readJsonBodySoft, jsonAction, serveStatic };

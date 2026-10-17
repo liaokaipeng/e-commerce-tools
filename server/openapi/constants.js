@@ -11,6 +11,16 @@ const ENV_HOSTS = {
 // 环境下拉选项（前端展示顺序）
 const ENVS = ['prod', 'sandbox'];
 
+/**
+ * 环境 → 官方 API 网关 host（非法环境直接抛中文错）：
+ * 各 client 模块共用同一取值口径，避免把坏 host 拼进 URL 才在网关侧失败。
+ */
+function hostOf(env) {
+  const host = ENV_HOSTS[env];
+  if (!host) throw new Error('无效的环境：' + env);
+  return host;
+}
+
 // 官方接口路径（v2）
 const API_PATH = {
   authPartner: '/api/v2/shop/auth_partner',        // 生成卖家授权链接
@@ -53,6 +63,7 @@ const REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
 module.exports = {
   ENV_HOSTS,
   ENVS,
+  hostOf,
   API_PATH,
   DEFAULT_REDIRECT,
   LOCAL_REDIRECT_HOSTS,

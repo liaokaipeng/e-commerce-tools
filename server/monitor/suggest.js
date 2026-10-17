@@ -3,9 +3,9 @@
 // 用途：默认阈值常与店铺实际量级不匹配（如「扣分记录数」恒为 1 却默认 p1=1 → 常驻 P1；
 // 大店广告花费远超默认阈值 → 每轮必 P0）。这里按监控店铺的历史样本算分位数给「建议值」，
 // 并给出「当前阈值历史命中率」，帮助判断阈值是否过于敏感；是否采纳完全由用户在规则面板决定。
-const { METRICS } = require('./constants');
+const { METRICS, isMoneyMetric } = require('./constants');
 const { levelOf } = require('./rules');
-const { toRmb } = require('./currency');
+const { toRmb, DEFAULT_CURRENCY } = require('./currency');
 const store = require('./store');
 const scheduler = require('./scheduler');
 
@@ -39,10 +39,11 @@ function buildRuleSuggestions(days) {
     const m = METRICS[metric] || {};
     const dir = m.direction || 'up';
     const unit = m.unit || '';
-    const money = unit === '元';
+    // 是否金额类指标以常量目录的 isMoneyMetric 为准（原为 unit === '元' 的副本判断）
+    const money = isMoneyMetric(metric);
     const samples = [];
     for (const s of monitored) {
-      const cur = String((meta.shops && meta.shops[s.shopId] && meta.shops[s.shopId].currency) || 'CNY');
+      const cur = String((meta.shops && meta.shops[s.shopId] && meta.shops[s.shopId].currency) || DEFAULT_CURRENCY);
       for (const p of store.readTrend(s.shopId, metric, days)) {
         if (typeof p.v !== 'number' || !isFinite(p.v)) continue;
         samples.push(money ? toRmb(p.v, cur) : p.v);
