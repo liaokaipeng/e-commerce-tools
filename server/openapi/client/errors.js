@@ -75,4 +75,4 @@ function isAuthFatalAfterRefresh(message) {
   return isAuthDead(message) || AUTH_FATAL_AFTER_REFRESH_RE.test(String(message || ''));
 }
 
-module.exports = { hintOf, gatewayError, nonJsonError, isAuthDead, isAuthRetryable, isAuthFatalAfterRefresh };
+module.exports = { gatewayError, nonJsonError, isAuthDead, isAuthRetryable, isAuthFatalAfterRefresh };

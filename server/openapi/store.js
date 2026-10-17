@@ -5,12 +5,10 @@
 //   important 为用户在「开放平台」页勾选的「重点店铺」标记（非凭证）：某环境有任一标记时，
 //   监控大屏采集与 shopee_skill 只作用于重点店铺；一个都没标记则回落为全部店铺。
 // 对外输出一律打码（maskToken），与仓库「凭证不入库、日志不完整打印」约定一致。
-const path = require('path');
 const { ENVS, ACCESS_EXPIRE_MARGIN, EXPIRING_SOON_SEC } = require('./constants');
+const { OPENAPI_SESSION_FILE: SESSION_FILE } = require('../lib/shopee/constants');
 const { maskToken, nowSec } = require('../lib/openapi-utils');
 const { readJson, writeJson } = require('../lib/json-file');
-
-const SESSION_FILE = process.env.OPENAPI_SESSION_FILE || path.join(__dirname, '..', 'data', 'openapi-session.json');
 
 let store = { app: null, shops: {} };
 

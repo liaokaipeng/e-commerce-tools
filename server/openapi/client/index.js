@@ -12,7 +12,7 @@
 //   client/transport.js signedCall：签名请求 + 网络/5xx 重试
 //   client/refresh.js   refreshToken：按 shop_id 刷新 token 协议
 //   client/persist.js   saveRefreshResult：刷新结果只写回本店
-//   client/auth.js      授权链接 / 换 token / get_shop_info
+//   client/auth.js      授权链接 / 换 token
 //   client/ensure.js    ensureFresh：TTL / 冷却 / per-shop 锁 / 全局串行链编排
 //   client/call.js      callOpenApi：通用接口调用 + 认证失败强制刷新重试
 //
@@ -35,8 +35,8 @@ const { pickPayload } = require('./parse');
 const { isAuthDead, isAuthRetryable, isAuthFatalAfterRefresh } = require('./errors');
 const { REFRESH_COOLDOWN_MS } = require('../constants');
 
-// 门面只导出被消费的入口（refreshToken / saveRefreshResult / ensureFresh / getShopInfo
-// 均由 client 内部子模块相互调用，无外部消费者，需要时直接 require 对应子模块）。
+// 门面只导出被消费的入口（refreshToken / saveRefreshResult / ensureFresh 等内部实现
+// 只由 client 子模块相互调用，无外部消费者，需要时直接 require 对应子模块）。
 module.exports = {
   getAuthUrl,
   exchangeToken,

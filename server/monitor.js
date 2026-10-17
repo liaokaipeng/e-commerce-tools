@@ -6,12 +6,12 @@
  *       大屏页面（frontend/src/monitor/）展示店铺健康墙/趋势图/对比矩阵/告警流。
  * 本期告警只在大屏展示（不接 IM）；数据存 server/data/monitor/（凭证不入库）。
  * 链路拆分到 monitor/ 子模块：
- *   constants.js  常量（数据目录/级别/任务/指标/默认规则）
+ *   constants/    常量（infra 数据目录与容量 / jobs 任务 / levels 级别 / metrics 指标 / rules-data 默认规则）
  *   rules.js      规则评估纯函数
- *   store.js      快照/告警/规则覆盖/meta 持久化
+ *   store/        持久化（paths 路径 + JSON 读写 / 规则 / 告警 / meta / 快照）
  *   collectors/   开放平台接口采集（按域拆分，见其 index.js）
- *   engine.js     告警生命周期（去重/升级/恢复/确认关闭）+ SSE 广播
- *   scheduler.js  巡检调度（每店串行、跨店并发限流、手动触发）
+ *   engine/       告警生命周期（去重/升级/恢复/确认关闭）+ SSE 广播
+ *   scheduler/    巡检调度（每店串行、跨店并发限流、手动触发）
  *   view.js       单店视图投影（shopView）
  *   view/         路由级视图与副作用编排（overview / trend / config）
  *   suggest.js    阈值分位数建议（buildRuleSuggestions）

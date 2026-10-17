@@ -1,5 +1,5 @@
 'use strict';
-// 开放平台授权与 App 解析：生成卖家授权链接、授权码换 token，以及测试用 get_shop_info。
+// 开放平台授权与 App 解析：生成卖家授权链接、授权码换 token。
 const { API_PATH, hostOf } = require('../constants');
 const { nowSec } = require('../../lib/openapi-utils');
 const { commonParams, qsOf } = require('./sign');
@@ -53,11 +53,4 @@ async function exchangeToken(env, { code, shopId, mainAccountId }) {
   };
 }
 
-/** 测试用：拉取店铺信息验证 token 有效性（get_shop_info 为 GET 查询类接口） */
-async function getShopInfo(env, shopId, accessToken) {
-  const j = await signedCall({ env, apiPath: API_PATH.getShopInfo, accessToken, shopId, method: 'GET' });
-  const name = j.shop_name || (j.data && j.data.shop_name) || '';
-  return { shopId: String(shopId), shopName: String(name) };
-}
-
-module.exports = { resolveApp, getAuthUrl, exchangeToken, getShopInfo };
+module.exports = { resolveApp, getAuthUrl, exchangeToken };

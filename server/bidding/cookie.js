@@ -1,8 +1,7 @@
 'use strict';
 // 扩展 Cookie 接收与登录状态：session 文件路径与读取统一走 lib/shopee-session.js。
-const fs = require('fs');
-const path = require('path');
 const { readJsonBodySoft } = require('../lib/http-utils');
+const { writeJson } = require('../lib/json-file');
 const { SESSION_FILE, readSession } = require('../lib/shopee-session');
 
 // 注意：本接口是扩展（extension/popup.js）的对接协议，返回纯文本 'ok' / 错误说明，
@@ -16,8 +15,7 @@ async function handleCookie(req, res) {
     return;
   }
   try {
-    fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
-    fs.writeFileSync(SESSION_FILE, JSON.stringify(payload, null, 2));
+    writeJson(SESSION_FILE, payload);
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
     console.log(`✅ 已收到 ${cookies.length} 个 Cookie，保存到 ${SESSION_FILE}`);

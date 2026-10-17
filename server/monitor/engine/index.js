@@ -38,6 +38,5 @@ module.exports = {
   flushAlerts: persist.flushAlerts,
   // 展示渲染
   renderAlertMessage: render.renderAlertMessage,
-  shopCurrency: render.shopCurrency,
   _test: { alerts: state.alerts },
 };

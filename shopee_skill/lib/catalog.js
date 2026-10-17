@@ -189,13 +189,6 @@ function loadCatalog() {
   return cache;
 }
 
-/** 按接口名/路径在目录中查找条目，未收录返回 null */
-function findApi(input) {
-  const { apiName } = normalizeApi(input);
-  const { apis } = loadCatalog();
-  return apis.find((a) => a.apiName === apiName) || null;
-}
-
 /**
  * 解析用户输入为接口条目（agent 提速：允许短名，省一次 search 往返）：
  *   1) 精确匹配（v2.order.get_order_list / 完整路径）；
@@ -302,7 +295,6 @@ module.exports = {
   loadCatalog,
   listApis,
   normalizeApi,
-  findApi,
   resolveApi,
   describe,
   inferMethod,

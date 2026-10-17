@@ -78,7 +78,9 @@ if (!require.cache[schedPath]) {
 // 这些子模块在 unit.test.js 阶段就已随 openapi.js 加载过，内部持有的 store 指向**真实**
 // openapi-session.json、持有的 http.request 是 mock 替换**之前**解构的原始实现。
 // 漏清缓存 → 命中旧实例 → 测试会真的向 Shopee 网关发刷新请求并把结果写回用户真实凭证文件。
+// 路径常量在模块加载时读取环境变量，必须与 store 一起清缓存，否则临时 OPENAPI_SESSION_FILE 不生效。
 for (const p of [
+  '../server/lib/shopee/constants',
   '../server/openapi/store',
   '../server/openapi/client',
   '../server/openapi',

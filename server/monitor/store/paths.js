@@ -10,10 +10,10 @@ const fs = require('fs');
 const path = require('path');
 const { readJson: readJsonRaw, writeJson: writeJsonRaw } = require('../../lib/json-file');
 const { DATA_DIR } = require('../constants');
+const { MONITOR_META_FILE: META_FILE } = require('../../lib/shopee/constants');
 
 const RULES_FILE = path.join(DATA_DIR, 'rules.json');
 const ALERTS_FILE = path.join(DATA_DIR, 'alerts.json');
-const META_FILE = path.join(DATA_DIR, 'meta.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const SNAPSHOT_DIR = path.join(DATA_DIR, 'snapshots');
 

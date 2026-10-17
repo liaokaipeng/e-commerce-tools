@@ -7,20 +7,18 @@
  * 本文件保留为门面，re-export 全部原有导出，上传链路与测试的 require 路径不变。
  */
 const {
-  md5hex, etagOf, etagFromSha1Hex, streamHashes, hmac, sha256hex,
+  md5hex, etagOf, etagFromSha1Hex, streamHashes,
 } = require('./video/hash');
 const { decryptVodToken, awsSigV4, authExpOf } = require('./video/sign');
 const { findItemIds } = require('./video/scan');
 const { probeVideo, probeVideoFile, findMoovInTail } = require('./video/mp4');
-const { validateUploadRow, skipError, CAPTION_MAX_LENGTH } = require('./video/validate');
+const { validateUploadRow, skipError } = require('./video/validate');
 
 module.exports = {
   md5hex,
   etagOf,
   etagFromSha1Hex,
   streamHashes,
-  hmac,
-  sha256hex,
   decryptVodToken,
   awsSigV4,
   authExpOf,
@@ -30,5 +28,4 @@ module.exports = {
   findMoovInTail,
   validateUploadRow,
   skipError,
-  CAPTION_MAX_LENGTH,
 };

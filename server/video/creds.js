@@ -1,6 +1,6 @@
 'use strict';
-const fs = require('fs');
 const path = require('path');
+const { readJson, writeJson } = require('../lib/json-file');
 const { authExpOf } = require('../lib/video-utils');
 const { call } = require('./request');
 const { SITES, SOLUTIONS, UA } = require('./constants');
@@ -34,13 +34,9 @@ function credsPatch(src, withShopId) {
 }
 
 function loadCredsFile() {
-  let raw = {};
-  try {
-    if (fs.existsSync(CREDS_FILE)) raw = JSON.parse(fs.readFileSync(CREDS_FILE, 'utf8'));
-  } catch (e) {
-    console.warn('读取视频凭证文件失败:', e.message);
-    return;
-  }
+  const raw = readJson(CREDS_FILE, {}, (e) => {
+    if (e.code !== 'ENOENT') console.warn('读取视频凭证文件失败:', e.message);
+  });
   // 兼容旧格式：顶层 {auth,cookie,shopId} 视为跨境 cn → 归入 shops
   if (raw.auth || raw.cookie || raw.shopId) {
     const flat = flatCreds(raw);
@@ -62,8 +58,7 @@ function loadCredsFile() {
 }
 function saveCredsFile() {
   try {
-    fs.mkdirSync(path.dirname(CREDS_FILE), { recursive: true });
-    fs.writeFileSync(CREDS_FILE, JSON.stringify(storedCreds, null, 2));
+    writeJson(CREDS_FILE, storedCreds);
   }
   catch (e) { console.warn('保存视频凭证文件失败:', e.message); }
 }
@@ -83,8 +78,7 @@ function cnShops() {
 function clearCreds() {
   for (const k of Object.keys(storedCreds)) delete storedCreds[k];
   try {
-    fs.mkdirSync(path.dirname(CREDS_FILE), { recursive: true });
-    fs.writeFileSync(CREDS_FILE, '{}');
+    writeJson(CREDS_FILE, {});
   }
   catch (e) { console.warn('清空视频凭证文件失败:', e.message); }
 }

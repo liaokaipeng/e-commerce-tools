@@ -1,6 +1,6 @@
 'use strict';
 // 输出与错误处理：所有命令统一输出合法 JSON（便于管道 / agent 解析），错误写 stderr 并置非零退出码。
-// 载荷解包口径与 server/openapi/client/parse.js 一致：优先 response，其次 data，最后顶层。
+// 载荷解包口径：优先 response，其次 data，最后顶层（注意 server/openapi/client/parse.js 的顺序为顶层 → response → data，两者不同）。
 function extractPayload(raw) {
   if (raw && typeof raw === 'object') {
     const r = raw.response;

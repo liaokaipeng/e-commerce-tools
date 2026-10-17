@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { request } = require('../../lib/http');
+const { readJson, writeJson } = require('../../lib/json-file');
 const { DATA_DIR } = require('../constants');
 
 // 内置静态汇率（1 单位当地货币 ≈ 多少人民币；近似值，仅作离线兜底，在线拉取成功后覆盖）
@@ -25,20 +26,14 @@ let ratesLockedForTest = false; // 起测时钉死内置静态表：不读磁盘
 /** 读磁盘缓存（24h 内有效），失败/过期返回 null；测试锁定期间直接返回 null */
 function loadCachedRates() {
   if (ratesLockedForTest) return null;
-  try {
-    if (!fs.existsSync(RATES_FILE)) return null;
-    const j = JSON.parse(fs.readFileSync(RATES_FILE, 'utf8'));
-    if (j && j.rates && typeof j.rates === 'object' && Date.now() - (j.fetchedAt || 0) < RATE_TTL_MS) return j;
-    return null;
-  } catch (e) {
-    return null;
-  }
+  const j = readJson(RATES_FILE, null);
+  if (j && j.rates && typeof j.rates === 'object' && Date.now() - (j.fetchedAt || 0) < RATE_TTL_MS) return j;
+  return null;
 }
 
 function saveCachedRates(j) {
   try {
-    fs.mkdirSync(path.dirname(RATES_FILE), { recursive: true });
-    fs.writeFileSync(RATES_FILE, JSON.stringify(j));
+    writeJson(RATES_FILE, j, { space: 0 });
   } catch (e) {
     console.warn('[监控] 保存汇率缓存失败:', e.message);
   }

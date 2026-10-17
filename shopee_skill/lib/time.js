@@ -110,4 +110,4 @@ function applyHelpers(business, flags, known, nowSec) {
   return { params, notes };
 }
 
-module.exports = { parseDuration, parseTimePoint, applyHelpers, isRelative };
+module.exports = { parseDuration, parseTimePoint, applyHelpers };

@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { ymd } = require('../../lib/date-utils');
+const { readJson, writeJson } = require('../../lib/json-file');
 const { RETENTION_DAYS, SNAPSHOT_CAP_PER_DAY } = require('../constants');
 const { SNAPSHOT_DIR } = require('./paths');
 
@@ -13,14 +14,11 @@ function appendSample(shopId, metric, v, at) {
   const file = path.join(dir, ymd(at) + '.json');
   try {
     fs.mkdirSync(dir, { recursive: true });
-    let arr = [];
-    if (fs.existsSync(file)) {
-      arr = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (!Array.isArray(arr)) arr = [];
-    }
+    let arr = readJson(file, [], (e) => { if (e.code !== 'ENOENT') throw e; });
+    if (!Array.isArray(arr)) arr = [];
     arr.push({ at, v });
     if (arr.length > SNAPSHOT_CAP_PER_DAY) arr.splice(0, arr.length - SNAPSHOT_CAP_PER_DAY);
-    fs.writeFileSync(file, JSON.stringify(arr));
+    writeJson(file, arr, { space: 0 });
     // 顺带清理过期快照（同目录下超过保留期的天文件）
     const cutoff = Date.now() - RETENTION_DAYS * 24 * 3600 * 1000;
     for (const f of fs.readdirSync(dir)) {
@@ -50,7 +48,7 @@ function readTrend(shopId, metric, days, offsetDays) {
     // offsetDays=0 取最近 win 天；否则取「更早的 win 天」（避免与当前窗口重叠）
     const keep = off ? names.slice(-(win + off), -off) : names.slice(-win);
     for (const f of keep) {
-      const arr = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+      const arr = readJson(path.join(dir, f), [], (e) => { throw e; });
       if (Array.isArray(arr)) for (const p of arr) if (p && typeof p.v === 'number') points.push({ at: p.at, v: p.v });
     }
   } catch (e) {

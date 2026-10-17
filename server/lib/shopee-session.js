@@ -9,9 +9,9 @@
  * 现按单一职责拆分到 lib/shopee/（constants / session / client / stores / amount）与 lib/sleep.js，
  * 本文件保留为门面，re-export 全部原有导出，调用方与测试的 require 路径不变。
  */
-const { SESSION_FILE, UA, HOST, DEFAULT_REGION } = require('./shopee/constants');
+const { SESSION_FILE, HOST, DEFAULT_REGION } = require('./shopee/constants');
 const {
-  readSession, matchCookies, loadCookieHeader, loadCookie, assertLoginOk,
+  readSession, loadCookieHeader, loadCookie,
 } = require('./shopee/session');
 const {
   buildShopeeUrl, apiGet, apiPost, fetchShopRegion,
@@ -22,14 +22,11 @@ const { sleep } = require('./sleep');
 
 module.exports = {
   SESSION_FILE,
-  UA,
   HOST,
   DEFAULT_REGION,
   readSession,
-  matchCookies,
   loadCookieHeader,
   loadCookie,
-  assertLoginOk,
   buildShopeeUrl,
   apiGet,
   apiPost,

@@ -174,4 +174,4 @@ async function callWithPaging({ apiPath, business, shopId, method, all, maxPages
   return Object.assign({}, first, merged);
 }
 
-module.exports = { callWithPaging, DEFAULT_MAX_PAGES, detectStyle, detectListKey, stillMore };
+module.exports = { callWithPaging, detectStyle, detectListKey, stillMore };
