@@ -22,7 +22,18 @@ const emit = defineEmits(['save']);
         <el-input v-model="form.partnerId" placeholder="开放平台 App 的 partner_id" />
       </el-form-item>
       <el-form-item label="partner_key">
-        <el-input v-model="form.partnerKey" type="password" show-password placeholder="开放平台 App 的 partner_key" />
+        <div style="width: 100%">
+          <el-input
+            v-model="form.partnerKey"
+            type="password"
+            show-password
+            :placeholder="status.configured ? '已保存，如需更换请重新输入（留空则保持不变）' : '开放平台 App 的 partner_key'"
+          />
+          <!-- 完整 key 不回显（安全约束），输入框为空不代表未配置：这里明确给出已保存的打码值 -->
+          <div v-if="status.configured" class="hint" style="margin-top: 4px">
+            已保存：{{ status.partnerKeyMasked }}（留空保存则保持不变）
+          </div>
+        </div>
       </el-form-item>
       <el-form-item label="环境">
         <el-select v-model="form.env" style="width: 220px">
@@ -31,7 +42,12 @@ const emit = defineEmits(['save']);
         </el-select>
       </el-form-item>
       <el-form-item>
-        <el-button type="primary" :loading="saving" :disabled="!form.partnerId || !form.partnerKey" @click="emit('save')">
+        <el-button
+          type="primary"
+          :loading="saving"
+          :disabled="!form.partnerId || (!form.partnerKey && !status.configured)"
+          @click="emit('save')"
+        >
           保存配置
         </el-button>
         <el-tag v-if="status.configured" type="success" effect="light" style="margin-left: 12px">

@@ -55,13 +55,18 @@ function requireApp() {
  */
 function setApp({ partnerId, partnerKey, env }) {
   const id = String(partnerId || '').trim();
-  const key = String(partnerKey || '').trim();
+  const inputKey = String(partnerKey || '').trim();
   const e = String(env || 'prod');
   if (!id) throw new Error('partner_id 不能为空');
-  if (!key) throw new Error('partner_key 不能为空');
   if (!ENVS.includes(e)) throw new Error('无效的环境：' + e);
   const prev = store.app;
   const partnerChanged = !!(prev && prev.partnerId && String(prev.partnerId) !== id);
+  // partner_key 留空 = 沿用已保存的 key：页面出于安全不回显完整 key（输入框恒为空），
+  // 用户只改环境时不该被迫重填；首次配置或更换 partner_id 时必须显式填写（旧 key 属于旧 App）。
+  if (!inputKey && (!prev || !prev.partnerKey || partnerChanged)) {
+    throw new Error('partner_key 不能为空');
+  }
+  const key = inputKey || prev.partnerKey;
   store.app = { partnerId: id, partnerKey: key, env: e };
   store.shops[e] = partnerChanged ? {} : (store.shops[e] || {});
   saveFile();
