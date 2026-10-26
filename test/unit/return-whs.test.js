@@ -34,18 +34,20 @@ async function run() {
   t('splitChunks 空数组返回空', splitChunks([], 20).length === 0 && splitChunks(null, 20).length === 0);
   t('splitChunks 非正 size 按 1 兜底不抛错', splitChunks([{ a: 1 }, { a: 2 }], 0).length === 2);
 
-  // ===== 入参行归一化（job.js） =====
+  // ===== 入参行归一化（job.js，多店铺：店铺ID 按行带） =====
   {
     const rows = normalizeRows([
-      { rowIndex: 1, returnId: ' RTN12345TEST0001 ' },
+      { rowIndex: 1, returnId: ' RTN12345TEST0001 ', shopId: ' 953673451 ' },
       { rowIndex: 2, returnId: '' },          // 空 Return ID，过滤
       { rowIndex: 3 },                         // 缺 returnId，过滤
-      { rowIndex: 4, returnId: '2610084ABCDE' },
-      { returnId: '2610085FGHIJ' },            // 缺 rowIndex，回退为下标 4
+      { rowIndex: 4, returnId: '2610084ABCDE', shopId: 123456789 },
+      { returnId: '2610085FGHIJ', shopId: '953673451.0' }, // 缺 rowIndex，回退为下标 4
     ]);
     t('normalizeRows 过滤空 Return ID 行', rows.length === 3);
     t('normalizeRows 归一化 Return ID', rows[0].returnId === 'RTN12345TEST0001');
     t('normalizeRows 保留 rowIndex', rows[0].rowIndex === 1 && rows[2].rowIndex === 4);
+    t('normalizeRows 归一化店铺ID', rows[0].shopId === '953673451' && rows[1].shopId === '123456789' && rows[2].shopId === '953673451');
+    t('normalizeRows 缺店铺ID 保留为空串（由 handleRun 显式 400）', normalizeRows([{ rowIndex: 1, returnId: 'R1' }])[0].shopId === '');
     t('normalizeRows 非数组输入返回空数组', normalizeRows(null).length === 0 && normalizeRows('x').length === 0);
   }
   t('MAX_ROWS / CHUNK_SIZE 为正整数常量', MAX_ROWS === 2000 && CHUNK_SIZE === 20);
