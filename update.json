@@ -1,8 +1,8 @@
 {
-  "version": "1.4.1",
-  "builtAt": "2026-10-21T06:32:33.187Z",
-  "commit": "2e8aeef",
-  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.4.1/kp_tools-v1.4.1.zip",
-  "sha256": "0576c9fe8224e919e870ca29274f6e9ef302720bdea0c4f8d94fdcca624e6b0d",
-  "notes": "开放平台 App 配置体验修复：partner_key 保存后不再让人误以为未配置——已配置时输入框提示「已保存，如需更换请重新输入」，下方展示打码后的 key；留空保存将沿用已保存的 key，仅首次配置或更换 partner_id 时必须重新填写。其余功能不变。"
+  "version": "1.5.0",
+  "builtAt": "2026-10-26T15:34:24.337Z",
+  "commit": "e42387e",
+  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.5.0/kp_tools-v1.5.0.zip",
+  "sha256": "47b6416e57015c3a005caa9f05136f7782fe5ebb85fd1624ff023f4e56d1042f",
+  "notes": "获取退单仓库支持多店铺：表格新增「店铺ID」列（兼容 Shop ID / 店铺编号 等写法），每行按自己的店铺ID查询，可一次混排多个店铺，无需再选店铺。表格中有未授权或已失效的店铺ID 时会直接提示并阻止执行。日志、预览与导出结果均带店铺信息，导出逻辑不变（新列「退单仓库ID」插在 Order ID 列后）。其余功能不变。"
 }
