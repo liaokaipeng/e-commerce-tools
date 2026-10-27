@@ -1,8 +1,8 @@
 {
-  "version": "1.5.0",
-  "builtAt": "2026-10-26T15:34:24.337Z",
-  "commit": "e42387e",
-  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.5.0/kp_tools-v1.5.0.zip",
-  "sha256": "47b6416e57015c3a005caa9f05136f7782fe5ebb85fd1624ff023f4e56d1042f",
-  "notes": "获取退单仓库支持多店铺：表格新增「店铺ID」列（兼容 Shop ID / 店铺编号 等写法），每行按自己的店铺ID查询，可一次混排多个店铺，无需再选店铺。表格中有未授权或已失效的店铺ID 时会直接提示并阻止执行。日志、预览与导出结果均带店铺信息，导出逻辑不变（新列「退单仓库ID」插在 Order ID 列后）。其余功能不变。"
+  "version": "1.5.1",
+  "builtAt": "2026-10-27T03:55:47.454Z",
+  "commit": "9ce7ff2",
+  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.5.1/kp_tools-v1.5.1.zip",
+  "sha256": "4b14edfae369e772f4f30b37cb2441f1d30a5e62bd7849a60063dbaa779ee52c",
+  "notes": "更新后自动重启：网页左下角「一键更新」完成后会自动结束旧实例并启动新版本，页面几秒后自动刷新，不用再手动关黑窗口。即使忘了关，双击 启动.bat 也会自动结束旧的工具进程并启动当前版本（端口被其它软件占用时不会误杀，只提示）。注意：从 1.5.0 升到本版本时，旧版本还不支持自动重启，本次更新后请双击一次 启动.bat，之后版本即无需任何手动操作。其余功能不变。"
 }

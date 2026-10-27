@@ -7,7 +7,7 @@ import UpdateDrawer from './UpdateDrawer.vue';
 // 各工具各用一个 iframe，首次访问时加载并常驻 DOM。
 // 切换 Tab 只改变 display，不重新加载页面，从而保留各 Tab 状态。
 const { tabs, active, show, isActive, iframeSrc } = usePortalTabs();
-const { ver, upd, updateDrawer, checking, applying, steps, doneInfo, checkUpdate, applyUpdate, openUpdate, downloadPackage } = useAppUpdate();
+const { ver, upd, updateDrawer, checking, applying, steps, doneInfo, restarting, checkUpdate, applyUpdate, openUpdate, downloadPackage } = useAppUpdate();
 </script>
 
 <template>
@@ -57,6 +57,7 @@ const { ver, upd, updateDrawer, checking, applying, steps, doneInfo, checkUpdate
       :applying="applying"
       :steps="steps"
       :done-info="doneInfo"
+      :restarting="restarting"
       @check="checkUpdate(true)"
       @apply="applyUpdate"
       @download="downloadPackage"

@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { runSSE } from '../composables/useSSE.js';
-import { getJsonResult } from '../composables/api.js';
+import { getJsonResult, postJsonResult } from '../composables/api.js';
 
 export function useAppUpdate() {
   const ver = ref({ version: '', commit: null, builtAt: null });
@@ -12,6 +12,7 @@ export function useAppUpdate() {
   const applying = ref(false);
   const steps = ref([]);
   const doneInfo = ref(null);
+  const restarting = ref(false);
 
   async function loadVersion() {
     try {
@@ -47,6 +48,7 @@ export function useAppUpdate() {
       await runSSE('/api/update/apply', { method: 'POST' }, (ev) => {
         if (ev.phase === 'done') {
           doneInfo.value = ev;
+          autoRestart();
         } else if (ev.phase === 'error') {
           steps.value.push({ phase: 'error', message: ev.message });
         } else if (ev.phase === 'download' && typeof ev.percent === 'number') {
@@ -69,6 +71,35 @@ export function useAppUpdate() {
     if (!upd.value.checkedAt) checkUpdate();
   }
 
+  /**
+   * 更新成功后自动重启：后端拉起 启动.bat（新版 bat 会结束旧实例与旧黑窗口），
+   * 这里轮询 /api/version 直到新版本就绪再刷新页面；失败回落到「双击 启动.bat」的手动提示。
+   */
+  async function autoRestart() {
+    restarting.value = true;
+    let accepted = false;
+    try {
+      // 旧版本后端没有该接口（404）或响应途中服务被结束，都视为未接管重启
+      accepted = (await postJsonResult('/api/update/restart', {})).ok;
+    } catch { /* 连接被切断属正常 */ }
+    if (!accepted) {
+      restarting.value = false;
+      return;
+    }
+    const target = doneInfo.value && doneInfo.value.version;
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        const s = await getJsonResult('/api/version');
+        if (s && s.version && (!target || s.version === target)) {
+          location.reload();
+          return;
+        }
+      } catch { /* 新进程还没开始监听，拒连是正常的 */ }
+    }
+    restarting.value = false;
+  }
+
   function downloadPackage() {
     if (upd.value.url) window.open(upd.value.url, '_blank');
   }
@@ -79,5 +110,5 @@ export function useAppUpdate() {
     checkUpdate();
   });
 
-  return { ver, upd, updateDrawer, checking, applying, steps, doneInfo, checkUpdate, applyUpdate, openUpdate, downloadPackage };
+  return { ver, upd, updateDrawer, checking, applying, steps, doneInfo, restarting, checkUpdate, applyUpdate, openUpdate, downloadPackage };
 }

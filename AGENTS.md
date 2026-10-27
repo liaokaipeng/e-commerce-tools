@@ -43,7 +43,7 @@
 - **样式一律取设计令牌，不写死颜色与尺寸**：浅色取 `styles/base.css` 的 `:root`，深色取 `monitor/monitor.css` 的 `--d-*`；两个硬约束（深色令牌必须挂 `html`、ECharts 文字色在 `monitor/trend-chart.js`）见 [docs/架构.md](docs/架构.md) §4。
 - **CORS 是本机白名单**（`main.js` 的 `isAllowedOrigin`），**不要退回 `Access-Control-Allow-Origin: *`**。
 - 改前端 `src` 后必须 `vite build` 重建 `frontend/dist`（gitignored 产物）；新增共享模块后逐个确认调用方已 `require`（`grep -n "require('./lib/xxx')" server/*.js`），遗忘表现为路由 500。
-- **改后端 `server/` 后必须重启服务才生效**：先关掉旧的黑窗口再双击 `启动.bat`（端口被占用时双击只会开浏览器、不会重启，见「本机环境坑」）。**前端 `dist` 是每次请求从磁盘读的、后端模块只在进程启动时加载一次**，所以「改了没生效」往往是新前端配旧后端，别去怀疑代码。
+- **改后端 `server/` 后必须重启服务才生效**：直接双击 `启动.bat` 即可——它会自动结束 8765 上的旧实例（只认本项目的 `node server/main.js`）并启动当前版本，**不用先手动关旧黑窗口**；网页「一键更新」成功后也会自动重启（见 [docs/架构.md](docs/架构.md) §1.3）。**前端 `dist` 是每次请求从磁盘读的、后端模块只在进程启动时加载一次**，所以「改了没生效」往往是新前端配旧后端，别去怀疑代码。
 
 ## 关键注意点（红线一句话，细节见各自链路文档）
 
@@ -53,7 +53,7 @@
 - **重点店铺筛选**：开放平台页勾选「重点店铺」后，**监控大屏采集与 shopee_skill 只作用于重点店铺**（一个都没勾选时回落为全部已授权店铺，不是硬性开关）；判定源唯一在 `server/openapi/store` 的 `getImportantIds`，改大屏注册表或 CLI 取店范围必须复用它，否则两边范围会漂移。各工具页「选择店铺」下拉不受该筛选影响。详见 [docs/开放平台链路.md](docs/开放平台链路.md) §4。
 - **监控大屏**：金额阈值一律按人民币配置与比较；规则阈值「留空 = 该级别不触发」必须用 `null` 传递（前端空值转 `null`，否则默认阈值会「复活」）；系统自检告警同样受规则 `enabled` 约束。详见 [docs/监控大屏实现.md](docs/监控大屏实现.md) §4。
 - **开放平台接口报参数错误时**（error_param / 格式错 / Wrong sign / error_unknown）：网关报错文案经常是误导性的，**先查 `docs/shopee_api_doc/` 核对参数名与必填项，再用最小参数组合逐变体验证**，不要按字面改——完整排查顺序见 [docs/开发指南.md](docs/开发指南.md) §5.1。
-- **版本与自更新**：`server/data/`（真实店铺授权）**绝不能进发布包，也绝不能被一键更新覆盖**；更新只按 `server/update.js` 的 `COPY_ITEMS` 白名单覆盖，落盘后必须重启才生效。流程与约束见 [docs/架构.md](docs/架构.md) §1.3。
+- **版本与自更新**：`server/data/`（真实店铺授权）**绝不能进发布包，也绝不能被一键更新覆盖**；更新只按 `server/update.js` 的 `COPY_ITEMS` 白名单覆盖，落盘后需重启才生效——网页一键更新会自动调 `POST /api/update/restart` 拉起重启（结束旧实例的逻辑只在 `启动.bat`，`restart.js` 不重复实现）。流程与约束见 [docs/架构.md](docs/架构.md) §1.3。
 - **发布打包（`npm run pack`）**：zip 必须**显式列出顶层条目**（传 `.` 会让资源管理器显示为空包）并带 **`--options hdrcharset=UTF-8`**（否则中文文件名按本机代码页 GBK 写入且不置标志位，在 Linux / macOS / 英文 Windows 解压全是乱码）。`pack.js` 已内置这两点并在打包后自检编码，**看到「⚠ 编码」警告不要发布**。详见 [docs/GitHub提交与发布指南.md](docs/GitHub提交与发布指南.md) §3.2、§3.6。
 - **提交 / 推送前必须做敏感信息与安全自检（红线）**：`git status` 逐条过目，确认没有把真实凭证（Cookie / token / AK-SK / 密码 / 代理账密）、`server/data/`、`*-session.json`、`settings.json`、`*.har`、`research/` 抓包脚本、真实店铺授权与个人信息带进仓库。三条硬要求：①**文件名干净不等于内容干净**——必须看 diff 内容（代码、示例、文档、测试 fixture、提交信息、Release 正文与附件里同样不得出现真实凭证，一律脱敏成占位符）；②规则缺失先补 `.gitignore` 再提交，不要靠「这次小心一点」；③**已推送的凭证视为已泄露**，必须立刻作废重签，只删文件、只改工作树都不解决问题。完整检查清单与关键词扫描命令见 [docs/GitHub提交与发布指南.md](docs/GitHub提交与发布指南.md) §2.4。
 
@@ -75,7 +75,9 @@
 - **同一文件的多处修改必须串行**：在同一条消息里对**同一个文件**发多个编辑请求会互相覆盖（读-改-写竞态），最终只有最后一个落盘，而每次都返回成功——曾因此静默丢掉 `pack.js` 顶部注释与 `docs/架构.md` 的一处改动。改完**回读确认**，同一文件分多次调用，只有跨文件的编辑才可并行。
 - **前端没有自动化测试**：`vite build` 只保证编译期正确，拦不住 prop 名写错 / 模板变量未定义这类运行时错误，改完前端要跑页面级验证（cdp-page-verify 技能）；本机 8765 常被用户已启动的服务占用，先探端口，别杀用户的服务。
 - **冒烟 `/monitor/` 前必须屏蔽 `POST /api/monitor/presence`**（CDP `Network.setBlockedURLs`）：该接口触发按需巡检，不屏蔽等于替用户对全部已授权店铺发起一轮真实采集；其余监控接口是只读的，照常请求即可。
-- **改后端后必须重启服务，否则「改了没生效」（踩过最大的一次坑）**：`启动.bat` 先 `netstat` 探 8765，占用则只开浏览器然后退出（设计使然，方便二次双击），所以**双击不会重启已在跑的服务**——必须先关掉旧的黑窗口再双击，否则会误判「改了没生效」。**「新前端 + 旧后端」的典型症状**：页面 UI 是新的（`dist` 每次请求从磁盘读），行为却是旧的（后端模块只在进程启动时加载一次）——曾出现「页面明明有新选项，点了没用、行为还是旧的」，排查半天才发现 8765 上跑的还是几小时前启动的旧进程。**怀疑没生效时先对版本**：`GET /api/<模块>/status` 看响应里有没有已被删掉的旧字段，再用 `Get-Process -Id <pid> | Select StartTime` 看进程启动时间是否早于本次改动。想验证新代码而不动用户服务：`PORT=8899 node server/main.js` 另起一个实例，别去杀用户的进程。
+- **改后端后必须重启服务，否则「改了没生效」（踩过最大的一次坑）**：`启动.bat` 会先 `netstat` 探 8765，占用时**自动结束本项目旧实例并重启**（端口被其它程序占用则只开浏览器、不误杀），所以双击即等于重启。**「新前端 + 旧后端」的典型症状**：页面 UI 是新的（`dist` 每次请求从磁盘读），行为却是旧的（后端模块只在进程启动时加载一次）——曾出现「页面明明有新选项，点了没用、行为还是旧的」，排查半天才发现 8765 上跑的还是几小时前启动的旧进程。**怀疑没生效时先对版本**：`GET /api/<模块>/status` 看响应里有没有已被删掉的旧字段，再用 `Get-Process -Id <pid> | Select StartTime` 看进程启动时间是否早于本次改动。想验证新代码而不动用户服务：`PORT=8899 node server/main.js` 另起一个实例，别去杀用户的进程。
+- **验证「网页一键更新后自动重启」必须在一条命令内闭环**：启动旧实例 → `POST /api/update/restart` → 等十几秒 → 比对 8765 的新 PID 与 `/api/version`。RunCommand 结束后会连带杀掉该命令的所有后代进程（含 `detached` + `unref` 的），跨命令观察后台服务必然「假失败」。
+- **bat 里 `start "" /b powershell …` 在「由本项目 node 经 `cmd /c start` 拉起」的上下文会阻塞**：表现为日志停在它前一行、新实例起不来。延时开浏览器那一行只在正常启动时执行，重启分支必须跳过（`启动.bat` 的 `SKIP_BROWSER`），否则自动重启永远起不来。
 - **新增工具页后不重启的典型症状 = 该页 404、其它工具全正常**：`/xxx/` → `/xxx/index.html` 的映射表在 `lib/http-utils.js` 的 `DIR_INDEX`，旧进程内存里没有新条目，而静态文件本身已能从磁盘读到（所以直接访问 `/xxx/index.html` 反而 200，很容易误判成「文件没构建」）。看到这个组合先怀疑后端没重启，不要去查 dist。顺带：`/xxx`（无尾斜杠）对所有工具页一律 404，这是既有行为，不是 bug。
 - **终端工具（RunCommand）可能整体不可用**：曾出现每次调用都报 `Toolhost terminal commands must be routed through the agent runtime`（连 `node --version` 都跑不了）。此时改用 `integrated_code_mode` MCP 的 `Exec` 工具，在其沙箱里用 `await tools.Shell({ command, cwd, description })` 执行命令（`ALL_TOOLS` 可查看可用工具；沙箱本身没有 `require`/`fs`，别在 Exec 里直接写 node 脚本）。
 - **Exec 的 Shell 跑长命令会被审批卡死**：超过约 15 秒的命令（如 `node test/test.js`）会走人工审批，而自动审批曾持续报 `auto review source state is not ready, reason=target_not_pending`，命令直接失败。解法：`run_in_background: true` 后台跑，并让命令自己写日志（`node test/test.js *>&1 | Out-File -FilePath .tmp_xxx.log -Encoding utf8`），完成后用 Read 工具读日志；短命令（`node --check`、`Start-Sleep`）不受影响。注意 `cmd /c` 被 Shell 工具禁用，PowerShell 5 也不支持 `&&`，串行用 `;`。

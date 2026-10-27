@@ -9,6 +9,7 @@ defineProps({
   applying: { type: Boolean, default: false },
   steps: { type: Array, default: () => [] },
   doneInfo: { type: Object, default: null },
+  restarting: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['check', 'apply', 'download']);
@@ -84,8 +85,12 @@ function fmtTime(iso) {
         v-if="doneInfo"
         type="success"
         :closable="false"
-        :title="`已更新到 v${doneInfo.version}，重启后生效`"
-        :description="'关闭本窗口后重新双击 启动.bat 即可。'
+        :title="restarting
+          ? `已更新到 v${doneInfo.version}，正在自动重启…`
+          : `已更新到 v${doneInfo.version}，重启后生效`"
+        :description="(restarting
+          ? '服务正在自动重启，页面会在几秒后自动刷新，请稍候。'
+          : '请直接双击 启动.bat：会自动结束旧的黑色窗口并启动新版本，无需手动关闭。')
           + (doneInfo.backup ? `更新前的数据已备份到 ${doneInfo.backup}。` : '')
           + '浏览器扩展若是新版本，需在 edge://extensions 点「重新加载」。'"
       />
