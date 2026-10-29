@@ -139,7 +139,7 @@ function jsonAction(label, handler) {
   return async (req, res, url) => {
     let body;
     try {
-      body = JSON.parse(String(await readBody(req)).replace(/^\uFEFF/, ''));
+      body = parseJsonText(await readBody(req));
     } catch {
       sendJson(res, 400, { ok: false, message: '请求体不是合法 JSON' });
       return;

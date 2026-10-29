@@ -423,21 +423,26 @@ async function cmdCall(positional, flags) {
     return;
   }
 
-  // 多店：逐店结果 + 失败清单
+  // 多店：逐店结果 + 失败清单（pick 只算一次，wrap / 非 wrap 两种视图共用同一份结果）
   const failed = [];
-  const results = {};
+  const results = {}; // wrap 视图：失败为 { error }
+  const plain = {};   // 非 wrap 视图：失败为 { __error }
   for (const it of settled) {
-    if (it.error) {
+    const mark = (msg) => {
       failed.push(it.shopId);
-      results[it.shopId] = { error: it.error.message };
+      results[it.shopId] = { error: msg };
+      plain[it.shopId] = { __error: msg };
+    };
+    if (it.error) {
+      mark(it.error.message);
       continue;
     }
     const picked = pick(it.value);
     if (select && picked === undefined) {
-      failed.push(it.shopId);
-      results[it.shopId] = { error: `--select 路径不存在：${select}` };
+      mark(`--select 路径不存在：${select}`);
     } else {
       results[it.shopId] = picked;
+      plain[it.shopId] = picked;
     }
   }
   if (wrap) {
@@ -450,10 +455,8 @@ async function cmdCall(positional, flags) {
       shops: results,
     }, failed.length ? { failed } : {}, notes.length ? { notes } : {}), flags);
   } else {
-    const out = {};
-    for (const it of settled) out[it.shopId] = it.error ? { __error: it.error.message } : pick(it.value);
     for (const n of notes) warn(n);
-    emit(out, flags);
+    emit(plain, flags);
   }
   if (failOnError && failed.length) process.exitCode = 1;
 }

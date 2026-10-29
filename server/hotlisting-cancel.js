@@ -28,9 +28,7 @@ const { sendJson, readJsonBodySoft } = require('./lib/http-utils');
 // 长任务注册中心（暂停 / 继续 / 取消 / SSE 断开即取消 / TTL 清理）：与取消竞价共用
 const jobs = require('./lib/jobs');
 const { loadSpuConfig, saveSpuConfig } = require('./hotlisting-cancel/config');
-const {
-  parseSpuList, extractEnrolledSkus, normalizeSpuMap, resolvePerShopSpus,
-} = require('./hotlisting-cancel/parse');
+const { normalizeSpuMap } = require('./hotlisting-cancel/parse');
 const { handlePreview } = require('./hotlisting-cancel/preview');
 const { handleRun } = require('./hotlisting-cancel/job');
 
@@ -67,4 +65,4 @@ function register({ get, post }) {
   jobs.registerControlRoutes(post, '/api/hotlisting-cancel');
 }
 
-module.exports = { register, parseSpuList, extractEnrolledSkus, normalizeSpuMap, resolvePerShopSpus };
+module.exports = { register };

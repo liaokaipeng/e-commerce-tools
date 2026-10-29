@@ -11,7 +11,6 @@
  *   cookie.js     扩展 Cookie 接收与登录状态
  */
 const { sendJson, readJsonBodySoft } = require('./lib/http-utils');
-const { toAmount } = require('./lib/shopee-session');
 const { sessionStatus, handleCookie } = require('./bidding/cookie');
 const { handleExport } = require('./bidding/export');
 
@@ -31,4 +30,4 @@ function register({ get, post }) {
   });
 }
 
-module.exports = { register, toAmount };
+module.exports = { register };

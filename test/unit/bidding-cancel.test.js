@@ -1,9 +1,9 @@
 'use strict';
 // 单元测试：竞价金额换算、取消竞价的待改进列表解析、取消注册 Hot Listing 的 SPU 解析与已注册列表提取。
 const { t } = require('../helpers');
-const { toAmount } = require('../../server/bidding');
-const biddingCancel = require('../../server/bidding-cancel');
-const hotlistingCancel = require('../../server/hotlisting-cancel');
+const { toAmount } = require('../../server/lib/shopee-session');
+const biddingCancelParse = require('../../server/bidding-cancel/parse');
+const hotlistingCancelParse = require('../../server/hotlisting-cancel/parse');
 
 async function run() {
   // ===== 竞价金额换算 =====
@@ -12,7 +12,6 @@ async function run() {
   t('toAmount 四舍五入到分', toAmount(12345678) === 123.46);
 
   // ===== 取消竞价：待改进列表解析 =====
-  t('bidding-cancel toAmount 与 bidding 一致', biddingCancel.toAmount(12345678) === 123.46 && biddingCancel.toAmount(null) === '');
   {
     const data = {
       list: [
@@ -30,25 +29,25 @@ async function run() {
         { item_id: '222', item_name: '商品B', model_list: [] },
       ],
     };
-    const rows = biddingCancel.extractImprovementItems(data);
+    const rows = biddingCancelParse.extractImprovementItems(data);
     t('extractImprovementItems 提取待改进竞价行', rows.length === 1 && rows[0].bidId === 'b1' && rows[0].itemId === '111' && rows[0].modelName === '型号1', JSON.stringify(rows));
     t('extractImprovementItems 金额换算正确', rows.length === 1 && rows[0].price === 179 && rows[0].suggestedPrice === 207, JSON.stringify(rows));
-    t('extractImprovementItems 空数据返回空数组', biddingCancel.extractImprovementItems({ list: [] }).length === 0 && biddingCancel.extractImprovementItems(null).length === 0);
+    t('extractImprovementItems 空数据返回空数组', biddingCancelParse.extractImprovementItems({ list: [] }).length === 0 && biddingCancelParse.extractImprovementItems(null).length === 0);
   }
 
   // ===== 取消注册 Hot Listing：SPU 解析与已注册列表提取 =====
   {
     t('parseSpuList 多行/逗号/空格混合解析并去重', (() => {
-      const r = hotlistingCancel.parseSpuList('42555837160, 42555837161\n42555837160 123456789');
+      const r = hotlistingCancelParse.parseSpuList('42555837160, 42555837161\n42555837160 123456789');
       return !r.error && r.spus.length === 3 && r.spus[0] === '42555837160' && r.spus[2] === '123456789';
     })());
     t('parseSpuList 数组输入', (() => {
-      const r = hotlistingCancel.parseSpuList(['42555837160', '42555837161']);
+      const r = hotlistingCancelParse.parseSpuList(['42555837160', '42555837161']);
       return !r.error && r.spus.length === 2;
     })());
-    t('parseSpuList 空输入报错', !!hotlistingCancel.parseSpuList('').error && !!hotlistingCancel.parseSpuList('   ').error);
+    t('parseSpuList 空输入报错', !!hotlistingCancelParse.parseSpuList('').error && !!hotlistingCancelParse.parseSpuList('   ').error);
     t('parseSpuList 非法内容报错', (() => {
-      const r = hotlistingCancel.parseSpuList('abc\n42555837160');
+      const r = hotlistingCancelParse.parseSpuList('abc\n42555837160');
       return !!r.error && r.error.includes('abc');
     })());
 
@@ -73,33 +72,33 @@ async function run() {
         },
       ],
     };
-    const rows = hotlistingCancel.extractEnrolledSkus(data);
+    const rows = hotlistingCancelParse.extractEnrolledSkus(data);
     t('extractEnrolledSkus 只提取已注册且资格正常(seller_decision=1 & qualification_flags=1)行',
       rows.length === 2 && rows[0].rskuId === '146728386921' && rows[0].vskuId === '325204957142' && rows[1].rskuId === '3',
       JSON.stringify(rows));
     t('extractEnrolledSkus 提取标题/规格/预览链接', rows[0].itemName === '商品A' && rows[0].modelName === 'White, 5m 50LED' && rows[0].previewLink === 'https://shopee.ph/product/1/2');
-    t('extractEnrolledSkus 空数据返回空数组', hotlistingCancel.extractEnrolledSkus({ vrsku_info_list: [] }).length === 0 && hotlistingCancel.extractEnrolledSkus(null).length === 0);
+    t('extractEnrolledSkus 空数据返回空数组', hotlistingCancelParse.extractEnrolledSkus({ vrsku_info_list: [] }).length === 0 && hotlistingCancelParse.extractEnrolledSkus(null).length === 0);
 
     // 按店铺 SPU 配置：归一化 + 汇总
     t('normalizeSpuMap 归一化并丢弃非法项', (() => {
-      const m = hotlistingCancel.normalizeSpuMap({ 100000001: '  42555837160\n123 ', abc: '1', '100000002': '   ', '100000003': 12345 });
+      const m = hotlistingCancelParse.normalizeSpuMap({ 100000001: '  42555837160\n123 ', abc: '1', '100000002': '   ', '100000003': 12345 });
       return Object.keys(m).length === 2 && m['100000001'] === '42555837160\n123' && m['100000003'] === '12345';
     })());
-    t('normalizeSpuMap 非对象输入返回空对象', Object.keys(hotlistingCancel.normalizeSpuMap(null)).length === 0 && Object.keys(hotlistingCancel.normalizeSpuMap('x')).length === 0);
+    t('normalizeSpuMap 非对象输入返回空对象', Object.keys(hotlistingCancelParse.normalizeSpuMap(null)).length === 0 && Object.keys(hotlistingCancelParse.normalizeSpuMap('x')).length === 0);
     t('resolvePerShopSpus 请求体为完整状态（清空也生效）', (() => {
-      const r = hotlistingCancel.resolvePerShopSpus(['1', '2'], { 1: '11111\n22222', 2: '' }, { 1: '99999', 2: '33333' });
+      const r = hotlistingCancelParse.resolvePerShopSpus(['1', '2'], { 1: '11111\n22222', 2: '' }, { 1: '99999', 2: '33333' });
       return r.perShop['1'].spus.join(',') === '11111,22222' && !!r.perShop['2'].error && r.validCount === 2;
     })());
     t('resolvePerShopSpus 无请求体时回落已保存配置', (() => {
-      const r = hotlistingCancel.resolvePerShopSpus(['1', '2'], null, { 1: '99999', 2: '33333' });
+      const r = hotlistingCancelParse.resolvePerShopSpus(['1', '2'], null, { 1: '99999', 2: '33333' });
       return r.perShop['1'].spus[0] === '99999' && r.perShop['2'].spus[0] === '33333' && r.validCount === 2;
     })());
     t('resolvePerShopSpus 未配置店铺返回 error', (() => {
-      const r = hotlistingCancel.resolvePerShopSpus(['1', '2'], null, { 1: '11111' });
+      const r = hotlistingCancelParse.resolvePerShopSpus(['1', '2'], null, { 1: '11111' });
       return !r.perShop['1'].error && !!r.perShop['2'].error && r.validCount === 1;
     })());
     t('resolvePerShopSpus 非法 SPU 内容返回 parseSpuList 错误', (() => {
-      const r = hotlistingCancel.resolvePerShopSpus(['1'], { 1: 'abc' }, {});
+      const r = hotlistingCancelParse.resolvePerShopSpus(['1'], { 1: 'abc' }, {});
       return !!r.perShop['1'].error && r.perShop['1'].error.includes('abc');
     })());
   }

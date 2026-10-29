@@ -18,8 +18,6 @@
 const { readJsonBodySoft } = require('./lib/http-utils');
 // 长任务注册中心：暂停 / 继续 / 取消 / SSE 断开即取消 / 僵尸清理
 const jobs = require('./lib/jobs');
-const { toAmount } = require('./lib/shopee-session');
-const { extractImprovementItems } = require('./bidding-cancel/parse');
 const { handlePreview } = require('./bidding-cancel/preview');
 const { handleRun } = require('./bidding-cancel/job');
 
@@ -40,4 +38,4 @@ function register({ post }) {
   jobs.registerControlRoutes(post, '/api/bidding-cancel');
 }
 
-module.exports = { register, extractImprovementItems, toAmount };
+module.exports = { register };

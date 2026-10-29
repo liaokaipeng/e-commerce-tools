@@ -77,6 +77,12 @@ function handleRun(body, res) {
     units: splitChunks(rows, CHUNK_SIZE),
     startPayload: { total: rows.length, shopCount: shopIds.length },
     onUnit: async (chunk, ctx) => {
+      // 单行结果：内存归并与 SSE 事件共用同一份 row-done 载荷，字段不会两处漂移
+      const recordRow = (row, ok, extra) => {
+        const payload = Object.assign({ rowIndex: row.rowIndex, returnId: row.returnId, shopId: row.shopId, ok }, extra);
+        results.push(payload);
+        ctx.emit(Object.assign({ type: 'row-done' }, payload));
+      };
       for (const row of chunk) {
         await ctx.checkpoint();
         ctx.emit({ type: 'row-start', rowIndex: row.rowIndex, returnId: row.returnId, shopId: row.shopId });
@@ -88,17 +94,13 @@ function handleRun(body, res) {
           );
           const whsId = extractWhsId(j);
           if (whsId) {
-            results.push({ rowIndex: row.rowIndex, returnId: row.returnId, shopId: row.shopId, ok: true, whsId });
-            ctx.emit({ type: 'row-done', rowIndex: row.rowIndex, returnId: row.returnId, shopId: row.shopId, ok: true, whsId });
+            recordRow(row, true, { whsId });
           } else {
             // 凭证正常但响应无 return_address：多为该退单不需要退货物流（仅退款），属正常业务态
-            const msg = '接口未返回退货仓库（该退单可能无需退货物流）';
-            results.push({ rowIndex: row.rowIndex, returnId: row.returnId, shopId: row.shopId, ok: false, msg });
-            ctx.emit({ type: 'row-done', rowIndex: row.rowIndex, returnId: row.returnId, shopId: row.shopId, ok: false, msg });
+            recordRow(row, false, { msg: '接口未返回退货仓库（该退单可能无需退货物流）' });
           }
         } catch (e) {
-          results.push({ rowIndex: row.rowIndex, returnId: row.returnId, shopId: row.shopId, ok: false, msg: e.message });
-          ctx.emit({ type: 'row-done', rowIndex: row.rowIndex, returnId: row.returnId, shopId: row.shopId, ok: false, msg: e.message });
+          recordRow(row, false, { msg: e.message });
         }
       }
     },
