@@ -24,10 +24,10 @@ const manualUrl = defineModel('manualUrl', { type: String, default: '' });
     <template #header>② 店铺授权</template>
     <el-form label-width="130px" @submit.prevent>
       <el-form-item label="回调地址 redirect">
-        <el-input v-model="form.redirect" placeholder="https://example.com/" style="max-width: 480px" />
+        <el-input v-model="form.redirect" placeholder="https://example.com/" class="redirect-input" />
       </el-form-item>
     </el-form>
-    <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 12px"
+    <el-alert type="warning" :closable="false" show-icon class="auth-warn"
       title="回调地址需为合法域名（不接受 127.0.0.1 / localhost 等本机地址，不能带 ?），后台与上面输入框填成一致；没有域名时两边都用 https://example.com/。" />
     <div class="row">
       <el-button type="primary" :loading="generating" :disabled="!status.configured" @click="emit('generate')">
@@ -35,12 +35,12 @@ const manualUrl = defineModel('manualUrl', { type: String, default: '' });
       </el-button>
       <span v-if="!status.configured" class="hint">请先完成 ① 保存 App 配置</span>
     </div>
-    <div v-if="authUrl" class="row" style="margin-top: 12px">
+    <div v-if="authUrl" class="row auth-url-row">
       <el-input v-model="authUrl" readonly class="auth-url" />
       <el-button @click="emit('copy-auth-url')">复制链接</el-button>
       <el-button type="success" @click="emit('open-auth-page')">打开授权页</el-button>
     </div>
-    <div class="hint" style="margin-top: 8px">
+    <div class="hint auth-tip">
       打开授权页，用<b>主账号</b>登录授权（一次授权名下全部店铺）。授权后把浏览器地址栏完整链接粘贴到下方「手动完成授权」；链接约 30 分钟过期、授权码一次性（只有 code 与 main_account_id 是正常的）。
     </div>
     <el-divider />
@@ -55,7 +55,7 @@ const manualUrl = defineModel('manualUrl', { type: String, default: '' });
           也可给域名加 A 记录 <b>local.你的域名 → 127.0.0.1</b>，回调地址填 <b>http://local.你的域名:8765/openapi/callback</b>。
         </div>
         <el-input :model-value="forwardSnippet" type="textarea" :rows="6" readonly class="snippet" />
-        <el-button size="small" style="margin-top: 6px" @click="emit('copy-snippet')">复制代码</el-button>
+        <el-button size="small" class="copy-snippet" @click="emit('copy-snippet')">复制代码</el-button>
       </el-collapse-item>
     </el-collapse>
   </el-card>
@@ -63,6 +63,11 @@ const manualUrl = defineModel('manualUrl', { type: String, default: '' });
 
 <style scoped>
 .auth-url { flex: 1; min-width: 320px; }
+.redirect-input { max-width: 480px; }
+.auth-warn { margin-bottom: var(--sp-3); }
+.auth-url-row { margin-top: var(--sp-3); }
+.auth-tip { margin-top: var(--sp-2); }
+.copy-snippet { margin-top: var(--sp-2); }
 .domain-help {
   margin-top: var(--sp-3);
   border: 1px dashed var(--border-strong);

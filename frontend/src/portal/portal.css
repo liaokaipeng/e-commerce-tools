@@ -31,6 +31,14 @@
   --text-2: #4b5266;
   --danger: #c62828;
   --success: #2e7d32;
+  /* UpdateDrawer 的 EP 主按钮品牌色：与 base.css 的 --el-color-primary 系同值，两处需同步 */
+  --el-color-primary: #ee4d2d;
+  --el-color-primary-light-3: #f3826c;
+  --el-color-primary-light-5: #f7a696;
+  --el-color-primary-light-7: #facac0;
+  --el-color-primary-light-8: #fcdbd5;
+  --el-color-primary-light-9: #fdedea;
+  --el-color-primary-dark-2: #be3e24;
 
   font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   font-size: 14px;

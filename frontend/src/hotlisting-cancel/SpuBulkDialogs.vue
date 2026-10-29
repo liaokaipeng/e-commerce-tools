@@ -50,7 +50,7 @@ defineExpose({ openImport, openExport });
 
 <template>
   <!-- 批量导入：直接从 Excel 粘两列（店铺ID 或 店铺名 + SPU） -->
-  <el-dialog v-model="importVisible" title="批量导入 SPU 配置" width="620px">
+  <el-dialog v-model="importVisible" title="批量导入 SPU 配置" width="620px" :close-on-click-modal="false">
     <div class="dlg-tip">
       从 Excel 直接粘贴两列：<b>店铺ID（或店铺名）</b> + <b>SPU ID</b>，每行一条，用 Tab / 逗号分隔。例如
       <code>123456789&nbsp;&nbsp;42555837160</code> 或 <code>深圳3C数码旗舰店,42555837160</code>。
@@ -73,7 +73,7 @@ defineExpose({ openImport, openExport });
   </el-dialog>
 
   <!-- 导出：把当前全量配置输出成「店铺ID / SPU / 店铺名」，可粘回 Excel 或修改后再导入 -->
-  <el-dialog v-model="exportVisible" title="导出当前 SPU 配置" width="620px">
+  <el-dialog v-model="exportVisible" title="导出当前 SPU 配置" width="620px" :close-on-click-modal="false">
     <div class="dlg-tip">共 {{ exportCount }} 个店铺有配置，可直接复制到 Excel 存档；改完再用「批量导入」贴回来。</div>
     <el-input v-model="exportText" type="textarea" :rows="10" readonly />
     <template #footer>
@@ -86,7 +86,7 @@ defineExpose({ openImport, openExport });
 <style scoped>
 /* 批量导入 / 导出弹窗 */
 .dlg-tip { font-size: var(--fs-sm); color: var(--text-2); line-height: 1.8; margin-bottom: var(--sp-2); }
-.dlg-tip code { font-family: var(--font-mono); background: var(--surface-2); padding: 1px 4px; border-radius: 3px; }
+.dlg-tip code { font-family: var(--font-mono); background: var(--surface-2); padding: 1px 4px; border-radius: var(--radius-sm); }
 .dlg-preview { margin-top: var(--sp-2); min-height: 20px; font-size: var(--fs-xs); color: var(--text-3); line-height: 1.8; }
 .dlg-preview .warn { color: var(--warning); }
 .dlg-item { font-family: var(--font-mono); color: var(--text-2); }

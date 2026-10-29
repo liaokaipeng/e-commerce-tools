@@ -19,7 +19,7 @@ const { ver, upd, updateDrawer, checking, applying, steps, doneInfo, restarting,
         </span>
       </div>
       <nav>
-        <template v-for="g in GROUP_ORDER" :key="g">
+        <template v-for="g in GROUP_ORDER.filter((name) => tabs.some((t) => t.group === name))" :key="g">
           <span class="g-label">{{ g }}</span>
           <a
             v-for="t in tabs.filter((x) => x.group === g)"

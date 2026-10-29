@@ -1,9 +1,10 @@
 // 开放平台页 · 逐店管理：测试 / 刷新 / 删除授权、busy 集合，以及展示格式化（stateMeta/fmtTime/envLabel）。
 // 从 openapi/App.vue 抽出；操作完成后统一 refreshStatus 拉取最新状态。
 import { reactive } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from 'element-plus';
 import { postJsonResult } from '../composables/api.js';
 import { shopStateMeta } from '../composables/shopState.js';
+import { confirmDanger } from '../composables/confirmDanger.js';
 
 export function useOpenapiShops({ refreshStatus }) {
   const busyShop = reactive(new Set()); // 正在操作中的店铺
@@ -45,15 +46,12 @@ export function useOpenapiShops({ refreshStatus }) {
   }
 
   async function removeShop(shopId) {
-    try {
-      await ElMessageBox.confirm(`确定删除店铺 ${shopId} 的授权吗？删除后相关功能将无法调用官方接口。`, '删除授权', {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-      });
-    } catch {
-      return; // 用户取消
-    }
+    const confirmed = await confirmDanger({
+      message: `确定删除店铺 ${shopId} 的授权吗？删除后相关功能将无法调用官方接口。`,
+      title: '删除授权',
+      confirmText: '删除',
+    });
+    if (!confirmed) return; // 用户取消
     await withShop(shopId, async () => {
       const { ok, data: j } = await postJsonResult('/api/openapi/remove-shop', { shopId });
       if (ok) ElMessage.success(j.message || '已删除');

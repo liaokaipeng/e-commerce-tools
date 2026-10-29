@@ -31,6 +31,7 @@ html, body { margin: 0; padding: 0; }
   --success: #2e7d32;
   --success-bright: #25c16d;
   --warning: #b26a00;
+  --warning-bright: #e6a23c; /* 亮警告（实心图形用；与门户 portal.css 的 --p-warn 同值，两处需同步） */
   --warning-strong: #d84315;
   --danger: #c62828;
   --danger-bright: #e5484d;
@@ -155,6 +156,15 @@ html, body { margin: 0; padding: 0; }
   min-height: var(--control-h-lg);
   padding-left: var(--sp-5);
   padding-right: var(--sp-5);
+}
+
+/* .btn-row 操作行的 flex 布局（video 两页使用；此前两页各自 scoped 复制，统一收敛于此） */
+.btn-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
 }
 
 /* ===== 原生滚动条（浅色主题，Firefox / Chromium 双份） ===== */

@@ -82,7 +82,7 @@ const statusText = (t) => STATUS_TEXT[t] || '';
         @update:model-value="(v) => emit('update:userid', v)"
       />
     </div>
-    <div class="btn-row" style="margin-top: 10px">
+    <div class="btn-row">
       <el-button :loading="refreshingCreds" @click="emit('refresh-creds')">从浏览器刷新凭证</el-button>
     </div>
   </el-card>
@@ -138,7 +138,6 @@ const statusText = (t) => STATUS_TEXT[t] || '';
 .pill { margin-left: var(--sp-2); }
 .file-upload { margin-top: var(--sp-1); }
 .field-label { font-size: var(--fs-xs); color: var(--text-3); margin-right: var(--sp-2); }
-.shop-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .shop-region-select { width: 170px; flex: none; }
 .shop-select { flex: 1 1 320px; min-width: 280px; }
 .opt-region {
@@ -151,6 +150,5 @@ const statusText = (t) => STATUS_TEXT[t] || '';
 .opt-label { font-size: var(--fs-sm); }
 /* 被国家/关键词筛掉的选项仍要渲染（保住已选标签的名称），只是在下拉里隐藏 */
 .opt-filtered-out { display: none; }
-.btn-row { display: flex; gap: var(--sp-3); margin-top: 6px; flex-wrap: wrap; align-items: center; }
 .preview { margin-top: var(--sp-3); }
 </style>

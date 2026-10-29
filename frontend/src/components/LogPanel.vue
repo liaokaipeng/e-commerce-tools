@@ -1,4 +1,4 @@
-<!-- 控制台风格日志面板：tiktok / bidding / bidding-cancel / video 四页共用。
+<!-- 控制台风格日志面板：tiktok / bidding / return-whs / video 直接引用，bidding-cancel / hotlisting-cancel 经 PreviewTableCard 内嵌。
      lines: [{ time, cls, msg, title? }]（composables/useLog.js 的 useLog 生成），cls 决定行颜色。 -->
 <script setup>
 import { computed } from 'vue';

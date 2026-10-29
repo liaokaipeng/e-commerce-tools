@@ -145,13 +145,13 @@ const emit = defineEmits(['bulk-import', 'bulk-export']);
 </template>
 
 <style scoped>
-.spu-tip { font-size: var(--fs-sm); color: var(--text-2); margin-bottom: 10px; line-height: 1.7; }
+.spu-tip { font-size: var(--fs-sm); color: var(--text-2); margin-bottom: var(--sp-2); line-height: 1.7; }
 .spu-input { font-family: var(--font-mono); }
 .save-state { font-size: var(--fs-xs); }
 .sv-saving { color: var(--text-3); }
 .sv-ok { color: var(--success); }
 .sv-err { color: var(--danger); }
-.spu-empty { color: var(--text-3); font-size: var(--fs-sm); padding: 6px 0; line-height: 1.7; }
+.spu-empty { color: var(--text-3); font-size: var(--fs-sm); padding: var(--sp-2) 0; line-height: 1.7; }
 /* 店铺表格：与「开放平台」页的店铺表同款呈现（表格 + 状态 tag + 操作列） */
 .spu-table { width: 100%; }
 .spu-name { font-weight: 600; color: var(--text-1); }

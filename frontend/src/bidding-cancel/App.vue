@@ -61,7 +61,7 @@ const job = useBatchJob({
 const { running: cancelling, jobId: curJobId, paused, pausing, start, togglePause, cancel } = job;
 
 const runningTip = computed(() => (cancelling.value
-  ? `进行中：已处理 ${job.progress.value.done} 条（失败 ${job.progress.value.fail}）。`
+  ? `进行中：已处理 ${job.progress.value.done} 项（失败 ${job.progress.value.fail}）。`
   : '撤销后竞价立即失效，不可恢复！建议先执行第 ③ 步扫描确认。'));
 
 async function doCancel() {
@@ -130,7 +130,7 @@ async function doCancel() {
         :row-key-of="(r) => String(r.shopId)"
         count-label="待改进竞价"
         :count-of="(r) => r.bidCount"
-        :badge="cancelling ? `进度：已处理 ${job.progress.value.done}` : ''"
+        :badge="cancelling ? `进度：已处理 ${job.progress.value.done} 项` : ''"
         :running="cancelling"
         :can-run="selCount > 0"
         action-text="撤销全部待改进竞价"

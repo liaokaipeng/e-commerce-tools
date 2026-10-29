@@ -34,11 +34,11 @@ const emit = defineEmits(['start', 'cancel', 'clear-log', 'export-result', 'upda
         @update:model-value="(v) => emit('update:autoScroll', v)"
       />
     </div>
-    <div v-if="summary" class="hint" style="margin-top: 10px">{{ summary }}</div>
+    <div v-if="summary" class="hint summary">{{ summary }}</div>
     <LogPanel class="log-box" :lines="logLines" height="320px" fixed :auto-scroll="autoScroll" />
   </el-card>
 </template>
 
 <style scoped>
-.btn-row { display: flex; gap: var(--sp-3); margin-top: 6px; flex-wrap: wrap; align-items: center; }
+.summary { margin-top: var(--sp-2); }
 </style>

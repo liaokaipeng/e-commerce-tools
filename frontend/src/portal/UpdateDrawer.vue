@@ -107,8 +107,8 @@ function fmtTime(iso) {
 <style scoped>
 .upd { display: flex; flex-direction: column; gap: 14px; font-size: 13px; }
 .upd-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.upd-label { color: var(--el-text-color-secondary); }
-.upd-meta { color: var(--el-text-color-secondary); font-size: 12px; }
+.upd-label { color: var(--text-2); }
+.upd-meta { color: var(--text-2); font-size: 12px; }
 .upd-notes {
   margin: 0;
   padding: 10px 12px;

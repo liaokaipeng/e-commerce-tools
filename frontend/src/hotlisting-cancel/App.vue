@@ -187,6 +187,7 @@ async function doCancel() {
       >
         <template #toolbar>
           <div class="actions">
+            <span class="sel-count">已选 {{ selected.size }} 个店铺</span>
             <el-button @click="clearAll">清空店铺选择</el-button>
           </div>
         </template>

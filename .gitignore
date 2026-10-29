@@ -35,6 +35,9 @@ research/
 # AI 助手本地记忆目录（工作日志 / 会话上下文，不入库）
 .workbuddy/
 
+# ZCode CLI 本地会话目录（会话状态 / 配置缓存，不入库）
+.zcode/
+
 # AI 助手目录：skills/ 下的技能定义入库，其余（documents / local 等本地产物，含 SMTP 凭证）不入库
 .trae/*
 !.trae/skills/

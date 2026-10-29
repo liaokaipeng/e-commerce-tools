@@ -167,7 +167,7 @@ function onExport() {
         <template #header>
           <div class="card-header-row">
             <span>① 授权店铺</span>
-            <el-button link @click="loadShops" :loading="shopsLoading">刷新</el-button>
+            <el-button size="small" @click="loadShops" :loading="shopsLoading">刷新</el-button>
           </div>
         </template>
         <div class="hint">店铺由表格「店铺ID」列逐行决定，这里只需确认这些店铺已授权（失效店铺需先去「开放平台」页重新授权）。</div>
@@ -235,7 +235,7 @@ function onExport() {
             {{ running ? '获取中…' : '开始获取' }}
           </el-button>
           <el-button v-if="running" :loading="pausing" @click="togglePause">{{ paused ? '继续' : '暂停' }}</el-button>
-          <el-button v-if="running" @click="cancel">取消</el-button>
+          <el-button v-if="running" type="danger" plain @click="cancel">取消</el-button>
           <el-button :disabled="!results.length" @click="onExport">导出结果表格</el-button>
         </div>
         <div class="hint exec-tip">{{ runningTip }}</div>

@@ -103,7 +103,7 @@ const emit = defineEmits(['run', 'pause', 'cancel']);
       >
         {{ paused ? '继续' : '暂停' }}
       </el-button>
-      <el-button v-if="running && jobId && cancellable" size="large" plain @click="emit('cancel')">
+      <el-button v-if="running && jobId && cancellable" size="large" type="danger" plain @click="emit('cancel')">
         取消任务
       </el-button>
       <span v-if="running && paused" class="paused-tip">{{ pausedTip }}</span>

@@ -22,7 +22,7 @@ const emit = defineEmits(['save']);
         <el-input v-model="form.partnerId" placeholder="开放平台 App 的 partner_id" />
       </el-form-item>
       <el-form-item label="partner_key">
-        <div style="width: 100%">
+        <div class="key-block">
           <el-input
             v-model="form.partnerKey"
             type="password"
@@ -30,13 +30,13 @@ const emit = defineEmits(['save']);
             :placeholder="status.configured ? '已保存，如需更换请重新输入（留空则保持不变）' : '开放平台 App 的 partner_key'"
           />
           <!-- 完整 key 不回显（安全约束），输入框为空不代表未配置：这里明确给出已保存的打码值 -->
-          <div v-if="status.configured" class="hint" style="margin-top: 4px">
+          <div v-if="status.configured" class="hint key-saved">
             已保存：{{ status.partnerKeyMasked }}（留空保存则保持不变）
           </div>
         </div>
       </el-form-item>
       <el-form-item label="环境">
-        <el-select v-model="form.env" style="width: 220px">
+        <el-select v-model="form.env" class="env-select">
           <el-option label="生产环境（正式接口）" value="prod" />
           <el-option label="沙箱环境（测试接口）" value="sandbox" />
         </el-select>
@@ -50,7 +50,7 @@ const emit = defineEmits(['save']);
         >
           保存配置
         </el-button>
-        <el-tag v-if="status.configured" type="success" effect="light" style="margin-left: 12px">
+        <el-tag v-if="status.configured" type="success" effect="light" class="configured-tag">
           已配置：{{ status.partnerId }}（key {{ status.partnerKeyMasked }}，{{ envLabel(status.env) }}）
         </el-tag>
       </el-form-item>
@@ -59,3 +59,10 @@ const emit = defineEmits(['save']);
       title="凭证只保存在本机，不上传；key 保存后不再完整显示。" />
   </el-card>
 </template>
+
+<style scoped>
+.key-block { width: 100%; }
+.key-saved { margin-top: var(--sp-1); }
+.env-select { width: 220px; }
+.configured-tag { margin-left: var(--sp-3); }
+</style>

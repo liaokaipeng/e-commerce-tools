@@ -31,7 +31,7 @@ onMounted(() => {
 <template>
   <div class="page">
     <div class="container">
-      <el-alert :class="proxyConnected ? 'proxy-on' : 'proxy-off'" :closable="false" type="info" show-icon>
+      <el-alert class="proxy-alert" :closable="false" type="info" show-icon>
         <template #title>
           <span class="dot" :class="proxyConnected ? '' : 'off'"></span>
           {{ proxyText }}
@@ -54,7 +54,7 @@ onMounted(() => {
           :rows="8"
           placeholder="每行粘贴一个 TikTok 视频链接，例如：&#10;https://www.tiktok.com/@username/video/7439702365055290666&#10;&#10;支持 www.tiktok.com / vm.tiktok.com / v.tiktok.com 短链接"
         />
-        <div class="empty-hint">{{ validCount ? `已识别 ${validCount} 个有效链接` : '' }}</div>
+        <div class="hint empty-hint">{{ validCount ? `已识别 ${validCount} 个有效链接` : '' }}</div>
       </el-card>
 
       <el-card shadow="never" class="card">
@@ -67,7 +67,7 @@ onMounted(() => {
         />
         <div class="actions">
           <template v-if="downloading">
-            <el-button type="primary" size="large" :loading="true">下载中...</el-button>
+            <el-button type="primary" size="large" :loading="downloading">下载中...</el-button>
             <el-button type="danger" size="large" @click="stopDownload">停止下载</el-button>
           </template>
           <el-button v-else type="primary" size="large" @click="startDownload">开始下载</el-button>
@@ -93,19 +93,17 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.proxy-on { margin-bottom: var(--sp-5); }
-.proxy-off { margin-bottom: var(--sp-5); }
-.vpn-alert { margin-bottom: var(--sp-5); }
+.proxy-alert { margin-bottom: var(--sp-5); }
 .dot {
   display: inline-block;
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--success-bright);
   margin-right: var(--sp-2);
 }
 .dot.off { background: var(--warning-bright); }
-.empty-hint { color: var(--text-3); font-size: var(--fs-xs); margin-top: var(--sp-2); }
+.empty-hint { margin-top: var(--sp-2); }
 .actions { margin-top: var(--sp-4); }
 .progress-line {
   display: flex;
@@ -119,9 +117,9 @@ onMounted(() => {
   font-weight: 600;
   white-space: nowrap;
 }
-.progress-text .ok { color: var(--success-bright); margin-left: var(--sp-2); }
-.progress-text .err { color: var(--danger-bright); margin-left: var(--sp-2); }
+.progress-text .ok { color: var(--success); margin-left: var(--sp-2); }
+.progress-text .err { color: var(--danger); margin-left: var(--sp-2); }
 .summary-alert { margin-bottom: var(--sp-3); }
-.summary-alert.sum-ok { color: var(--success-bright); }
-.summary-alert.sum-err { color: var(--danger-bright); }
+.summary-alert.sum-ok { color: var(--success); }
+.summary-alert.sum-err { color: var(--danger); }
 </style>
