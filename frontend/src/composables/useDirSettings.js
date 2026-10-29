@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getJsonResult, postJsonResult } from './api.js';
+import { confirmDanger } from './confirmDanger.js';
 
 /**
  * 保存目录相关（读取/设置默认目录、打开目录）
@@ -63,5 +64,19 @@ export function useDirSettings(tool, log = () => {}) {
     return openPath(dir.value, '请先填写保存目录');
   }
 
-  return { dir, hasDefault, loadSettings, setDefaultDir, openDir, openPath };
+  /** 执行导出/下载前询问「是否设为默认目录」：尚未设过时弹确认，用户取消则静默继续 */
+  async function ensureDefaultDir(d) {
+    if (hasDefault.value) return;
+    const ok = await confirmDanger({
+      message: `是否将「${d}」设为默认目录？下次打开会自动使用该目录。`,
+      title: '默认目录',
+      confirmText: '设为默认',
+      cancelText: '暂不',
+      type: 'info',
+      danger: false,
+    });
+    if (ok) await setDefaultDir(d);
+  }
+
+  return { dir, hasDefault, loadSettings, setDefaultDir, ensureDefaultDir, openDir };
 }

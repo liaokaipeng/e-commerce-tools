@@ -36,4 +36,22 @@ function parseTokenResponse(resp) {
   };
 }
 
-module.exports = { pickPayload, parseTokenResponse };
+const SHOP_NAME_KEYS = ['shop_name', 'region', 'country', 'shop_region', 'shop_country'];
+const SHOP_REGION_KEYS = ['region', 'country', 'shop_region', 'shop_country'];
+
+/**
+ * 解析 get_shop_info 响应为 { name, region }：店铺名/地区提取只有这一份口径
+ * （stores-view 取名/取地区与监控币种识别共用）。region 保持接口原样大小写，
+ * 由调用方按用途处理（列表筛选用大写、币种识别用原样）。
+ */
+function parseShopInfoPayload(j) {
+  const p = pickPayload(j, SHOP_NAME_KEYS) || {};
+  const name = p.shop_name ? String(p.shop_name) : '';
+  let region = '';
+  for (const k of SHOP_REGION_KEYS) {
+    if (p[k] !== undefined && p[k] !== null && p[k] !== '') { region = String(p[k]); break; }
+  }
+  return { name: name || null, region };
+}
+
+module.exports = { pickPayload, parseTokenResponse, parseShopInfoPayload };

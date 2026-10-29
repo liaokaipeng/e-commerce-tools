@@ -19,26 +19,14 @@ const {
   pickService,
   preuploadRequest,
   reportuploadRequest,
+  mmsHeaders,
   assertReportUpload,
   probeAndLog,
 } = require('./steps');
 
-// MMS 上传接口（preupload/reportupload）不带 Cookie：带上会返回跨区 uploaddomain 导致 400。
-// 且必须 useJar:false——请求不显式带 Cookie 时，Cookie 罐里该 host 的残留 set-cookie 会被
-// 「jar 补齐」逻辑整条带上，同样触发 400（表现为间歇性，preupload 响应下发过 cookie 即发作）
-function mmsHeaders(S) {
-  return {
-    'content-type': 'application/json',
-    accept: 'application/json, text/plain, */*',
-    origin: S.origin,
-    referer: S.origin + '/',
-    'user-agent': UA,
-  };
-}
-
 // creator.shopee.ph 业务接口（task/create、item/list、task/edit、task/post）带 Cookie
 function jsonHeaders(S, cookie) {
-  return Object.assign({ cookie }, mmsHeaders(S));
+  return Object.assign({ cookie }, mmsHeaders(S.origin));
 }
 
 // 商品前置校验②：配置了商品但查不到 → 跳过上传（原逻辑在上传完成后才查询，现提前到上传前，避免白传大文件）
@@ -259,7 +247,7 @@ async function uploadOnePh(row, creds, site, log, signal) {
   assertRowValid(row);
   const product = resolveProduct(row, log);
 
-  const mmsH = mmsHeaders(S);
+  const mmsH = mmsHeaders(S.origin);
   const jsonH = jsonHeaders(S, cookie);
 
   log('read', `读取文件: ${filePath}`);

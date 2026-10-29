@@ -1,5 +1,5 @@
 // Shopee 卖家中心登录状态：查询 /api/status 并生成提示文案（bidding 系三页共用）。
-import { ref, reactive } from 'vue';
+import { ref, reactive, nextTick } from 'vue';
 import { getJsonResult } from './api.js';
 
 export function useSessionStatus(readyTip = 'Cookie 已就绪，可直接选择店铺操作。') {
@@ -30,7 +30,10 @@ export function useSessionStatus(readyTip = 'Cookie 已就绪，可直接选择�
       status.checking = false;
       refreshing.value = false;
       if (manual) {
+        // 先复位、等一次 DOM 刷新后再置位：同一 tick 内连续两次赋值会被 Vue 批处理合并，
+        // flash 类加不上/加上了就不摘，闪烁动画只会播一次
         flash.value = false;
+        await nextTick();
         flash.value = true;
       }
     }

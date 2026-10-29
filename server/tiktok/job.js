@@ -2,7 +2,8 @@
 // 批量下载编排（代理检测、逐条解析下载、进度事件、取消）
 const fs = require('fs');
 const path = require('path');
-const { sleep, REQUEST_DELAY_MS, REQUEST_DELAY_JITTER_MS } = require('./constants');
+const { REQUEST_DELAY_MS, REQUEST_DELAY_JITTER_MS } = require('./constants');
+const { sleep } = require('../lib/sleep');
 const { detectProxy, createAgent } = require('./proxy');
 const { parseVideo, downloadFile, isNetworkError } = require('./parse');
 

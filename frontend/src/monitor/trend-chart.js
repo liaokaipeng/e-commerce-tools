@@ -91,9 +91,9 @@ export function buildTrendOption(trend) {
     return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
   };
   const thMeta = [
-    { key: 'p0', color: '#FF3B30', label: 'P0 阈值' },
-    { key: 'p1', color: '#FF9500', label: 'P1 阈值' },
-    { key: 'p2', color: '#FFD60A', label: 'P2 阈值' },
+    { key: 'p0', color: LEVEL_COLOR.P0, label: 'P0 阈值' },
+    { key: 'p1', color: LEVEL_COLOR.P1, label: 'P1 阈值' },
+    { key: 'p2', color: LEVEL_COLOR.P2, label: 'P2 阈值' },
   ];
   const markLines = thMeta
     .filter((t) => typeof th[t.key] === 'number')

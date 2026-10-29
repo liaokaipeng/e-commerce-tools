@@ -20,17 +20,14 @@
 //   scheduler/control.js  启停 / 手动触发 / 状态投影
 const { state } = require('./state');
 const control = require('./control');
-const { tick } = require('./tick');
 const presence = require('./presence');
 
 module.exports = {
   start: control.start,
   stop: control.stop,
-  tick,
   collectNow: control.collectNow,
   status: control.status,
   setPresence: presence.setPresence,
-  isPresenceActive: presence.isPresenceActive,
   notifyAuthChanged: presence.notifyAuthChanged,
   notifyConfigChanged: presence.notifyConfigChanged,
   _state: state,

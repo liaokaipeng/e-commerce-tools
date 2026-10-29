@@ -39,17 +39,12 @@ async function fetchShopNames(env, shops) {
           shopId: s.shopId,
           method: 'GET',
         });
-        // 载荷层口径与 client.pickPayload 统一（顶层 / response / data）
-        const p = client.pickPayload(j, ['shop_name', 'region', 'country', 'shop_region', 'shop_country']) || {};
-        let name = p.shop_name ? String(p.shop_name) : '';
-        let region = '';
-        // region 提取口径与监控采集（collectors.fetchShopInfo）一致
-        for (const k of ['region', 'country', 'shop_region', 'shop_country']) {
-          if (p[k] !== undefined && p[k] !== null && p[k] !== '') { region = String(p[k]).toUpperCase(); break; }
-        }
-        if (name.trim()) patch.shopName = name.trim();
+        // 店铺名/地区解析与监控采集（collectors.fetchShopInfo）共用同一份口径
+        const { name: rawName, region: rawRegion } = client.parseShopInfoPayload(j);
+        const name = String(rawName || '').trim();
+        if (name) patch.shopName = name;
         else patch.shopNameFailedAt = Date.now();
-        if (region) patch.shopRegion = region;
+        if (rawRegion) patch.shopRegion = String(rawRegion).toUpperCase();
         else patch.shopRegionFailedAt = Date.now();
       } catch (e) {
         patch.shopNameFailedAt = Date.now();

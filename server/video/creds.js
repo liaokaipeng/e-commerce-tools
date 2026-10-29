@@ -104,8 +104,8 @@ async function refreshAuthToken(cookie, shopId, signal) {
     headers: {
       accept: 'application/json, text/plain, */*',
       cookie,
-      origin: 'https://solutions.shopee.cn',
-      referer: 'https://solutions.shopee.cn/sellers/video-upload/',
+      origin: SOLUTIONS,
+      referer: `${SOLUTIONS}/sellers/video-upload/`,
       'user-agent': UA,
     },
   });

@@ -229,8 +229,3 @@ async function doCancel() {
     </div>
   </div>
 </template>
-
-<style scoped>
-/* 页面级/共用样式统一在 styles/base.css（.danger-card / .preview-table / .expand-* 等）；
-   SPU 配置卡片与导入导出弹窗的样式分别在 SpuConfigCard.vue / SpuBulkDialogs.vue 内。 */
-</style>

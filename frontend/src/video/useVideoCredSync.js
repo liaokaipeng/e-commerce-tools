@@ -42,6 +42,13 @@ export function useVideoCredSync({
     if (el && v && document.activeElement !== el) userid.value = v;
   }
 
+  // 把一个店铺凭证存根回填到页面状态（缺的字段跳过，不用空值覆盖）
+  function applyCreds(s) {
+    if (s.auth) auth.value = s.auth;
+    if (s.cookie) cookie.value = s.cookie;
+    if (s.userid) userid.value = s.userid;
+  }
+
   async function loadCredsFromServer(quiet) {
     try {
       const c = await getJsonResult('/api/creds');
@@ -82,40 +89,29 @@ export function useVideoCredSync({
           auth.value = '';
           cookie.value = '';
           userid.value = '';
-          cnShops.value = [];
           return;
         }
-        if (list.length) {
-          // 优先沿用当前所选店铺（用户手动选择或上次记住的），未选择时自动挑最近更新的有凭证店铺
-          const withCred = list
-            .filter((x) => x.hasCred)
-            .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-          const cur = selectedShopId.value ? list.find((x) => x.shopId === selectedShopId.value) : null;
-          if (cur) {
-            if (cur.auth) auth.value = cur.auth;
-            if (cur.cookie) cookie.value = cur.cookie;
-            shopId.value = cur.shopId;
-            if (cur.userid) userid.value = cur.userid;
-            if (!quiet) saveCreds();
-          } else if (selectedShopId.value) {
-            // 所选店铺未抓到凭证：保留选择（可能是已授权店铺列表里的店铺），凭证沿用最近更新的有凭证店铺
-            shopId.value = selectedShopId.value;
-            const src = withCred[0];
-            if (src) {
-              if (src.auth) auth.value = src.auth;
-              if (src.cookie) cookie.value = src.cookie;
-              if (src.userid) userid.value = src.userid;
-            }
-            if (!quiet) saveCreds();
-          } else if (withCred[0] || list[0]) {
-            const pick = withCred[0] || list[0];
-            selectedShopId.value = pick.shopId;
-            if (pick.auth) auth.value = pick.auth;
-            if (pick.cookie) cookie.value = pick.cookie;
-            shopId.value = pick.shopId;
-            if (pick.userid) userid.value = pick.userid;
-            if (!quiet) saveCreds();
-          }
+        // 优先沿用当前所选店铺（用户手动选择或上次记住的），未选择时自动挑最近更新的有凭证店铺
+        const withCred = list
+          .filter((x) => x.hasCred)
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        const cur = selectedShopId.value ? list.find((x) => x.shopId === selectedShopId.value) : null;
+        if (cur) {
+          applyCreds(cur);
+          shopId.value = cur.shopId;
+          if (!quiet) saveCreds();
+        } else if (selectedShopId.value) {
+          // 所选店铺未抓到凭证：保留选择（可能是已授权店铺列表里的店铺），凭证沿用最近更新的有凭证店铺
+          shopId.value = selectedShopId.value;
+          const src = withCred[0];
+          if (src) applyCreds(src);
+          if (!quiet) saveCreds();
+        } else if (withCred[0] || list[0]) {
+          const pick = withCred[0] || list[0];
+          selectedShopId.value = pick.shopId;
+          applyCreds(pick);
+          shopId.value = pick.shopId;
+          if (!quiet) saveCreds();
         }
       }
     } catch {
@@ -154,5 +150,5 @@ export function useVideoCredSync({
     return setInterval(() => loadCredsFromServer(true), 5000);
   }
 
-  return { shopEmptyTip, loadCredsFromServer, refreshCreds, checkShopEmpty, startStoreSync };
+  return { shopEmptyTip, refreshCreds, startStoreSync };
 }

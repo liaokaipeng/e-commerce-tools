@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { t } = require('../helpers');
+const { t, withTemp } = require('../helpers');
 const { box, mvhdBody, tkhdBody, buildMp4, buildMp4TailMoov, makeAuth } = require('./fixtures');
 const {
   md5hex,
@@ -37,18 +37,14 @@ async function run() {
 
   // ===== streamHashes（流式哈希，不整文件加载） =====
   {
-    const tmp = path.join(os.tmpdir(), `kp_hash_${Date.now()}.dat`);
     const content = Buffer.from('stream-hash-test-content-流式哈希测试');
-    fs.writeFileSync(tmp, content);
-    try {
+    await withTemp('kp_hash', content, async (tmp) => {
       const h = await streamHashes(tmp);
       t('streamHashes 返回正确 size', h.size === content.length, `size=${h.size}`);
       t('streamHashes md5 与一次性计算一致', h.md5 === crypto.createHash('md5').update(content).digest('hex'));
       t('streamHashes sha1 与一次性计算一致', h.sha1 === crypto.createHash('sha1').update(content).digest('hex'));
       t('streamHashes sha256 与一次性计算一致', h.sha256 === crypto.createHash('sha256').update(content).digest('hex'));
-    } finally {
-      fs.unlinkSync(tmp);
-    }
+    });
   }
 
   // ===== decryptVodToken =====
@@ -119,72 +115,51 @@ async function run() {
 
   // ===== probeVideoFile（文件级采样探针） =====
   {
-    const tmp = path.join(os.tmpdir(), `kp_probe_${Date.now()}.mp4`);
-    fs.writeFileSync(tmp, buildMp4());
-    try {
+    await withTemp('kp_probe', buildMp4(), async (tmp) => {
       const r = probeVideoFile(tmp);
       t('probeVideoFile 解析出宽高', r.width === 1920 && r.height === 1080, `${r.width}x${r.height}`);
       t('probeVideoFile 解析出时长 ms', r.duration === 5000, `duration=${r.duration}`);
-    } finally {
-      fs.unlinkSync(tmp);
-    }
-    const bad = path.join(os.tmpdir(), `kp_probe_bad_${Date.now()}.mp4`);
-    fs.writeFileSync(bad, 'not an mp4 at all');
-    try {
+    });
+    await withTemp('kp_probe_bad', 'not an mp4 at all', async (bad) => {
       t('probeVideoFile 非 mp4 文件返回 0 不抛错', probeVideoFile(bad).width === 0);
-    } finally {
-      fs.unlinkSync(bad);
-    }
+    });
   }
 
   // ===== probeVideoFile：非 faststart（moov 在尾部）布局必须能探测到 =====
   // 回归：尾采样窗口起点与 box 边界不对齐，旧实现按 box 头顺序解析 → >512KB 且 moov 在尾的文件
   // 恒返回 0x0/0ms，导致 video/create 提交 width/height/duration 全 0。
   {
-    const tail = path.join(os.tmpdir(), `kp_probe_tail_${Date.now()}.mp4`);
-    fs.writeFileSync(tail, buildMp4TailMoov(600 * 1024)); // 总大小 ≈ 600KB > 512KB 采样窗口
-    try {
+    await withTemp('kp_probe_tail', buildMp4TailMoov(600 * 1024), async (tail) => { // 总大小 ≈ 600KB > 512KB 采样窗口
       const r = probeVideoFile(tail);
       t('probeVideoFile 尾置 moov（>512KB）解析出宽高', r.width === 1280 && r.height === 720, JSON.stringify(r));
       t('probeVideoFile 尾置 moov（>512KB）解析出时长', r.duration === 5000, JSON.stringify(r));
       t('probeVideoFile 尾置 moov 不再返回全 0（回归旧 bug）', r.width !== 0 && r.duration !== 0);
-    } finally {
-      fs.unlinkSync(tail);
-    }
+    });
     // moov 之后还有小 box（如 free）：moov 不恰好收尾，走兜底分支也要命中
-    const tailFree = path.join(os.tmpdir(), `kp_probe_tail_free_${Date.now()}.mp4`);
-    fs.writeFileSync(tailFree, buildMp4TailMoov(600 * 1024, box('free', Buffer.alloc(16))));
-    try {
-      t('probeVideoFile 尾置 moov 后跟 free box 仍能解析', probeVideoFile(tailFree).width === 1280, JSON.stringify(probeVideoFile(tailFree)));
-    } finally {
-      fs.unlinkSync(tailFree);
-    }
+    await withTemp('kp_probe_tail_free', buildMp4TailMoov(600 * 1024, box('free', Buffer.alloc(16))), async (tailFree) => {
+      const r = probeVideoFile(tailFree);
+      t('probeVideoFile 尾置 moov 后跟 free box 仍能解析', r.width === 1280, JSON.stringify(r));
+    });
     // >512KB 但整份文件里没有 moov → 返回 0，不抛错
-    const noMoov = path.join(os.tmpdir(), `kp_probe_nomoov_${Date.now()}.mp4`);
-    fs.writeFileSync(noMoov, Buffer.concat([box('ftyp', Buffer.from('isom')), box('mdat', Buffer.alloc(600 * 1024))]));
-    try {
-      t('probeVideoFile 大文件无 moov 返回 0 不抛错', probeVideoFile(noMoov).width === 0);
-    } finally {
-      fs.unlinkSync(noMoov);
-    }
+    await withTemp('kp_probe_nomoov',
+      Buffer.concat([box('ftyp', Buffer.from('isom')), box('mdat', Buffer.alloc(600 * 1024))]),
+      async (noMoov) => {
+        t('probeVideoFile 大文件无 moov 返回 0 不抛错', probeVideoFile(noMoov).width === 0);
+      });
     // 回归：moov 本身很大（长视频帧索引多，moov 可达数 MB）——'moov' 签名距 EOF 超过 512KB
     // 采样窗，旧逻辑小窗搜不到签名 → 返回全 0，发布接口拿到 duration=0。加宽窗后必须命中
-    {
-      const bigMoov = box('moov', Buffer.concat([
-        box('mvhd', mvhdBody(1000, 5000)),
-        box('trak', box('tkhd', tkhdBody(1280, 720))),
-        box('free', Buffer.alloc(700 * 1024)), // 把 moov 撑到 ~700KB
-      ]));
-      const bigTail = path.join(os.tmpdir(), `kp_probe_big_moov_${Date.now()}.mp4`);
-      fs.writeFileSync(bigTail, Buffer.concat([box('ftyp', Buffer.from('isom')), box('mdat', Buffer.alloc(64 * 1024)), bigMoov]));
-      try {
+    const bigMoov = box('moov', Buffer.concat([
+      box('mvhd', mvhdBody(1000, 5000)),
+      box('trak', box('tkhd', tkhdBody(1280, 720))),
+      box('free', Buffer.alloc(700 * 1024)), // 把 moov 撑到 ~700KB
+    ]));
+    await withTemp('kp_probe_big_moov',
+      Buffer.concat([box('ftyp', Buffer.from('isom')), box('mdat', Buffer.alloc(64 * 1024)), bigMoov]),
+      async (bigTail) => {
         const r = probeVideoFile(bigTail);
         t('probeVideoFile 大 moov（签名距 EOF>512KB）解析出宽高', r.width === 1280 && r.height === 720, JSON.stringify({ width: r.width, height: r.height }));
         t('probeVideoFile 大 moov 解析出时长', r.duration === 5000, `duration=${r.duration}`);
-      } finally {
-        fs.unlinkSync(bigTail);
-      }
-    }
+      });
     // 窗口起点不对齐（前面 7 字节杂数据）：仍能由 'moov' 签名回推 box 起点
     t('findMoovInTail 窗口起点不对齐时仍能回推 box 起点', (() => {
       const buf = Buffer.concat([Buffer.alloc(7), box('moov', mvhdBody(1000, 5000))]);
@@ -200,25 +175,17 @@ async function run() {
 
   // ===== validateUploadRow =====
   {
-    const tmp = path.join(os.tmpdir(), `kp_tools_test_${Date.now()}.mp4`);
-    fs.writeFileSync(tmp, 'test');
-    try {
+    await withTemp('kp_tools_test', 'test', async (tmp) => {
       t('validateUploadRow 缺路径报错', validateUploadRow({}) === '缺少视频路径');
       t('validateUploadRow 文件不存在报错', validateUploadRow({ path: tmp + '.nonexist' }).includes('不存在'));
       t('validateUploadRow 超长说明报错', validateUploadRow({ path: tmp, caption: 'x'.repeat(251) }).includes('250'));
       t('validateUploadRow 含 tiktok 字样报错', validateUploadRow({ path: tmp, caption: 'a tiktok b' }).includes('tiktok'));
       t('validateUploadRow 合法行通过', validateUploadRow({ path: tmp, caption: 'ok', product: '1' }) === '');
-    } finally {
-      fs.unlinkSync(tmp);
-    }
-    // 0 字节文件 / 目录：必须给出可读原因，而不是让分片读取抛 ERR_OUT_OF_RANGE
-    const empty = path.join(os.tmpdir(), `kp_tools_empty_${Date.now()}.mp4`);
-    fs.writeFileSync(empty, '');
-    try {
+    });
+    // 0 字节文件：必须给出可读原因，而不是让分片读取抛 ERR_OUT_OF_RANGE
+    await withTemp('kp_tools_empty', '', async (empty) => {
       t('validateUploadRow 空文件（0 字节）报错并说明原因', validateUploadRow({ path: empty }).includes('0 字节'), validateUploadRow({ path: empty }));
-    } finally {
-      fs.unlinkSync(empty);
-    }
+    });
     const dir = path.join(os.tmpdir(), `kp_tools_dir_${Date.now()}`);
     fs.mkdirSync(dir, { recursive: true });
     try {

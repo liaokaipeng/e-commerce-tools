@@ -41,7 +41,7 @@ const shownShops = computed(() => filterByKeywords(props.shops, search.value, (s
         @click="emit('select', s.shopId)"
       >
         <div class="sc-head">
-          <span class="dot" :style="{ background: s.authBroken ? '#8f95a8' : LEVEL_COLOR[s.alerts.maxLevel] || OK_COLOR }"></span>
+          <span class="dot" :style="{ background: s.authBroken ? 'var(--d-reauth)' : LEVEL_COLOR[s.alerts.maxLevel] || OK_COLOR }"></span>
           <b class="sc-name">{{ shopName(s) }}</b>
           <span class="sc-badges">
             <i v-if="s.authBroken" class="b-reauth" :title="'授权已失效，重新授权后自动恢复采集'">待重新授权</i>

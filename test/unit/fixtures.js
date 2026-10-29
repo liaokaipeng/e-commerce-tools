@@ -50,4 +50,4 @@ function makeAuth(exp) {
   return Buffer.from('50007225:' + jwt).toString('base64');
 }
 
-module.exports = { box, mvhdBody, tkhdBody, buildMp4, buildMp4TailMoov, b64url, makeAuth };
+module.exports = { box, mvhdBody, tkhdBody, buildMp4, buildMp4TailMoov, makeAuth };

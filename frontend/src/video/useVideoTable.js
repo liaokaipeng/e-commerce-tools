@@ -83,7 +83,7 @@ export function useVideoTable() {
   }
 
   return {
-    headers, rows,
-    parseFile, rebuildRows, downloadTemplate, exportResult,
+    rows,
+    parseFile, downloadTemplate, exportResult,
   };
 }

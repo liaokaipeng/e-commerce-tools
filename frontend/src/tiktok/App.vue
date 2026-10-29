@@ -10,7 +10,7 @@ import { useDownloadJob } from './useDownloadJob.js';
 
 const { logLines, log, clear: clearLog } = useLog();
 
-const { dir, hasDefault, loadSettings, setDefaultDir, openDir } = useDirSettings('tiktok', log);
+const { dir, loadSettings, setDefaultDir, ensureDefaultDir, openDir } = useDirSettings('tiktok', log);
 
 const { proxyConnected, proxyText, showVpn, checkNetwork, recheckNetwork } = useTiktokNetwork({
   log,
@@ -20,7 +20,7 @@ const { proxyConnected, proxyText, showVpn, checkNetwork, recheckNetwork } = use
 });
 
 const { urls, downloading, progress, progressPct, summary, validCount, startDownload, stopDownload } =
-  useDownloadJob({ dir, hasDefault, setDefaultDir, log, clear: clearLog, showVpn });
+  useDownloadJob({ dir, ensureDefaultDir, log, clear: clearLog, showVpn });
 
 onMounted(() => {
   checkNetwork();

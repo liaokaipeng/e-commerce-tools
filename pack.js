@@ -147,9 +147,6 @@ function main() {
   console.log(`  1. 把 update.json 提交并推送到仓库（客户端从这里读版本清单，地址要固定）`);
   console.log(`  2. 在 GitHub 建 Release（tag v${version}），把 build/${zipName} 作为资产上传`);
   console.log('  3. 若 Release 资产地址与 DOWNLOAD_URL_TEMPLATE 不一致，改 update.json 的 url 后重新提交');
-  if (manifest.url.includes('<用户名>')) {
-    console.log('\n  ⚠ update.json 里的 url 还是模板占位符：请先在 pack.js 顶部填好 DOWNLOAD_URL_TEMPLATE。');
-  }
   console.log('');
 }
 

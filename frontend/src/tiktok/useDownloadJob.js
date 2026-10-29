@@ -2,19 +2,17 @@
 import { ref, computed } from 'vue';
 import { ElMessage } from 'element-plus';
 import { runSSE } from '../composables/useSSE.js';
-import { confirmDanger } from '../composables/confirmDanger.js';
 
 /**
  * 下载任务编排子系统。
  * @param {object} o
- *   - dir           保存目录 Ref（来自 useDirSettings）
- *   - hasDefault    是否已有默认目录 Ref（来自 useDirSettings）
- *   - setDefaultDir 设置默认目录方法（来自 useDirSettings）
- *   - log           页面日志函数
- *   - clear         清空日志方法
- *   - showVpn       网络异常提示 Ref（来自 useTiktokNetwork）
+ *   - dir              保存目录 Ref（来自 useDirSettings）
+ *   - ensureDefaultDir 「设为默认目录」确认（来自 useDirSettings）
+ *   - log              页面日志函数
+ *   - clear            清空日志方法
+ *   - showVpn          网络异常提示 Ref（来自 useTiktokNetwork）
  */
-export function useDownloadJob({ dir, hasDefault, setDefaultDir, log, clear: clearLog, showVpn }) {
+export function useDownloadJob({ dir, ensureDefaultDir, log, clear: clearLog, showVpn }) {
   const urls = ref('');
   const downloading = ref(false);
   const abortRef = ref(null);
@@ -84,18 +82,8 @@ export function useDownloadJob({ dir, hasDefault, setDefaultDir, log, clear: cle
       ElMessage.warning('请先选择保存目录');
       return;
     }
-    if (!hasDefault.value) {
-      const ok = await confirmDanger({
-        message: `是否将「${d}」设为默认目录？下次打开会自动使用该目录。`,
-        title: '默认目录',
-        confirmText: '设为默认',
-        cancelText: '暂不',
-        type: 'info',
-        danger: false,
-      });
-      if (ok) await setDefaultDir(d);
-      /* 用户取消，继续下载 */
-    }
+    await ensureDefaultDir(d);
+    /* 用户取消，继续下载 */
     downloading.value = true;
     showVpn.value = false;
     clearLog();

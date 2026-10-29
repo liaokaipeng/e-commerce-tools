@@ -28,14 +28,13 @@ defineProps({
   logLines: { type: Array, default: () => [] },
   /** 是否显示取消按钮（hotlisting / bidding 均已支持） */
   cancellable: { type: Boolean, default: true },
-  danger: { type: Boolean, default: true },
 });
 
 const emit = defineEmits(['run', 'pause', 'cancel']);
 </script>
 
 <template>
-  <el-card shadow="never" class="card" :class="{ 'danger-card': danger }">
+  <el-card shadow="never" class="card danger-card">
     <template #header>
       <div class="card-header-row">
         <span>{{ title }}</span>

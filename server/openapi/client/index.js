@@ -8,7 +8,7 @@
 // 实现按职责拆分到 client/ 子模块，本文件只做导出聚合（不含业务逻辑）：
 //   client/sign.js      签名与 query 组装（signedCall / refreshToken 共用同一套口径）
 //   client/errors.js    错误文案映射与认证失效/可重试判定（纯函数）
-//   client/parse.js     网关响应载荷解析（pickPayload / parseTokenResponse）
+//   client/parse.js     网关响应载荷解析（pickPayload / parseTokenResponse / parseShopInfoPayload）
 //   client/transport.js signedCall：签名请求 + 网络/5xx 重试
 //   client/refresh.js   refreshToken：按 shop_id 刷新 token 协议
 //   client/persist.js   saveRefreshResult：刷新结果只写回本店
@@ -31,7 +31,7 @@ const { getAuthUrl, exchangeToken } = require('./auth');
 const { refreshShopNow } = require('./ensure');
 const { callOpenApi } = require('./call');
 const { signedCall } = require('./transport');
-const { pickPayload } = require('./parse');
+const { pickPayload, parseShopInfoPayload } = require('./parse');
 const { isAuthDead, isAuthRetryable, isAuthFatalAfterRefresh } = require('./errors');
 const { REFRESH_COOLDOWN_MS } = require('../constants');
 
@@ -44,6 +44,7 @@ module.exports = {
   signedCall,
   refreshShopNow,
   pickPayload,
+  parseShopInfoPayload,
   // 纯函数（单测覆盖）
   isAuthDead,
   isAuthRetryable,

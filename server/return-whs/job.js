@@ -18,10 +18,9 @@ const MAX_ROWS = 2000;
 /** 每个 SSE 执行单元的行数（块内串行；块间 checkpoint，暂停/取消最多延迟一块） */
 const CHUNK_SIZE = 20;
 
-/** 归一化 shopId：去空白与零宽字符（Excel 单元格常带不可见字符），数字按整串处理 */
+/** 归一化 shopId：复用 normalizeReturnId 去空白与零宽字符（Excel 单元格常带不可见字符），数字按整串处理 */
 function normalizeShopId(raw) {
-  if (raw === null || raw === undefined) return '';
-  const s = String(raw).replace(/[\s\u200b-\u200d\ufeff]+/g, '');
+  const s = normalizeReturnId(raw);
   return /^\d+\.0+$/.test(s) ? s.replace(/\.0+$/, '') : s;
 }
 

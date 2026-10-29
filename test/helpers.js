@@ -1,5 +1,5 @@
 'use strict';
-// 测试共享工具：结果收集 / HTTP 封装 / 服务启动与清理
+// 测试共享工具：结果收集 / HTTP 封装 / SSE 读取 / 响应桩 / 临时文件夹具 / 服务启动与清理
 // 供 test/unit.test.js 与 test/api.test.js 共用，保证两条测试线结果汇总一致。
 const { spawn } = require('child_process');
 const path = require('path');
@@ -17,7 +17,8 @@ function t(name, ok, detail = '') {
   else console.log('  ✗ ' + name + (detail ? '  — ' + detail : ''));
 }
 
-// 简易 fetch 封装（返回 {status, text}）
+// 简易 fetch 封装（返回 {status, text, json}；json 为惰性解析，
+// 页面静态资源等非 JSON 响应在访问 .json 前不会抛错）
 async function req(method, urlPath, body) {
   const opts = { method };
   if (body !== undefined) {
@@ -25,18 +26,60 @@ async function req(method, urlPath, body) {
     opts.body = JSON.stringify(body);
   }
   const r = await fetch(BASE + urlPath, opts);
-  return { status: r.status, text: await r.text() };
+  const text = await r.text();
+  return { status: r.status, text, get json() { return JSON.parse(text); } };
 }
 
-async function waitReady() {
-  for (let i = 0; i < 50; i++) {
-    try {
-      const r = await fetch(BASE + '/');
-      if (r.ok) return true;
-    } catch (e) { /* 未就绪，继续等 */ }
-    await new Promise((res) => setTimeout(res, 200));
+// 请求并读取 SSE 流直至出现指定类型事件（或流结束），返回全部已收到的事件。
+// untilTypes 传空数组表示读到流结束；opts 透传给 fetch（POST 的 SSE 接口传 method/headers/body）。
+async function readSSEUntil(urlPath, untilTypes, opts = {}) {
+  const r = await fetch(BASE + urlPath, opts);
+  const events = [];
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split('\n\n');
+    buf = parts.pop();
+    for (const part of parts) {
+      const line = part.split('\n').find((l) => l.startsWith('data: '));
+      if (!line) continue;
+      try {
+        const ev = JSON.parse(line.slice(6));
+        events.push(ev);
+        if (untilTypes.includes(ev.type)) {
+          await reader.cancel().catch(() => {});
+          return events;
+        }
+      } catch { /* 忽略无法解析的事件 */ }
+    }
   }
-  return false;
+  return events;
+}
+
+// JSON 形态的 res 测试桩：记录 writeHead 的状态码与 headersSent、end 的响应体。
+// SSE 场景（要收集 write 帧 / endPromise）语义不同，由各测试自建桩。
+function fakeRes() {
+  const r = { headersSent: false, status: 0, body: '' };
+  r.writeHead = (s) => { r.headersSent = true; r.status = s; };
+  r.end = (b) => { r.body = b || ''; };
+  return r;
+}
+
+// 临时文件夹具：写入 content（Buffer 或字符串）后执行 fn(路径)，
+// 结束（含抛错）统一走 removeFile 清理——本机删除 shim 按「每轮删除数」计数，
+// 测试里零散 unlinkSync 可能触发批量删除拦截，见 removeFile 注释。
+async function withTemp(name, content, fn) {
+  const f = path.join(os.tmpdir(), `${name}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+  fs.writeFileSync(f, content);
+  try {
+    return await fn(f);
+  } finally {
+    removeFile(f);
+  }
 }
 
 // 删除文件（绕过本机可能存在的 node 安全删除 shim：它按「每轮删除数」计数，
@@ -98,6 +141,17 @@ function startServer() {
   };
 }
 
+async function waitReady() {
+  for (let i = 0; i < 50; i++) {
+    try {
+      const r = await fetch(BASE + '/');
+      if (r.ok) return true;
+    } catch (e) { /* 未就绪，继续等 */ }
+    await new Promise((res) => setTimeout(res, 200));
+  }
+  return false;
+}
+
 function printSummary() {
   const ok = results.filter((r) => r.ok).length;
   const fail = results.length - ok;
@@ -105,4 +159,4 @@ function printSummary() {
   return fail === 0;
 }
 
-module.exports = { ROOT, PORT, BASE, t, req, waitReady, startServer, removeFile, printSummary };
+module.exports = { ROOT, BASE, t, req, readSSEUntil, fakeRes, withTemp, startServer, removeFile, printSummary };

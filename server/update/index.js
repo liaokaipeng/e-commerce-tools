@@ -15,16 +15,14 @@
  *     覆盖前先把 server/data 整目录备份到 backup/data-<时间戳>。
  *   - 程序文件落盘后**必须重启服务才生效**（后端模块已加载进内存），接口如实返回 restartRequired。
  *
- * 实现已按单一职责拆分到 server/update/ 子目录，本文件只做装配与对外导出（保持导出不变）：
+ * 实现已按单一职责拆分到 server/update/ 子目录，本文件只做装配与对外导出
+ * （只导出被消费的入口；checkNow / applyUpdate / loadConfig 由 routes / apply 等直接 require 子模块）：
  *   config.js（配置/路径）· whitelist.js（白名单与合并备份）· archive.js（解压与包校验）
  *   download.js（流式下载）· manifest.js（清单拉取比对）· deps.js（依赖差异安装）
  *   apply.js（更新编排）· routes.js（路由注册）· schedule.js（启动后自动检查）
  */
 const { register } = require('./routes');
 const { startAutoCheck } = require('./schedule');
-const { checkNow } = require('./manifest');
-const { applyUpdate } = require('./apply');
-const { loadConfig } = require('./config');
 const { COPY_ITEMS } = require('./whitelist');
 
-module.exports = { register, startAutoCheck, checkNow, applyUpdate, loadConfig, COPY_ITEMS };
+module.exports = { register, startAutoCheck, COPY_ITEMS };

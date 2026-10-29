@@ -1,7 +1,7 @@
 'use strict';
 // 取消竞价接口调用层（URL 拼接与请求层见 lib/shopee-session.js）。
-const { apiPost, buildShopeeUrl } = require('../lib/shopee-session');
-const { PAGE_TAB_IMPROVE, PAGE_SIZE, MAX_PAGES } = require('./constants');
+const { collectBiddingList, buildShopeeUrl, apiPost } = require('../lib/shopee-session');
+const { PAGE_TAB_IMPROVE } = require('./constants');
 const { extractImprovementItems } = require('./parse');
 
 /**
@@ -9,21 +9,13 @@ const { extractImprovementItems } = require('./parse');
  * @returns {Array<{itemId, itemName, modelId, modelName, bidId, price, suggestedPrice}>}
  */
 async function fetchImprovementBids(cookieHeader, shopId, region) {
-  const url = buildShopeeUrl('/api/mkt/bidding/get_item_ongoing_list', { shopId, region });
-  const rows = [];
-  let pageNum = 1;
-  while (true) {
-    const j = await apiPost(url, cookieHeader, {
-      filter: { page_tab: PAGE_TAB_IMPROVE },
-      page_info: { page_num: pageNum, page_size: PAGE_SIZE },
-      option: { with_performance: true },
-    }, { label: '获取待改进列表' });
-    const d = j.data;
-    rows.push(...extractImprovementItems(d));
-    if (!d.has_more) break;
-    pageNum += 1;
-    if (pageNum > MAX_PAGES) throw new Error(`翻页超过 ${MAX_PAGES} 页，疑似死循环，已停止`);
-  }
+  const { rows } = await collectBiddingList(cookieHeader, {
+    shopId,
+    region,
+    pageTab: PAGE_TAB_IMPROVE,
+    label: '获取待改进列表',
+    mapRows: extractImprovementItems,
+  });
   return rows;
 }
 

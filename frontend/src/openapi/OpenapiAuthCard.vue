@@ -1,7 +1,7 @@
 <!-- 开放平台 · ② 店铺授权卡片（展示层）。
      授权链接生成 / 复制 / 手动回调等逻辑在 openapi/useOpenapiAuth.js，本组件只负责渲染并上抛事件。 -->
 <script setup>
-const props = defineProps({
+defineProps({
   /** App 配置表单对象（本卡片只读用其中的 redirect） */
   form: { type: Object, required: true },
   /** 登录状态（configured 等） */

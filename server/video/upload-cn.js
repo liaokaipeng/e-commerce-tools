@@ -19,6 +19,7 @@ const {
   pickService,
   preuploadRequest,
   reportuploadRequest,
+  mmsHeaders,
   assertReportUpload,
   probeAndLog,
 } = require('./steps');
@@ -69,13 +70,7 @@ async function mergeFiles(fids, auth, fileEtag, signal) {
 async function preupload(signal) {
   return preuploadRequest({
     url: `${MMS}/uploadapi/api/v1/vod/preupload`,
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json, text/plain, */*',
-      origin: SOLUTIONS,
-      referer: `${SOLUTIONS}/`,
-      'user-agent': UA,
-    },
+    headers: mmsHeaders(SOLUTIONS),
     payload: {
       biz: BIZ,
       ver: 2,
@@ -90,13 +85,7 @@ async function preupload(signal) {
 async function reportUpload({ vid, extendid, fsize, md5hexval, videourl }, signal) {
   return reportuploadRequest({
     url: `${MMS}/uploadapi/api/v1/vod/reportupload`,
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json, text/plain, */*',
-      origin: SOLUTIONS,
-      referer: `${SOLUTIONS}/`,
-      'user-agent': UA,
-    },
+    headers: mmsHeaders(SOLUTIONS),
     payload: {
       vid,
       mid: '',

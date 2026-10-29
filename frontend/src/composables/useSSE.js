@@ -1,7 +1,7 @@
 // SSE 流传输组合式函数：读取 fetch 响应流并逐事件回调，供各工具页共用。
 
-/** 读取 fetch SSE 响应流，逐条解析 data: 事件并回调 */
-export async function readSSE(resp, onEvent) {
+/** 读取 fetch SSE 响应流，逐条解析 data: 事件并回调（模块内私有，外部经 runSSE 使用） */
+async function readSSE(resp, onEvent) {
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';

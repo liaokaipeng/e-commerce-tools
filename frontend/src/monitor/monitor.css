@@ -39,6 +39,7 @@ html {
   --d-reauth: #8f95a8;
   --d-reauth-bg: rgba(143, 149, 168, 0.25);
   --d-p0-soft: rgba(255, 59, 48, 0.07);   /* 店铺卡 P0 底色 */
+  --d-p0-glow: rgba(255, 59, 48, 0.55);   /* P0 呼吸/闪烁动画的辉光峰值 */
   --d-muted: #5b6272;        /* 中性色（已关闭等） */
   --d-warn-bg: #2a2410;      /* 授权失效横幅 */
   --d-warn-border: #4d3c14;
@@ -163,7 +164,7 @@ html.dark {
 .rb-btn { margin-left: auto; flex: none; }
 @keyframes cardPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.5); }
-  50% { box-shadow: 0 0 16px 3px rgba(255, 59, 48, 0.55); }
+  50% { box-shadow: 0 0 16px 3px var(--d-p0-glow); }
 }
 .controls { display: flex; gap: var(--d-gap); align-items: center; flex-wrap: wrap; }
 .ctl { font-size: var(--d-fs-xs); color: var(--d-text-3); display: flex; gap: 5px; align-items: center; white-space: nowrap; }
@@ -310,7 +311,7 @@ html.dark {
 .alert-item.flashing { animation: itemFlash 1s ease-in-out 3; }
 @keyframes itemFlash {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0); }
-  50% { box-shadow: 0 0 12px 2px rgba(255, 59, 48, 0.55); }
+  50% { box-shadow: 0 0 12px 2px var(--d-p0-glow); }
 }
 .ai-body { flex: 1; padding: 7px 9px; min-width: 0; }
 .ai-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

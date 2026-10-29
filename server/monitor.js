@@ -21,7 +21,6 @@ const { sendJson, sse, jsonAction } = require('./lib/http-utils');
 const store = require('./monitor/store');
 const engine = require('./monitor/engine');
 const scheduler = require('./monitor/scheduler');
-const { shopView } = require('./monitor/view');
 const { buildOverview } = require('./monitor/view/overview');
 const { buildTrendPayload } = require('./monitor/view/trend');
 const configView = require('./monitor/view/config');
@@ -162,4 +161,4 @@ function register({ get, post }) {
   scheduler.start();
 }
 
-module.exports = { register, _test: { shopView } };
+module.exports = { register };

@@ -1,5 +1,5 @@
 // 视频上传页 · 凭证聚合器：创建站点/凭证状态，装配各高内聚子模块，
-// 对外导出与拆分前完全一致的键名与行为（消费者按名解构）。
+// 对外只导出页面（App.vue 与 useVideoPageLifecycle）实际消费的键。
 // 子模块职责：
 //   useVideoSite.js       站点派生（?mode=cn|ph → site / isPh / siteLabel）
 //   useVideoCredsStore.js 本地缓存（localStorage 读写与清空）
@@ -7,13 +7,11 @@
 //   useVideoCredSync.js   服务端同步 / 定时轮询 / 空态提示 / 手动刷新
 //   useVideoCredGuard.js  上传前就绪校验与提示
 import { ref, onMounted, onUnmounted } from 'vue';
-import { SITES, useVideoSite } from './useVideoSite.js';
+import { useVideoSite } from './useVideoSite.js';
 import { useVideoCredsStore } from './useVideoCredsStore.js';
 import { useVideoStores } from './useVideoStores.js';
 import { useVideoCredSync } from './useVideoCredSync.js';
 import { useVideoCredGuard } from './useVideoCredGuard.js';
-
-export { SITES };
 
 export function useVideoCreds() {
   const { site, isPh, siteLabel } = useVideoSite();
@@ -32,7 +30,7 @@ export function useVideoCreds() {
     site, isPh, auth, cookie, shopId, userid, selectedShopId, cnShops,
   });
 
-  const { stores, shopNameOf, shopRegionOf, shopOptions, applyShop, loadStoreList } = useVideoStores({
+  const { shopOptions, applyShop, loadStoreList } = useVideoStores({
     cnShops, shopId, selectedShopId, auth, cookie, userid, saveCreds,
   });
 
@@ -48,8 +46,8 @@ export function useVideoCreds() {
   return {
     site, isPh, siteLabel,
     auth, cookie, shopId, userid, refreshingCreds,
-    cnShops, selectedShopId, stores, shopOptions, shopNameOf, shopRegionOf, shopEmptyTip,
-    applyShop, saveCreds, refreshCreds, assertReady, startStoreSync,
+    selectedShopId, shopOptions, shopEmptyTip,
+    applyShop, refreshCreds, assertReady, startStoreSync,
   };
 }
 

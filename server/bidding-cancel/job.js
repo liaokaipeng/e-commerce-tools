@@ -58,13 +58,7 @@ function handleRun(body, res) {
         results.push({ shopId: String(id), name, ok: false, cancelled: 0, failed: 0, msg: e.message });
       }
     },
-    finalEvent: ({ cancelledByUser }) => ({
-      type: cancelledByUser ? 'cancelled' : 'summary',
-      cancelled: results.reduce((n, r) => n + (r.cancelled || 0), 0),
-      failed: results.reduce((n, r) => n + (r.failed || 0), 0),
-      success: results.filter(r => r.ok).length,
-      total: results.length,
-    }),
+    finalEvent: jobs.shopFinalEvent(results),
     fatalPrefix: '撤销失败：',
   });
 }

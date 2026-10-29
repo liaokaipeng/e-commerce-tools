@@ -4,7 +4,7 @@
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
-const { t } = require('../helpers');
+const { t, fakeRes, removeFile } = require('../helpers');
 const { parseJsonText, readJsonBodySoft, createDispatcher } = require('../../server/lib/http-utils');
 const {
   buildShopeeUrl, DEFAULT_REGION, HOST, loadStoreNames, storeNameOf,
@@ -199,12 +199,6 @@ async function run() {
       r.push(null);
       return r;
     };
-    const fakeRes = () => {
-      const r = { status: 0, body: '' };
-      r.writeHead = (s) => { r.status = s; };
-      r.end = (b) => { r.body = b || ''; };
-      return r;
-    };
 
     t('readJsonBodySoft：合法 JSON 原样解析', (await readJsonBodySoft(bodyReq('{"jobId":"a"}'))).jobId === 'a');
     const res400 = fakeRes();
@@ -218,7 +212,6 @@ async function run() {
   // ===== 共享层：zip 条目名编码自检（发布包跨平台不乱码） =====
   {
     const { zipNameEncoding } = require('../../server/lib/archive');
-    const { removeFile } = require('../helpers');
 
     // 最小 zip：只拼中央目录 + EOCD——被测函数只读中央目录，不需要真实数据段
     const buildZip = (entries) => {
@@ -304,13 +297,6 @@ async function run() {
 
   // ===== 全局：路由分发兜底（lib/http-utils.createDispatcher） =====
   {
-    // 最小 res 双桩：记录 writeHead / end，模拟 headersSent
-    function fakeRes() {
-      const r = { headersSent: false, status: 0, body: '' };
-      r.writeHead = (s) => { r.headersSent = true; r.status = s; };
-      r.end = (b) => { r.body = b || ''; };
-      return r;
-    }
     const url = new URL('http://127.0.0.1/x');
     const settle = () => new Promise((r) => setTimeout(r, 10)); // 等待 Promise 微任务链
 

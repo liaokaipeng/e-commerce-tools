@@ -1,7 +1,5 @@
 'use strict';
-// TikTok 下载模块常量与通用工具
-
-const { sleep } = require('../lib/sleep');
+// TikTok 下载模块常量
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const REHYDRATION_MARKER = '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">';
@@ -18,4 +16,4 @@ const NETWORK_PATTERNS = [
   'certificate', 'self signed', 'tls', 'deadline exceeded',
 ];
 
-module.exports = { UA, REHYDRATION_MARKER, sleep, REQUEST_DELAY_MS, REQUEST_DELAY_JITTER_MS, NETWORK_PATTERNS };
+module.exports = { UA, REHYDRATION_MARKER, REQUEST_DELAY_MS, REQUEST_DELAY_JITTER_MS, NETWORK_PATTERNS };

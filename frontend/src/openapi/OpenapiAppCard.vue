@@ -1,7 +1,7 @@
 <!-- 开放平台 · ① App 配置卡片（展示层）。
      状态与读写逻辑在 openapi/useOpenapiStatus.js，本组件只负责渲染并上抛保存事件。 -->
 <script setup>
-const props = defineProps({
+defineProps({
   /** App 配置表单对象（partnerId / partnerKey / env / redirect），由父级共享 */
   form: { type: Object, required: true },
   /** 登录状态（configured / partnerId / partnerKeyMasked / env 等） */

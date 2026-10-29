@@ -2,6 +2,7 @@
 // Shopee 取消竞价：扫描「待改进」竞价 + 批量撤销（可暂停 / 继续 / 取消）。
 // 通用能力：登录/店铺（useShopeeSession）、日志（useLog）、预览扫描与批量任务（useBatchJob）、
 // 预览表格卡片（PreviewTableCard）——与「取消注册 Hot Listing」页共用同一套实现。
+// 页面级样式统一在 styles/base.css（.danger-card / .preview-table / .expand-* 等）。
 import { ref, computed } from 'vue';
 import { ElMessage } from 'element-plus';
 import LoginCard from '../components/LoginCard.vue';
@@ -147,7 +148,3 @@ async function doCancel() {
     </div>
   </div>
 </template>
-
-<style scoped>
-/* 页面级/共用样式统一在 styles/base.css（.danger-card / .preview-table / .expand-* 等） */
-</style>

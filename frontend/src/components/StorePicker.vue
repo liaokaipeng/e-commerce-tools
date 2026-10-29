@@ -16,7 +16,7 @@ const props = defineProps({
 });
 
 const items = computed(() => props.stores);
-const { regionFilter, keyword, regionOptions, onFilter, visible: visibleStores } =
+const { regionFilter, regionOptions, onFilter, visible: visibleStores } =
   useShopFilter({ items, regionOf: (s) => s.region, textOf: (s) => `${s.name || ''} ${s.id}` });
 
 const isStoreVisible = (s) => visibleStores.value.includes(s);

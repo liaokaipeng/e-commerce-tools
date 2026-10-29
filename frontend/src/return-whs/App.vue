@@ -5,6 +5,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
+import { UploadFilled } from '@element-plus/icons-vue';
 import LogPanel from '../components/LogPanel.vue';
 import OpenapiGuide from '../components/OpenapiGuide.vue';
 import { useLog } from '../composables/useLog.js';
@@ -45,6 +46,9 @@ const shopById = computed(() => {
 // ---------- ② 表格（SheetJS 前端解析；表头需含 Return ID / Order ID / 店铺ID 列） ----------
 const table = ref(null); // { aoa, returnCol, orderCol, shopCol, rows, skipped, skippedNoShop, fileName }
 
+// el-upload 组件实例（超限替换文件时同步界面文件列表用）
+const uploadRef = ref(null);
+
 async function onFileChange(file) {
   const raw = (file && file.raw) || file;
   if (!raw) return;
@@ -74,6 +78,13 @@ function onFileRemove() {
   table.value = null;
   results.value = [];
   finished.value = false;
+}
+
+// 已选 1 个文件时再次选择：替换为新文件并同步界面文件列表（对齐 video 页写法，避免列表停留在旧文件）
+function onFileExceed(files) {
+  uploadRef.value?.clearFiles();
+  uploadRef.value?.handleStart(files[0]);
+  onFileChange(files[0]);
 }
 
 // 表格涉及的店铺ID（去重，按出现顺序）
@@ -179,6 +190,7 @@ function onExport() {
           <el-tag size="small" effect="light" class="pill">支持 .xlsx / .xls / .csv</el-tag>
         </template>
         <el-upload
+          ref="uploadRef"
           class="file-upload"
           drag
           action="#"
@@ -186,7 +198,7 @@ function onExport() {
           :limit="1"
           accept=".xlsx,.xls,.csv"
           :on-change="onFileChange"
-          :on-exceed="(files) => onFileChange(files[0])"
+          :on-exceed="onFileExceed"
           :on-remove="onFileRemove"
         >
           <el-icon class="el-icon--upload"><upload-filled /></el-icon>

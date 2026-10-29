@@ -43,7 +43,6 @@ module.exports = {
   listOf: parse.listOf,
   totalOf: parse.totalOf,
   orderSnDate: parse.orderSnDate,
-  orderAgeGroups: parse.orderAgeGroups,
   orderAgeBuckets: parse.orderAgeBuckets,
   stockOfModel: parse.stockOfModel,
   itemStockTotal: parse.itemStockTotal,

@@ -9,7 +9,7 @@
  * 通过参数传入或保留在各自文件，本模块不替它们做主。
  */
 const { call } = require('./request');
-const { UPLOAD_SERVICE_ID } = require('./constants');
+const { UPLOAD_SERVICE_ID, UA } = require('./constants');
 const { probeVideoFile, validateUploadRow, skipError } = require('../lib/video-utils');
 
 // 行基础校验（路径/文件大小/caption 等），先于一切网络请求执行
@@ -96,6 +96,19 @@ function assertReportUpload(rep) {
   }
 }
 
+// MMS 上传接口（preupload/reportupload）公共请求头，cn/ph 共用：不带 Cookie——带上会返回
+// 跨区 uploaddomain 导致 400；调用方还必须 useJar:false（不显式带 Cookie 时，jar 罐里该 host
+// 的残留 set-cookie 会被「jar 补齐」逻辑整条带上，同样触发 400，表现为间歇性发作）
+function mmsHeaders(origin) {
+  return {
+    'content-type': 'application/json',
+    accept: 'application/json, text/plain, */*',
+    origin,
+    referer: origin + '/',
+    'user-agent': UA,
+  };
+}
+
 // 本地探测视频元信息并记录日志（step 名称两站点不同：cn=create / ph=edit）
 function probeAndLog(filePath, step, log) {
   const meta = probeVideoFile(filePath);
@@ -115,6 +128,7 @@ module.exports = {
   pickService,
   preuploadRequest,
   reportuploadRequest,
+  mmsHeaders,
   assertReportUpload,
   probeAndLog,
 };

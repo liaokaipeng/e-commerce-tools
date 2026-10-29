@@ -38,7 +38,7 @@
 ## 技术栈速查（细则见 [docs/架构.md](docs/架构.md) §3–§4）
 
 - 后端一律 **CommonJS**（`require`/`module.exports`）；前端 **Vue3 SFC**。改代码时保持文件原有风格，不混用。
-- **后端不新增运行时依赖**（现仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`）；前端现为 `vue` / `element-plus` / `vite` / `echarts`（监控大屏折线图，按需引入）。
+- **后端不新增运行时依赖**（现仅 `exceljs` / `https-proxy-agent` / `socks-proxy-agent`）；前端现为 `vue` / `element-plus` / `@element-plus/icons-vue` / `vite` / `echarts`（监控大屏折线图，按需引入）。
 - **共享层必须复用，不许各写一份**：会话/请求层 `lib/shopee-session.js`、JSON body `lib/http-utils.js`、端口 `lib/config.js`、长任务 `lib/jobs.js`、重试 `lib/retry.js`、导出落盘 `lib/export-utils.js`、统一出站 `lib/http.js`；前端对应 `bootstrap.js` / `composables/`（跨页共享）/ `components/` / `utils/`（纯函数）/ `styles/base.css`，页面专属 composable 与子组件放各自页面目录。**各函数语义与「为什么不能绕过」见 [docs/架构.md](docs/架构.md) §3–§4，改前先读那一节。**
 - **样式一律取设计令牌，不写死颜色与尺寸**：浅色取 `styles/base.css` 的 `:root`，深色取 `monitor/monitor.css` 的 `--d-*`；两个硬约束（深色令牌必须挂 `html`、ECharts 文字色在 `monitor/trend-chart.js`）见 [docs/架构.md](docs/架构.md) §4。
 - **CORS 是本机白名单**（`main.js` 的 `isAllowedOrigin`），**不要退回 `Access-Control-Allow-Origin: *`**。

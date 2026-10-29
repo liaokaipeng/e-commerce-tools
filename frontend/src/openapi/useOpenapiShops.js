@@ -61,15 +61,11 @@ export function useOpenapiShops({ refreshStatus }) {
     });
   }
 
-  function stateMeta(s) {
-    return shopStateMeta(s);
-  }
-
   function fmtTime(t) {
     return t ? new Date(t * 1000).toLocaleString('zh-CN', { hour12: false }) : '—';
   }
 
   const envLabel = (e) => (e === 'sandbox' ? '沙箱' : '生产');
 
-  return { busyShop, testShop, refreshShop, removeShop, toggleImportant, stateMeta, fmtTime, envLabel };
+  return { busyShop, testShop, refreshShop, removeShop, toggleImportant, stateMeta: shopStateMeta, fmtTime, envLabel };
 }

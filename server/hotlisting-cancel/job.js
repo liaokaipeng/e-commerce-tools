@@ -9,6 +9,49 @@ const { loadSpuConfig } = require('./config');
 const { resolvePerShopSpus } = require('./parse');
 const { regionOf, fetchEnrolledSkus, unenrollSku } = require('./api');
 
+/** 逐 SPU 拉最新已注册列表并逐 SKU 取消注册（sku/spu 事件在此发射），返回 {cancelled, failed} */
+async function cancelSpus(cookie, shopId, region, spus, ctx) {
+  let cancelled = 0;
+  let failed = 0;
+  for (const spuId of spus) {
+    await ctx.checkpoint();
+    // 实时拉取最新已注册列表（预览后状态可能已变化）
+    let rows;
+    try {
+      rows = await fetchEnrolledSkus(cookie, shopId, region, spuId);
+    } catch (e) {
+      failed += 1;
+      ctx.emit({ type: 'spu-done', shopId, spuId, ok: false, msg: e.message });
+      continue;
+    }
+    if (rows.length === 0) {
+      ctx.emit({ type: 'spu-done', shopId, spuId, ok: true, cancelled: 0, msg: '无已注册 SKU' });
+      continue;
+    }
+    for (const r of rows) {
+      await ctx.checkpoint();
+      ctx.emit({
+        type: 'sku-start',
+        shopId,
+        spuId,
+        itemName: r.itemName,
+        modelName: r.modelName,
+      });
+      try {
+        await unenrollSku(cookie, shopId, region, r.rskuId, r.vskuId);
+        cancelled += 1;
+        ctx.emit({ type: 'sku-done', shopId, spuId, itemName: r.itemName, ok: true });
+      } catch (e) {
+        failed += 1;
+        ctx.emit({ type: 'sku-done', shopId, spuId, itemName: r.itemName, ok: false, msg: e.message });
+      }
+      await sleep(CANCEL_DELAY_MS);
+    }
+    ctx.emit({ type: 'spu-done', shopId, spuId, ok: true, cancelled: rows.length });
+  }
+  return { cancelled, failed };
+}
+
 function handleRun(body, res) {
   const shopIds = Array.isArray(body.shopIds) ? body.shopIds : [];
   if (shopIds.length === 0) {
@@ -37,46 +80,9 @@ function handleRun(body, res) {
         results.push({ shopId: String(id), name, ok: false, cancelled: 0, failed: 0 });
         return;
       }
-      let cancelled = 0;
-      let failed = 0;
       try {
         const region = await regionOf(cookie, String(id));
-        for (const spuId of plan.spus) {
-          await ctx.checkpoint();
-          // 实时拉取最新已注册列表（预览后状态可能已变化）
-          let rows;
-          try {
-            rows = await fetchEnrolledSkus(cookie, String(id), region, spuId);
-          } catch (e) {
-            failed += 1;
-            ctx.emit({ type: 'spu-done', shopId: String(id), spuId, ok: false, msg: e.message });
-            continue;
-          }
-          if (rows.length === 0) {
-            ctx.emit({ type: 'spu-done', shopId: String(id), spuId, ok: true, cancelled: 0, msg: '无已注册 SKU' });
-            continue;
-          }
-          for (const r of rows) {
-            await ctx.checkpoint();
-            ctx.emit({
-              type: 'sku-start',
-              shopId: String(id),
-              spuId,
-              itemName: r.itemName,
-              modelName: r.modelName,
-            });
-            try {
-              await unenrollSku(cookie, String(id), region, r.rskuId, r.vskuId);
-              cancelled += 1;
-              ctx.emit({ type: 'sku-done', shopId: String(id), spuId, itemName: r.itemName, ok: true });
-            } catch (e) {
-              failed += 1;
-              ctx.emit({ type: 'sku-done', shopId: String(id), spuId, itemName: r.itemName, ok: false, msg: e.message });
-            }
-            await sleep(CANCEL_DELAY_MS);
-          }
-          ctx.emit({ type: 'spu-done', shopId: String(id), spuId, ok: true, cancelled: rows.length });
-        }
+        const { cancelled, failed } = await cancelSpus(cookie, String(id), region, plan.spus, ctx);
         ctx.emit({ type: 'shop-done', shopId: String(id), name, ok: true, cancelled, failed, msg: '' });
         results.push({ shopId: String(id), name, ok: true, cancelled, failed });
       } catch (e) {
@@ -84,13 +90,7 @@ function handleRun(body, res) {
         results.push({ shopId: String(id), name, ok: false, cancelled: 0, failed: 0, msg: e.message });
       }
     },
-    finalEvent: ({ cancelledByUser }) => ({
-      type: cancelledByUser ? 'cancelled' : 'summary',
-      cancelled: results.reduce((n, r) => n + (r.cancelled || 0), 0),
-      failed: results.reduce((n, r) => n + (r.failed || 0), 0),
-      success: results.filter(r => r.ok).length,
-      total: results.length,
-    }),
+    finalEvent: jobs.shopFinalEvent(results),
     fatalPrefix: '取消注册失败：',
   });
 }

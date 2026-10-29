@@ -71,6 +71,7 @@ function create(onCancel = null) {
   return jobId;
 }
 
+/** 取任务详情（仅测试消费；生产代码判存在用 has） */
 function get(jobId) {
   return findJob(jobId);
 }
@@ -102,7 +103,7 @@ function cancel(jobId, reason = '用户取消') {
   return true;
 }
 
-/** 取消后供执行体查询的取消原因（如「任务取消」「SSE 连接断开」） */
+/** 查询取消原因（仅测试消费；执行体取消时经 checkpoint 抛出的 CancelledError 已携带原因） */
 function cancelReason(jobId) {
   const job = findJob(jobId);
   return (job && job.cancelReason) || '任务已取消';
@@ -159,6 +160,22 @@ function registerControlRoutes(post, basePath) {
     const parsed = await readJsonBodySoft(req, `${basePath}/cancel`, { res });
     if (!parsed) return;
     reply(res, cancel(parsed.jobId, '用户取消'));
+  });
+}
+
+/**
+ * 店铺级结果统计的收尾事件工厂：供「逐店产出 {ok, cancelled, failed} 结果」的批量任务
+ * （取消竞价 / 取消 Hot Listing）复用——cancelled/failed 按结果行字段累加，success 按行数。
+ * 行级口径不同的任务（如获取退单仓库按行计、cancelled=已处理行数）自行内联 finalEvent。
+ * @param {Array<{ok?: boolean, cancelled?: number, failed?: number}>} results onUnit 闭包里累计的结果行
+ */
+function shopFinalEvent(results) {
+  return ({ cancelledByUser }) => ({
+    type: cancelledByUser ? 'cancelled' : 'summary',
+    cancelled: results.reduce((n, r) => n + (r.cancelled || 0), 0),
+    failed: results.reduce((n, r) => n + (r.failed || 0), 0),
+    success: results.filter((r) => r.ok).length,
+    total: results.length,
   });
 }
 
@@ -252,7 +269,7 @@ function runShopBatch(opts) {
 
 module.exports = {
   create, get, has, setPaused, cancel, cancelReason, checkpoint, finish, CancelledError,
-  registerControlRoutes, runShopBatch,
+  registerControlRoutes, runShopBatch, shopFinalEvent,
   _ttlMs: TTL_MS,
   _test: { sweepJobs },
 };

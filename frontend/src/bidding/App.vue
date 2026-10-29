@@ -1,4 +1,5 @@
 <script setup>
+// Shopee 竞价导出页。页面级样式已统一收敛到 styles/base.css（.sel-count / .log-box 为全局类）。
 import { ref, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import LoginCard from '../components/LoginCard.vue';
@@ -9,7 +10,6 @@ import { useShopeeSession } from '../composables/useShopeeSession.js';
 import { useDirSettings } from '../composables/useDirSettings.js';
 import { useLog } from '../composables/useLog.js';
 import { runSSE } from '../composables/useSSE.js';
-import { confirmDanger } from '../composables/confirmDanger.js';
 
 // ---------- 登录状态 + 店铺列表（与取消竞价共用） ----------
 const {
@@ -21,7 +21,7 @@ const {
 const { logLines, log, clear: clearLog } = useLog();
 
 // ---------- 保存位置 ----------
-const { dir, hasDefault, loadSettings: loadDirSettings, setDefaultDir, openDir } = useDirSettings('bidding', log);
+const { dir, loadSettings: loadDirSettings, setDefaultDir, ensureDefaultDir, openDir } = useDirSettings('bidding', log);
 
 // ---------- 导出 ----------
 const exporting = ref(false);
@@ -33,18 +33,8 @@ async function doExport() {
     ElMessage.warning('请先设置保存目录');
     return;
   }
-  if (!hasDefault.value) {
-    const ok = await confirmDanger({
-      message: `是否将「${d}」设为默认目录？下次打开会自动使用该目录。`,
-      title: '默认目录',
-      confirmText: '设为默认',
-      cancelText: '暂不',
-      type: 'info',
-      danger: false,
-    });
-    if (ok) await setDefaultDir(d);
-    /* 用户取消则继续导出 */
-  }
+  await ensureDefaultDir(d);
+  /* 用户取消则继续导出 */
   exporting.value = true;
   clearLog();
   log('开始导出，共 ' + selected.size + ' 个店铺…', 'info');
@@ -115,6 +105,3 @@ onMounted(() => {
   </div>
 </template>
 
-<style scoped>
-/* 页面级样式已统一收敛到 styles/base.css（.sel-count / .log-box 为全局类） */
-</style>

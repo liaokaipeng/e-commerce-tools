@@ -100,7 +100,7 @@ export function useSpuConfig({ stores, selected }) {
   onMounted(loadSpuConfig);
 
   return {
-    spuMap, saveState, shopSpuId, setSpu, clearSpu, loadSpuConfig, saveSpuConfig,
+    spuMap, saveState, shopSpuId, setSpu, clearSpu, saveSpuConfig,
     selectedStores, configuredSelCount, pendingCount,
     spuKeyword, spuFilter, visibleSpuStores, savedElsewhere,
   };
