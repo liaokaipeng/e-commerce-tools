@@ -6,6 +6,7 @@
 // 通用能力与「取消竞价」页共用：useShopeeSession / useLog / useBatchJob / PreviewTableCard。
 import { ref, computed } from 'vue';
 import { ElMessage } from 'element-plus';
+import PageHeader from '../components/PageHeader.vue';
 import LoginCard from '../components/LoginCard.vue';
 import StorePicker from '../components/StorePicker.vue';
 import PreviewTableCard from '../components/PreviewTableCard.vue';
@@ -114,10 +115,6 @@ const job = useBatchJob({
 
 const { running: cancelling, jobId: curJobId, paused, pausing, start, togglePause, cancel } = job;
 
-const runningTip = computed(() => (cancelling.value
-  ? `进行中：已处理 ${job.progress.value.done} 项（失败 ${job.progress.value.fail}）。`
-  : '取消后 Hot Listing 立即失效，需重新注册才能恢复！建议先执行第 ④ 步扫描确认。'));
-
 async function doCancel() {
   if (selected.size === 0) { ElMessage.warning('请先选择至少一个店铺'); return; }
   if (configuredSelCount.value === 0) { ElMessage.warning('所选店铺均未配置 SPU ID，请先在上方 ③ 为已选店铺填写 SPU ID'); return; }
@@ -139,6 +136,7 @@ async function doCancel() {
 <template>
   <div class="page">
     <div class="container">
+      <PageHeader title="取消注册 Hot Listing" desc="按店铺配置 SPU，批量取消注册「已注册」SKU，取消后需重新注册才能恢复" />
 
       <LoginCard :status="status" :refreshing="refreshing" :flash="flash" @refresh="refreshStatus(true)" />
 
@@ -170,7 +168,8 @@ async function doCancel() {
       />
 
       <PreviewTableCard
-        title="④ 扫描已注册 Hot Listing（预览）"
+        :index="4"
+        title="扫描已注册 Hot Listing（预览）"
         :badge="previewDone ? `已注册 SKU 共 ${totalSkuCount} 个` : ''"
         :rows="previewRows"
         :row-key-of="(r) => `${r.shopId}-${r.spuId}`"
@@ -180,9 +179,9 @@ async function doCancel() {
         :can-run="selected.size > 0 && configuredSelCount > 0 && !scanning"
         action-text="扫描已注册 SKU"
         running-text="扫描中…"
-        danger-tip="扫描只读，不会改动任何注册状态；确认个数后再执行下方取消注册。"
+        tip="扫描只读，不会改动任何注册状态；确认个数后再执行下方取消注册。"
         :cancellable="false"
-        :log-lines="[]"
+        :log-visible="false"
         @run="onScan"
       >
         <template #toolbar>
@@ -207,12 +206,13 @@ async function doCancel() {
       </PreviewTableCard>
 
       <PreviewTableCard
-        title="⑤ 取消注册（危险操作）"
+        :index="5"
+        title="取消注册（危险操作）"
+        danger
         :rows="previewRows"
         :row-key-of="(r) => `${r.shopId}-${r.spuId}`"
         count-label="已注册 SKU"
         :count-of="skuCountOf"
-        :badge="cancelling ? `进度：已处理 ${job.progress.value.done} 项` : ''"
         :running="cancelling"
         :can-run="selected.size > 0 && configuredSelCount > 0"
         action-text="取消注册全部已注册 SKU"
@@ -221,7 +221,9 @@ async function doCancel() {
         :paused="paused"
         :pausing="pausing"
         paused-tip="已暂停：不再发起取消注册，点击「继续」恢复。"
-        :danger-tip="runningTip"
+        tip="取消后 Hot Listing 立即失效，需重新注册才能恢复！建议先执行第 ④ 步扫描确认。"
+        tip-type="danger"
+        :progress="cancelling ? job.progress.value : null"
         :log-lines="logLines"
         @run="doCancel"
         @pause="togglePause"

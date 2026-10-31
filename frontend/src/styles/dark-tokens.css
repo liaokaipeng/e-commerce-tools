@@ -1,0 +1,61 @@
+/* 深色主题共享令牌（--d-*）：监控大屏（monitor.css）与门户侧栏（portal.css）共用，
+   由两处 main.js 显式引入。与浅色主题的 styles/base.css 同构（字体 / 字号 / 间距 / 圆角 / 阴影 / 文字层级）。
+   定义在 html 上而不是局部容器：Element Plus 的抽屉、Tooltip 会 teleport 到 body，
+   只有挂在 html 上的变量才能被这些浮层内的元素取到。
+   本文件只定义 CSS 变量，不含 color-scheme / 滚动条等页面级行为——
+   monitor 在 monitor.css 的 html 上自带，门户侧栏在 portal.css 的 .sidebar 上自带。 */
+html {
+  /* ---------- 背景与表面 ---------- */
+  --d-bg: #0b0e17;           /* 页面底 */
+  --d-surface: #111527;      /* 顶栏 / 面板 / 底栏 */
+  --d-surface-2: #171b2e;    /* 卡片 / 表格头 */
+  --d-surface-3: #1c2140;    /* hover / 高亮块 */
+  --d-border: #1e2440;       /* 主分隔线 */
+  --d-border-2: #232a4a;     /* 卡片边线 */
+  --d-border-3: #2b3560;     /* 选中态边线 */
+
+  /* ---------- 文字层级（注释内为该色在 --d-surface-2 上的对比度，逐级拉开层次） ---------- */
+  --d-text-1: #eef1f8;       /* 标题 / 强调 · 15.1:1 */
+  --d-text-2: #c2c9db;       /* 正文 · 10.4:1 */
+  --d-text-3: #9aa3ba;       /* 次要（标签 / 单位） · 6.7:1 */
+  --d-text-4: #838cab;       /* 弱化（时间戳 / 脚注） · 5.1:1 */
+  --d-text-5: #7d86a0;       /* 极弱（禁用 / 未启用） · 4.7:1，脚注下限 */
+  --d-placeholder: #6b7490;  /* 占位符（非信息性文本） */
+
+  /* ---------- 语义色（保持现有色相不变） ---------- */
+  --d-p0: #FF3B30;
+  --d-p1: #FF9500;
+  --d-p2: #FFD60A;
+  --d-ok: #30D158;
+  --d-ok-bg: rgba(48, 209, 88, 0.2);
+  --d-reauth: #8f95a8;
+  --d-reauth-bg: rgba(143, 149, 168, 0.25);
+  --d-p0-soft: rgba(255, 59, 48, 0.07);   /* 店铺卡 P0 底色 */
+  --d-p0-glow: rgba(255, 59, 48, 0.55);   /* P0 呼吸/闪烁动画的辉光峰值 */
+  --d-muted: #5b6272;        /* 中性色（已关闭等） */
+  --d-warn-bg: #2a2410;      /* 授权失效横幅 */
+  --d-warn-border: #4d3c14;
+  --d-warn-text: #ffd97a;
+  --d-warn-strong: #ffb340;
+  --d-select: #4a5bd8;       /* 选中描边 */
+  --d-select-bg: #2b3560;
+
+  /* ---------- 字体 ---------- */
+  --d-font: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --d-fs-title: 15px;
+  --d-fs-body: 14px;
+  --d-fs-sm: 13px;
+  --d-fs-xs: 12px;
+  --d-fs-2xs: 11px;
+  --d-fs-3xs: 10px;
+
+  /* ---------- 间距 / 圆角 / 阴影 ---------- */
+  --d-gap: 10px;
+  --d-sp-2: 8px;
+  --d-sp-3: 12px;
+  --d-sp-4: 16px;
+  --d-radius-sm: 6px;
+  --d-radius-md: 8px;
+  --d-radius-lg: 10px;
+  --d-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+}

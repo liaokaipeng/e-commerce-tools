@@ -3,6 +3,7 @@
      支持：按国家/地区筛选 + 店铺名/店铺ID 搜索（下拉内输入即搜）+ 全选筛选结果 / 取消全选。 -->
 <script setup>
 import { computed } from 'vue';
+import StepCard from './StepCard.vue';
 import { regionLabel } from '../region-utils.js';
 import { useShopFilter } from '../composables/useShopFilter.js';
 import OpenapiGuide from './OpenapiGuide.vue';
@@ -42,8 +43,7 @@ const selCount = computed(() => props.selected.size);
 </script>
 
 <template>
-  <el-card shadow="never" class="card">
-    <template #header>② 选择店铺</template>
+  <StepCard :index="2" title="选择店铺">
     <div v-loading="loading" class="picker-box">
       <div class="picker-row">
         <el-select
@@ -87,7 +87,7 @@ const selCount = computed(() => props.selected.size);
       <!-- 缓存里没有任何店铺：给出去授权引导，而不是无限转圈 -->
       <OpenapiGuide v-if="stores.length === 0 && !loading" :tip="emptyTip || '暂无已授权店铺：请先到「开放平台」Tab 完成 App 配置与店铺授权。'" :reload="reload" />
     </div>
-  </el-card>
+  </StepCard>
 </template>
 
 <style scoped>

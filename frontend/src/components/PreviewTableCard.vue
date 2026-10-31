@@ -1,12 +1,16 @@
-<!-- 预览表格卡片：展开行明细 + 店铺/数量/状态列 + 底部执行区（含暂停/继续/取消）。
+<!-- 预览表格卡片：StepCard 骨架 + 展开行明细 + 店铺/数量/状态列 + 统一执行控制条
+     （RunControl：含进度条与暂停/继续/取消）。
      bidding-cancel 与 hotlisting-cancel 两页同源复用；两页的差异（是否有 SPU 列、明细列内容）
-     通过 extra-columns / #detail 插槽注入，样式在 styles/base.css 的 .preview-card 区块统一定义。 -->
+     通过 extra-columns / #detail 插槽注入。 -->
 <script setup>
+import StepCard from './StepCard.vue';
+import RunControl from './RunControl.vue';
 import LogPanel from './LogPanel.vue';
 
 defineProps({
+  index: { type: [Number, String], default: '' },
   title: { type: String, required: true },
-  /** 卡片头部右侧提示（如「待改进竞价共 12 条」） */
+  /** 卡片头部右侧徽章（如「待改进竞价共 12 条」） */
   badge: { type: String, default: '' },
   rows: { type: Array, default: () => [] },
   /** 行唯一键：(row) => string */
@@ -14,37 +18,36 @@ defineProps({
   /** 数量列标题与取值 */
   countLabel: { type: String, default: '数量' },
   countOf: { type: Function, required: true },
-  /** 执行区 */
+  /** 执行区（透传 RunControl） */
   actionText: { type: String, default: '开始执行' },
   runningText: { type: String, default: '执行中…' },
-  dangerTip: { type: String, default: '' },
   running: { type: Boolean, default: false },
   canRun: { type: Boolean, default: false },
+  /** 危险操作（主按钮红色实心 + 卡片红边） */
+  danger: { type: Boolean, default: false },
   jobId: { type: String, default: '' },
   paused: { type: Boolean, default: false },
   pausing: { type: Boolean, default: false },
-  /** 暂停时替换 dangerTip 显示的提示 */
-  pausedTip: { type: String, default: '已暂停：不再发起请求，点击「继续」恢复。' },
-  logLines: { type: Array, default: () => [] },
-  /** 是否显示取消按钮（hotlisting / bidding 均已支持） */
+  /** 是否显示取消按钮 */
   cancellable: { type: Boolean, default: true },
+  /** 静止时常驻提示（危险提示 / 运行说明） */
+  tip: { type: String, default: '' },
+  tipType: { type: String, default: 'info' },
+  pausedTip: { type: String, default: '已暂停：不再发起请求，点击「继续」恢复。' },
+  /** 进度 { done, total, fail }，透传 RunControl */
+  progress: { type: Object, default: null },
+  logLines: { type: Array, default: () => [] },
+  logHeight: { type: String, default: '280px' },
+  /** 只读卡（如扫描预览）可不显示日志面板 */
+  logVisible: { type: Boolean, default: true },
 });
 
 const emit = defineEmits(['run', 'pause', 'cancel']);
 </script>
 
 <template>
-  <el-card shadow="never" class="card danger-card">
-    <template #header>
-      <div class="card-header-row">
-        <span>{{ title }}</span>
-        <span v-if="badge" class="sel-count warn">{{ badge }}</span>
-      </div>
-    </template>
-
-    <template v-if="$slots.toolbar">
-      <slot name="toolbar" />
-    </template>
+  <StepCard :index="index" :title="title" :badge="badge" :class="{ 'danger-card': danger }">
+    <slot name="toolbar" />
 
     <el-table
       v-if="rows.length"
@@ -90,28 +93,28 @@ const emit = defineEmits(['run', 'pause', 'cancel']);
       <el-table-column prop="msg" label="备注" min-width="140" show-overflow-tooltip />
     </el-table>
 
-    <div class="actions exec-actions">
-      <el-button type="danger" size="large" :disabled="!canRun" :loading="running && !paused" @click="emit('run')">
-        {{ running ? runningText : actionText }}
-      </el-button>
-      <el-button
-        v-if="running && jobId"
-        size="large"
-        :type="paused ? 'success' : 'warning'"
-        :loading="pausing"
-        @click="emit('pause')"
-      >
-        {{ paused ? '继续' : '暂停' }}
-      </el-button>
-      <el-button v-if="running && jobId && cancellable" size="large" type="danger" plain @click="emit('cancel')">
-        取消任务
-      </el-button>
-      <span v-if="running && paused" class="paused-tip">{{ pausedTip }}</span>
-      <span v-else-if="dangerTip" class="danger-tip">{{ dangerTip }}</span>
-    </div>
+    <RunControl
+      class="exec-actions"
+      :action-text="actionText"
+      :running-text="runningText"
+      :running="running"
+      :can-run="canRun"
+      :danger="danger"
+      :job-id="jobId"
+      :paused="paused"
+      :pausing="pausing"
+      :cancellable="cancellable"
+      :tip="tip"
+      :tip-type="tipType"
+      :paused-tip="pausedTip"
+      :progress="progress"
+      @run="emit('run')"
+      @pause="emit('pause')"
+      @cancel="emit('cancel')"
+    />
 
-    <div class="log-box">
-      <LogPanel :lines="logLines" height="320px" />
+    <div v-if="logVisible" class="log-box">
+      <LogPanel :lines="logLines" :height="logHeight" />
     </div>
-  </el-card>
+  </StepCard>
 </template>

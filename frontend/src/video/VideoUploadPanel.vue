@@ -1,5 +1,8 @@
-<!-- 视频上传 · ③ 执行卡片 + 日志面板（展示层）。 -->
+<!-- 视频上传 · ③ 执行卡片 + 日志面板（展示层）。
+     执行控制（含进度条）统一走 RunControl；自动滚动开关内置于 LogPanel。 -->
 <script setup>
+import StepCard from '../components/StepCard.vue';
+import RunControl from '../components/RunControl.vue';
 import LogPanel from '../components/LogPanel.vue';
 
 defineProps({
@@ -7,36 +10,36 @@ defineProps({
   uploading: { type: Boolean, default: false },
   currentJobId: { type: String, default: '' },
   summary: { type: String, default: '' },
-  autoScroll: { type: Boolean, default: true },
   logLines: { type: Array, default: () => [] },
+  /** { done, total, fail }，来自 useVideoUpload */
+  progress: { type: Object, default: null },
 });
 
-const emit = defineEmits(['start', 'cancel', 'clear-log', 'export-result', 'update:autoScroll']);
+const emit = defineEmits(['start', 'cancel', 'clear-log', 'export-result']);
 </script>
 
 <template>
-  <el-card shadow="never" class="card">
-    <template #header>② 开始批量上传</template>
-    <div class="btn-row">
-      <el-button type="primary" :disabled="!hasRows" :loading="uploading" @click="emit('start')">
-        {{ uploading ? '上传中…' : '开始上传' }}
-      </el-button>
-      <el-button v-if="uploading" type="danger" plain :disabled="!currentJobId" @click="emit('cancel')">
-        取消上传
-      </el-button>
-      <el-button @click="emit('clear-log')">清空日志</el-button>
-      <el-button :disabled="!hasRows" @click="emit('export-result')">导出结果表格</el-button>
-      <el-switch
-        :model-value="autoScroll"
-        inline-prompt
-        active-text="自动滚动"
-        inactive-text="手动滚动"
-        @update:model-value="(v) => emit('update:autoScroll', v)"
-      />
-    </div>
+  <StepCard :index="3" title="开始批量上传">
+    <RunControl
+      action-text="开始上传"
+      running-text="上传中…"
+      :running="uploading"
+      :can-run="hasRows"
+      :job-id="currentJobId"
+      :pausable="false"
+      :progress="uploading ? progress : null"
+      tip="上传完成（含取消）后会自动导出带【状态】列的结果表格。"
+      @run="emit('start')"
+      @cancel="emit('cancel')"
+    >
+      <template #extra-actions>
+        <el-button size="large" @click="emit('clear-log')">清空日志</el-button>
+        <el-button size="large" :disabled="!hasRows" @click="emit('export-result')">导出结果表格</el-button>
+      </template>
+    </RunControl>
     <div v-if="summary" class="hint summary">{{ summary }}</div>
-    <LogPanel class="log-box" :lines="logLines" height="320px" fixed :auto-scroll="autoScroll" />
-  </el-card>
+    <LogPanel class="log-box" :lines="logLines" height="280px" fixed />
+  </StepCard>
 </template>
 
 <style scoped>

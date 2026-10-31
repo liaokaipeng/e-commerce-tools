@@ -6,6 +6,7 @@ import { useOpenapiStatus } from './useOpenapiStatus.js';
 import { useOpenapiAuth } from './useOpenapiAuth.js';
 import { useOpenapiShops } from './useOpenapiShops.js';
 import { useOpenapiBatchRefresh } from './useOpenapiBatchRefresh.js';
+import PageHeader from '../components/PageHeader.vue';
 import OpenapiAppCard from './OpenapiAppCard.vue';
 import OpenapiAuthCard from './OpenapiAuthCard.vue';
 import OpenapiShopTable from './OpenapiShopTable.vue';
@@ -19,6 +20,7 @@ const { batch, batchProgress, refreshAll, cancelRefreshAll } = useOpenapiBatchRe
 <template>
   <div class="page">
     <div class="container">
+      <PageHeader title="开放平台" desc="Shopee 开放平台 App 配置、店铺授权与 Token 管理，为官方 API 功能统一提供登录入口" />
 
       <OpenapiAppCard
         :form="form"

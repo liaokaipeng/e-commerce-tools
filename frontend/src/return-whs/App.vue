@@ -1,27 +1,27 @@
 <!-- Shopee 获取退单仓库 · 页面编排：上传表格（Return ID / Order ID / 店铺ID 三列）→ 按行取店铺ID
      → SSE 批量调 get_return_detail 取 whs_id → 导出「Order ID 列后插入退单仓库ID」的新表格。
      多店铺：店铺不在这里选，完全由表格「店铺ID」列决定（须为开放平台已授权店铺）。
-     表格解析与列语义见 useReturnTable.js；批量执行复用 composables/useBatchJob.js。 -->
+     展示拆 ShopWallCard（① 授权店铺）/ UploadCard（② 上传表格）；表格解析与列语义见 useReturnTable.js；
+     批量执行复用 composables/useBatchJob.js（执行区含可视化进度条）。 -->
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
-import { UploadFilled } from '@element-plus/icons-vue';
+import PageHeader from '../components/PageHeader.vue';
+import StepCard from '../components/StepCard.vue';
+import RunControl from '../components/RunControl.vue';
 import LogPanel from '../components/LogPanel.vue';
-import OpenapiGuide from '../components/OpenapiGuide.vue';
+import ShopWallCard from './ShopWallCard.vue';
+import UploadCard from './UploadCard.vue';
 import { useLog } from '../composables/useLog.js';
 import { useBatchJob } from '../composables/useBatchJob.js';
 import { downloadAoaXlsx } from '../utils/xlsx.js';
 import { readTable, buildRows, buildExportAoa } from './useReturnTable.js';
 import { getJsonResult } from '../composables/api.js';
-import { shopStateMeta } from '../composables/shopState.js';
 
 // ---------- ① 授权店铺（只读校验用：表格里的店铺ID必须都能对上，不在这里选店） ----------
 const shops = ref([]);
 const shopsLoading = ref(false);
 const appConfigured = ref(true);
-
-// 店铺展示名：店名优先（/api/openapi/status 回填的 shopName；失效店铺取不到名，回落「店铺 + ID」）
-const shopLabel = (s) => (s.shopName ? `${s.shopName}（${s.shopId}）` : `店铺 ${s.shopId}`);
 
 async function loadShops() {
   shopsLoading.value = true;
@@ -45,9 +45,6 @@ const shopById = computed(() => {
 
 // ---------- ② 表格（SheetJS 前端解析；表头需含 Return ID / Order ID / 店铺ID 列） ----------
 const table = ref(null); // { aoa, returnCol, orderCol, shopCol, rows, skipped, skippedNoShop, fileName }
-
-// el-upload 组件实例（超限替换文件时同步界面文件列表用）
-const uploadRef = ref(null);
 
 async function onFileChange(file) {
   const raw = (file && file.raw) || file;
@@ -78,13 +75,6 @@ function onFileRemove() {
   table.value = null;
   results.value = [];
   finished.value = false;
-}
-
-// 已选 1 个文件时再次选择：替换为新文件并同步界面文件列表（对齐 video 页写法，避免列表停留在旧文件）
-function onFileExceed(files) {
-  uploadRef.value?.clearFiles();
-  uploadRef.value?.handleStart(files[0]);
-  onFileChange(files[0]);
 }
 
 // 表格涉及的店铺ID（去重，按出现顺序）
@@ -127,10 +117,6 @@ const job = useBatchJob({
 
 const { running, progress, paused, pausing, jobId, togglePause, cancel } = job;
 
-const runningTip = computed(() => (running.value
-  ? `进行中：已处理 ${progress.value.done} / ${progress.value.total} 行（失败 ${progress.value.fail}）。`
-  : '逐行按表格「店铺ID」列调用开放平台 get_return_detail 获取退货仓库 ID（whs_id），只读不改动任何退单状态。'));
-
 const canRun = computed(() => !!table.value && table.value.rows.length > 0
   && badShopIds.value.length === 0 && !running.value);
 
@@ -145,8 +131,6 @@ async function onRun() {
 }
 
 // ---------- ④ 导出（Order ID 列后插入「退单仓库ID」新列） ----------
-const okCount = computed(() => results.value.filter((r) => r.ok).length);
-
 function onExport() {
   if (!table.value) return;
   const aoa = buildExportAoa(table.value.aoa, {
@@ -162,85 +146,47 @@ function onExport() {
 <template>
   <div class="page">
     <div class="container">
+      <PageHeader title="获取退单仓库" desc="按表格逐行查询 Return ID 对应的退货仓库 ID（whs_id），结果写回表格导出" />
 
-      <el-card shadow="never" class="card">
-        <template #header>
-          <div class="card-header-row">
-            <span>① 授权店铺</span>
-            <el-button size="small" @click="loadShops" :loading="shopsLoading">刷新</el-button>
-          </div>
-        </template>
-        <div class="hint">店铺由表格「店铺ID」列逐行决定，这里只需确认这些店铺已授权（失效店铺需先去「开放平台」页重新授权）。</div>
-        <div v-if="shops.length" class="shop-tags">
-          <el-tag
-            v-for="s in shops"
-            :key="s.shopId"
-            :type="shopStateMeta(s).type"
-            size="small"
-            effect="light"
-          >{{ shopLabel(s) }} · {{ shopStateMeta(s).label }}</el-tag>
-        </div>
-        <OpenapiGuide v-if="!appConfigured" tip="尚未配置开放平台 App：请先到「开放平台」页录入 App 并完成店铺授权，再回来使用本工具。" />
-        <OpenapiGuide v-else-if="!shops.length && !shopsLoading" tip="没有已授权店铺，请先到「开放平台」页授权。" />
-      </el-card>
+      <ShopWallCard
+        :shops="shops"
+        :shops-loading="shopsLoading"
+        :app-configured="appConfigured"
+        :reload="loadShops"
+      />
 
-      <el-card shadow="never" class="card">
-        <template #header>
-          <span>② 上传表格</span>
-          <el-tag size="small" effect="light" class="pill">支持 .xlsx / .xls / .csv</el-tag>
+      <UploadCard
+        :table="table"
+        :table-shop-ids="tableShopIds"
+        :bad-shop-ids="badShopIds"
+        @file-change="onFileChange"
+        @file-remove="onFileRemove"
+      />
+
+      <StepCard :index="3" title="获取退单仓库">
+        <template #extra>
+          <span v-if="jobId" class="job-id">任务 {{ jobId }}</span>
         </template>
-        <el-upload
-          ref="uploadRef"
-          class="file-upload"
-          drag
-          action="#"
-          :auto-upload="false"
-          :limit="1"
-          accept=".xlsx,.xls,.csv"
-          :on-change="onFileChange"
-          :on-exceed="onFileExceed"
-          :on-remove="onFileRemove"
+        <RunControl
+          action-text="开始获取"
+          running-text="获取中…"
+          :running="running"
+          :can-run="canRun"
+          :job-id="jobId"
+          :paused="paused"
+          :pausing="pausing"
+          :progress="running ? progress : null"
+          tip="逐行按表格「店铺ID」列调用开放平台 get_return_detail 获取退货仓库 ID（whs_id），只读不改动任何退单状态。"
+          @run="onRun"
+          @pause="togglePause"
+          @cancel="cancel"
         >
-          <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-          <div class="el-upload__text">把表格文件拖到这里，或 <em>点击选择文件</em></div>
-          <template #tip>
-            <div class="el-upload__tip">表头第 1 行必须包含 <b>Return ID</b> 列、<b>Order ID</b> 列与 <b>店铺ID</b> 列（也识别「退货ID / 退单编号 / 订单编号 / Shop ID / 店铺编号」等写法）。每行按自己的店铺ID查询，可一次混排多个店铺。</div>
+          <template #extra-actions>
+            <el-button size="large" :disabled="!results.length" @click="onExport">导出结果表格</el-button>
           </template>
-        </el-upload>
-        <div v-if="table" class="table-meta">
-          文件：{{ table.fileName || '（未命名）' }} ｜ 待查询 {{ table.rows.length }} 行（{{ tableShopIds.length }} 个店铺）
-          <span v-if="table.skipped">（跳过 {{ table.skipped }} 行无 Return ID）</span>
-          <span v-if="table.skippedNoShop">（跳过 {{ table.skippedNoShop }} 行无店铺ID）</span>
-        </div>
-        <el-alert
-          v-if="badShopIds.length"
-          class="shop-alert"
-          type="warning"
-          :closable="false"
-          show-icon
-          :title="`表格中有未授权或已失效的店铺ID：${badShopIds.join('、')}`"
-          description="请先到「开放平台」页完成授权或重新授权后再执行。"
-        />
-      </el-card>
-
-      <el-card shadow="never" class="card">
-        <template #header>
-          <div class="card-header-row">
-            <span>③ 获取退单仓库</span>
-            <span v-if="jobId" class="job-id">任务 {{ jobId }}</span>
-          </div>
-        </template>
-        <div class="actions">
-          <el-button type="primary" :disabled="!canRun" :loading="running" @click="onRun">
-            {{ running ? '获取中…' : '开始获取' }}
-          </el-button>
-          <el-button v-if="running" :loading="pausing" @click="togglePause">{{ paused ? '继续' : '暂停' }}</el-button>
-          <el-button v-if="running" type="danger" plain @click="cancel">取消</el-button>
-          <el-button :disabled="!results.length" @click="onExport">导出结果表格</el-button>
-        </div>
-        <div class="hint exec-tip">{{ runningTip }}</div>
+        </RunControl>
         <div class="log-box">
-          <LogPanel :lines="logLines" height="260px" />
+          <LogPanel :lines="logLines" />
         </div>
         <div v-if="results.length" class="preview-table">
           <el-table :data="results.slice().reverse()" size="small" max-height="320" border>
@@ -263,19 +209,12 @@ function onExport() {
             </el-table-column>
           </el-table>
         </div>
-      </el-card>
-
+      </StepCard>
     </div>
   </div>
 </template>
 
 <style scoped>
-.shop-tags { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
-.pill { margin-left: var(--sp-2); }
-.file-upload { margin-top: var(--sp-1); }
-.table-meta { margin-top: var(--sp-3); font-size: var(--fs-sm); color: var(--text-2); }
-.shop-alert { margin-top: var(--sp-3); }
-.exec-tip { margin-top: var(--sp-3); }
 .job-id { font-size: var(--fs-xs); color: var(--text-3); }
 .whs { font-family: var(--font-mono); }
 </style>

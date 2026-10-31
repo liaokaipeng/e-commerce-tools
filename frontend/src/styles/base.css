@@ -1,8 +1,9 @@
-/* 工具页公共基础样式与设计令牌（tiktok / bidding / bidding-cancel / hotlisting-cancel / video / openapi 共用）
-   monitor 大屏为深色主题，不使用本文件；门户页样式在 portal/App.vue 内维护。
+/* 工具页公共基础样式与设计令牌（tiktok / bidding / bidding-cancel / hotlisting-cancel / video / openapi / portal 共用；
+   门户页在 portal/main.js 显式引入本文件，工具页经各页 main.js 引入）
+   monitor 大屏为深色主题，不使用本文件。
 
-   本文件同时是「浅色主题」的唯一令牌来源：字体 / 字号 / 间距 / 圆角 / 阴影 / 控件高度 / 文字层级。
-   深色主题（monitor 大屏）的对应令牌在 monitor/monitor.css 顶部以 --d-* 前缀定义，两套同构、便于对照。
+   本文件是「浅色主题」的唯一令牌来源：字体 / 字号 / 间距 / 圆角 / 阴影 / 控件高度 / 文字层级。
+   深色主题（monitor 大屏 + 门户侧栏）的对应令牌抽在 styles/dark-tokens.css 以 --d-* 前缀定义，两套同构、便于对照。
    仅调整视觉与布局，不改动任何组件结构或交互逻辑。 */
 /* body 默认 margin 会让 min-height:100vh 的 .page 总高超出视口，多出一条滚动条 */
 html, body { margin: 0; padding: 0; }
@@ -31,12 +32,17 @@ html, body { margin: 0; padding: 0; }
   --success: #2e7d32;
   --success-bright: #25c16d;
   --warning: #b26a00;
-  --warning-bright: #e6a23c; /* 亮警告（实心图形用；与门户 portal.css 的 --p-warn 同值，两处需同步） */
+  --warning-bright: #e6a23c; /* 亮警告（实心图形用） */
   --warning-strong: #d84315;
   --danger: #c62828;
   --danger-bright: #e5484d;
   --danger-border: #ffd2cc;
   --info: #1e88e5;
+  /* 语义色软底（状态徽章 / 提示条背景用，与上面对应的深色字搭配） */
+  --success-soft: #e3f3e7;
+  --warning-soft: #fdf3e0;
+  --danger-soft: #fdecea;
+  --info-soft: #e4f1fd;
 
   /* ---------- 原生滚动条（浅色主题，Firefox / Chromium 双份） ---------- */
   --scroll-thumb: #cbd1e0;
@@ -146,8 +152,7 @@ html, body { margin: 0; padding: 0; }
 .btn-row > .el-button + .el-button,
 .row > .el-button + .el-button,
 .dir-row > .el-button + .el-button,
-.picker-row > .el-button + .el-button,
-.shopcfg-ops > .el-button + .el-button { margin-left: 0; }
+.picker-row > .el-button + .el-button { margin-left: 0; }
 
 /* 同一操作行内混用 size="default"(32px) 与 size="large"(40px) 会让一行出现两种高度，
    这里把操作行内的按钮统一到 --control-h-lg，行内高度一致。 */
@@ -229,11 +234,7 @@ html {
 /* ---------- 批量操作页预览表格（bidding-cancel / hotlisting-cancel 共用，
      原两页各自 scoped 复制一份，现统一在此定义） ---------- */
 .danger-card { border: 1px solid var(--danger-border); }
-.sel-count.warn { color: var(--warning-strong); font-weight: 600; }
-.danger-tip { font-size: var(--fs-sm); color: var(--danger); flex: 1; min-width: 220px; }
-.paused-tip { font-size: var(--fs-sm); color: var(--warning); flex: 1; min-width: 220px; }
 .exec-actions { margin-top: var(--sp-3); }
-.card-header-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .preview-table { margin-top: var(--sp-3); }
 .expand-list { padding: 2px 10px 8px; }
 .expand-row {

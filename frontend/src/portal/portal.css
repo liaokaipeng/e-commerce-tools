@@ -1,65 +1,39 @@
 /* 门户页样式（由 App.vue 以 <style scoped src> 引入，保持 scoped 作用域不变）。
-   注意：--p-* 令牌与 base.css / monitor.css 的同值令牌是刻意的手工同步（门户页不加载那两个文件），
-   改任一侧的观感令牌需同步另一侧。 */
+   浅色令牌与 Element Plus 变量覆盖来自 styles/base.css、深色令牌（--d-*）来自 styles/dark-tokens.css
+   （均在 portal/main.js 引入），本文件只保留门户布局与侧栏专属令牌，不再手工复制同值令牌。 */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 .portal {
-  /* 深色侧栏令牌：与监控大屏（monitor.css 的 --d-*）同源，两处深色观感一致 */
-  --p-bg: #f4f6fb;          /* 内容区（iframe 之外的留白） */
-  --p-sidebar: #111527;     /* 与监控大屏顶栏一致：与 monitor.css 的 --d-surface 同值，两处需同步 */
-  --p-border: #1e2440;
-  --p-text-1: #eef1f8;      /* 标题 */
-  --p-text-2: #d3d9e8;      /* 正文 / 菜单项 */
-  --p-text-3: #99a1b8;      /* 分组标签 / 次要说明 */
-  --p-brand: #ee4d2d;
-  --p-hover: rgba(255, 255, 255, 0.16);
-  --p-rest: rgba(255, 255, 255, 0.08);
-  --p-radius-sm: 8px;
-  --p-radius-md: 10px;
-  /* 侧栏滚动条：与 monitor.css 的深色滚动条同值，两处需同步 */
-  --p-scroll: #2f3a5c;
-  --p-scroll-hover: #3d4a72;
-  --p-warn: #e6a23c;        /* 更新检查失败（.ver-warn） */
-  --p-on-brand: #fff;       /* 导航 hover/active 文字、.ver-badge、.logo */
-  --p-on-brand-dim: rgba(255, 255, 255, 0.82); /* active 按钮内 small */
-  --p-text-body: #23262f;   /* 内容区正文（.portal 的 color） */
-  --p-frame-bg: #fff;       /* iframe 背景 */
+  /* 侧栏专属令牌（与深色令牌 --d-* 搭配使用） */
+  --p-on-brand: #fff;
+  --p-on-brand-dim: rgba(255, 255, 255, 0.78);
   --p-brand-glow: rgba(238, 77, 45, 0.45);
-  --p-brand-glow-strong: rgba(238, 77, 45, 0.5);
-  /* UpdateDrawer（el-drawer 就地渲染，可继承 .portal 上的令牌）复用浅色语义色：
-     门户页不加载 styles/base.css，这里按同值补齐，与 base.css 两处需同步 */
-  --surface-2: #f7f8fc;
-  --text-2: #4b5266;
-  --danger: #c62828;
-  --success: #2e7d32;
-  /* UpdateDrawer 的 EP 主按钮品牌色：与 base.css 的 --el-color-primary 系同值，两处需同步 */
-  --el-color-primary: #ee4d2d;
-  --el-color-primary-light-3: #f3826c;
-  --el-color-primary-light-5: #f7a696;
-  --el-color-primary-light-7: #facac0;
-  --el-color-primary-light-8: #fcdbd5;
-  --el-color-primary-light-9: #fdedea;
-  --el-color-primary-dark-2: #be3e24;
+  --p-brand-active-bg: rgba(238, 77, 45, 0.16);
+  --p-brand-bright: #ff7a5c;  /* 深底上的品牌亮色（active 图标用，#ee4d2d 在深底上偏暗） */
+  --p-scroll: #2f3a5c;        /* 与 monitor.css 的深色滚动条同值 */
+  --p-scroll-hover: #3d4a72;
 
-  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-  font-size: 14px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
   line-height: 1.5;
-  background: var(--p-bg);
-  color: var(--p-text-body);
+  background: var(--bg);
+  color: var(--text-1);
   height: 100vh;
   display: flex;
   flex-direction: row;
 }
+
+/* ============ 侧栏 ============ */
 .sidebar {
   flex: none;
-  width: 208px;
+  width: 224px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   overflow-y: auto; /* 菜单过多时侧栏纵向滚动 */
-  background: var(--p-sidebar);
-  border-right: 1px solid var(--p-border);
-  color: var(--p-text-2);
-  padding: 16px 14px;
+  background: var(--d-surface);
+  border-right: 1px solid var(--d-border);
+  color: var(--d-text-2);
+  padding: 16px 12px 14px;
   /* 深色侧栏的原生滚动条也要跟着变深，否则 Windows 上会露出一条浅灰滚动条 */
   color-scheme: dark;
   scrollbar-width: thin;
@@ -74,121 +48,216 @@
   border-radius: 999px;
 }
 .sidebar::-webkit-scrollbar-thumb:hover { background: var(--p-scroll-hover); background-clip: padding-box; }
+
+/* ---- 品牌区 ---- */
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: none;
-  padding: 0 4px 12px;
-  border-bottom: 1px solid var(--p-border);
+  padding: 2px 6px 14px;
+  border-bottom: 1px solid var(--d-border);
 }
 .logo {
-  width: 34px;
-  height: 34px;
-  background: var(--p-brand);
-  border-radius: var(--p-radius-md);
+  width: 36px;
+  height: 36px;
+  flex: none;
+  background: var(--brand);
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 18px;
   color: var(--p-on-brand);
-  box-shadow: 0 2px 8px var(--p-brand-glow);
+  box-shadow: 0 2px 10px var(--p-brand-glow);
 }
-.brand b { font-size: 16px; font-weight: 600; color: var(--p-text-1); display: block; line-height: 1.2; }
-.brand small {
+.brand-text b {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--d-text-1);
+  line-height: 1.25;
+}
+.brand-text small {
   display: block;
   font-size: 11px;
   font-weight: 400;
-  color: var(--p-text-3);
-  line-height: 1.2;
+  color: var(--d-text-3);
+  line-height: 1.25;
 }
+
+/* ---- 菜单 ---- */
 nav {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 .g-label {
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 600;
   letter-spacing: 1px;
-  color: var(--p-text-3);
-  margin-top: 6px;
+  color: var(--d-text-4);
+  margin: 10px 6px 2px;
   white-space: nowrap;
 }
-.g-label:first-child { margin-top: 0; }
+.g-label:first-child { margin-top: 2px; }
 nav a {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   border: none;
-  background: var(--p-rest);
-  color: var(--p-text-2);
-  padding: 8px 12px;
-  border-radius: var(--p-radius-sm);
-  font-size: 14px;
+  background: transparent;
+  color: var(--d-text-2);
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13.5px;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.15s, color 0.15s, transform 0.15s, box-shadow 0.15s;
+  transition: background-color 0.15s, color 0.15s;
   font-family: inherit;
   white-space: nowrap;
   text-align: left;
   text-decoration: none;
 }
-nav a:hover { background: var(--p-hover); color: var(--p-on-brand); }
-nav a.active {
-  background: var(--p-brand);
-  color: var(--p-on-brand);
-  box-shadow: 0 2px 10px var(--p-brand-glow-strong);
-  transform: translateX(2px);
+nav a:hover { background: var(--d-surface-3); color: var(--d-text-1); }
+/* active：左缘品牌指示条 + 柔和品牌底，替代整块色块与位移跳动 */
+nav a.active { background: var(--p-brand-active-bg); color: var(--p-on-brand); }
+nav a.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  width: 3px;
+  height: 60%;
+  border-radius: 999px;
+  background: var(--brand);
 }
+.nav-ico { font-size: 16px; flex: none; color: var(--d-text-3); transition: color 0.15s; }
+nav a:hover .nav-ico { color: var(--d-text-2); }
+nav a.active .nav-ico { color: var(--p-brand-bright); }
+.nav-text { flex: 1; min-width: 0; }
 nav a small {
   display: block;
   font-size: 11px;
   font-weight: 400;
-  color: var(--p-text-3);
+  color: var(--d-text-4);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: color 0.15s;
 }
-nav a.active small, nav a:hover small { color: var(--p-on-brand-dim); }
-.frame-wrap { flex: 1; position: relative; }
+nav a:hover small { color: var(--d-text-3); }
+nav a.active small { color: var(--p-on-brand-dim); }
 
 /* ============ 侧栏底部：版本与更新入口 ============ */
-.ver-bar {
+.ver-card {
   margin-top: auto;
   flex: none;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--d-surface-2);
+  border: 1px solid var(--d-border-2);
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.ver-card:hover { background: var(--d-surface-3); border-color: var(--d-border-3); }
+.ver-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 8px 12px;
-  border-radius: var(--p-radius-sm);
-  background: var(--p-rest);
-  color: var(--p-text-3);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background-color 0.15s, color 0.15s;
-  white-space: nowrap;
 }
-.ver-bar:hover { background: var(--p-hover); color: var(--p-text-2); }
-.ver-text { font-variant-numeric: tabular-nums; }
+.ver-label { font-size: 11px; color: var(--d-text-4); }
+.ver-text { font-size: 12px; font-weight: 600; color: var(--d-text-2); font-variant-numeric: tabular-nums; }
+.ver-status { margin-top: 5px; font-size: 11px; color: var(--d-text-4); }
 .ver-badge {
-  background: var(--p-brand);
+  display: inline-block;
+  background: var(--brand);
   color: var(--p-on-brand);
   font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
+  box-shadow: 0 1px 6px var(--p-brand-glow);
 }
-.ver-warn { color: var(--p-warn); }
-iframe {
+.ver-warn { color: var(--warning-bright); }
+.ver-dim { color: var(--d-text-5); }
+
+/* ============ 内容区：iframe 常驻槽位 ============ */
+.frame-wrap { flex: 1; position: relative; overflow: hidden; }
+.frame-slot {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  /* 离场：先淡出再隐藏（visibility 延迟到过渡结束） */
+  transition: opacity 0.18s ease, visibility 0s linear 0.18s;
+}
+.frame-slot.active {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  /* 进场：visibility 立即生效，透明度过渡 */
+  transition: opacity 0.18s ease;
+}
+.frame-slot iframe {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   border: none;
-  background: var(--p-frame-bg);
-  visibility: hidden;
+  background: var(--surface);
 }
-iframe.active { visibility: visible; }
+
+/* ---- 首次加载骨架（iframe load 事件后淡出） ---- */
+.frame-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.frame-loading-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.frame-loading-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--brand);
+  color: var(--p-on-brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  box-shadow: 0 4px 18px var(--p-brand-glow);
+  animation: framePulse 1.4s ease-in-out infinite;
+}
+@keyframes framePulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+
+/* ============ 窄屏（触屏 / 分屏场景）：侧栏塌缩成图标栏 ============ */
 @media (max-width: 640px) {
-  .brand-text b { font-size: 12px; }
-  .sidebar { width: 64px; padding: 12px 8px; }
-  nav a { padding: 8px; font-size: 12px; }
-  nav a small, .g-label { display: none; }
+  .sidebar { width: 60px; padding: 12px 8px 10px; }
+  .brand { justify-content: center; padding: 2px 0 12px; }
+  .brand-text { display: none; }
+  nav a { padding: 10px; justify-content: center; }
+  .nav-text, .g-label { display: none; }
+  nav a.active::before { display: none; }
+  .ver-card { padding: 8px 6px; }
+  .ver-label, .ver-status { display: none; }
+  .ver-row { justify-content: center; }
+  .ver-text { font-size: 10px; }
 }

@@ -3,6 +3,7 @@
 <script setup>
 import { computed } from 'vue';
 import { UploadFilled } from '@element-plus/icons-vue';
+import StepCard from '../components/StepCard.vue';
 import OpenapiGuide from '../components/OpenapiGuide.vue';
 import { regionLabel } from '../region-utils.js';
 import { useShopFilter } from '../composables/useShopFilter.js';
@@ -39,8 +40,7 @@ const statusText = (t) => STATUS_TEXT[t] || '';
 
 <template>
   <!-- 凭证 -->
-  <el-card shadow="never" class="card">
-    <template #header><span>上传凭证</span></template>
+  <StepCard :index="1" title="上传凭证">
     <div v-if="!isPh" class="row shop-row">
       <el-select
         v-model="shopRegionFilter"
@@ -85,12 +85,11 @@ const statusText = (t) => STATUS_TEXT[t] || '';
     <div class="btn-row">
       <el-button :loading="refreshingCreds" @click="emit('refresh-creds')">从浏览器刷新凭证</el-button>
     </div>
-  </el-card>
+  </StepCard>
 
   <!-- 表格 -->
-  <el-card shadow="never" class="card">
-    <template #header>
-      <span>① 选择表格</span>
+  <StepCard :index="2" title="选择表格">
+    <template #extra>
       <el-tag size="small" effect="light" class="pill">支持 .xlsx / .xls / .csv</el-tag>
     </template>
     <el-upload
@@ -131,7 +130,7 @@ const statusText = (t) => STATUS_TEXT[t] || '';
         </el-table-column>
       </el-table>
     </div>
-  </el-card>
+  </StepCard>
 </template>
 
 <style scoped>

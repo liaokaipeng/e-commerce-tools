@@ -1,6 +1,8 @@
 <!-- 开放平台 · ② 店铺授权卡片（展示层）。
      授权链接生成 / 复制 / 手动回调等逻辑在 openapi/useOpenapiAuth.js，本组件只负责渲染并上抛事件。 -->
 <script setup>
+import StepCard from '../components/StepCard.vue';
+
 defineProps({
   /** App 配置表单对象（本卡片只读用其中的 redirect） */
   form: { type: Object, required: true },
@@ -20,8 +22,7 @@ const manualUrl = defineModel('manualUrl', { type: String, default: '' });
 </script>
 
 <template>
-  <el-card shadow="never" class="card">
-    <template #header>② 店铺授权</template>
+  <StepCard :index="2" title="店铺授权">
     <el-form label-width="130px" @submit.prevent>
       <el-form-item label="回调地址 redirect">
         <el-input v-model="form.redirect" placeholder="https://example.com/" class="redirect-input" />
@@ -58,7 +59,7 @@ const manualUrl = defineModel('manualUrl', { type: String, default: '' });
         <el-button size="small" class="copy-snippet" @click="emit('copy-snippet')">复制代码</el-button>
       </el-collapse-item>
     </el-collapse>
-  </el-card>
+  </StepCard>
 </template>
 
 <style scoped>

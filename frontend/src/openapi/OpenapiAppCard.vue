@@ -1,6 +1,8 @@
 <!-- 开放平台 · ① App 配置卡片（展示层）。
      状态与读写逻辑在 openapi/useOpenapiStatus.js，本组件只负责渲染并上抛保存事件。 -->
 <script setup>
+import StepCard from '../components/StepCard.vue';
+
 defineProps({
   /** App 配置表单对象（partnerId / partnerKey / env / redirect），由父级共享 */
   form: { type: Object, required: true },
@@ -15,8 +17,7 @@ const emit = defineEmits(['save']);
 </script>
 
 <template>
-  <el-card shadow="never" class="card">
-    <template #header>① App 配置（开放平台开发者账号）</template>
+  <StepCard :index="1" title="App 配置（开放平台开发者账号）">
     <el-form label-width="130px" @submit.prevent>
       <el-form-item label="partner_id">
         <el-input v-model="form.partnerId" placeholder="开放平台 App 的 partner_id" />
@@ -57,7 +58,7 @@ const emit = defineEmits(['save']);
     </el-form>
     <el-alert type="info" :closable="false" show-icon
       title="凭证只保存在本机，不上传；key 保存后不再完整显示。" />
-  </el-card>
+  </StepCard>
 </template>
 
 <style scoped>

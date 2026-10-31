@@ -1,10 +1,10 @@
 <script setup>
 // Shopee 取消竞价：扫描「待改进」竞价 + 批量撤销（可暂停 / 继续 / 取消）。
 // 通用能力：登录/店铺（useShopeeSession）、日志（useLog）、预览扫描与批量任务（useBatchJob）、
-// 预览表格卡片（PreviewTableCard）——与「取消注册 Hot Listing」页共用同一套实现。
-// 页面级样式统一在 styles/base.css（.danger-card / .preview-table / .expand-* 等）。
+// 预览表格卡片（PreviewTableCard，执行区含可视化进度条）——与「取消注册 Hot Listing」页共用同一套实现。
 import { ref, computed } from 'vue';
 import { ElMessage } from 'element-plus';
+import PageHeader from '../components/PageHeader.vue';
 import LoginCard from '../components/LoginCard.vue';
 import StorePicker from '../components/StorePicker.vue';
 import PreviewTableCard from '../components/PreviewTableCard.vue';
@@ -60,10 +60,6 @@ const job = useBatchJob({
 
 const { running: cancelling, jobId: curJobId, paused, pausing, start, togglePause, cancel } = job;
 
-const runningTip = computed(() => (cancelling.value
-  ? `进行中：已处理 ${job.progress.value.done} 项（失败 ${job.progress.value.fail}）。`
-  : '撤销后竞价立即失效，不可恢复！建议先执行第 ③ 步扫描确认。'));
-
 async function doCancel() {
   if (selected.size === 0) { ElMessage.warning('请先选择至少一个店铺'); return; }
   const hint = previewDone.value
@@ -77,20 +73,23 @@ async function doCancel() {
   if (!ok) return; // 用户取消
   clearLog();
   log(`开始撤销，共 ${selected.size} 个店铺…`, 'info');
-  await start([], { shopIds: [...selected] });
+  // 传入预览行：执行时逐行回填状态，进度条 total = 预览店铺数
+  await start(previewShops.value, { shopIds: [...selected] });
 }
 </script>
 
 <template>
   <div class="page">
     <div class="container">
+      <PageHeader title="取消竞价" desc="扫描各店铺「待改进」竞价并批量撤销，撤销后立即失效不可恢复" />
 
       <LoginCard :status="status" :refreshing="refreshing" :flash="flash" @refresh="refreshStatus(true)" />
 
       <StorePicker :stores="stores" :selected="selected" :loading="storesLoading" :empty-tip="storesEmptyTip" :reload="loadStores" />
 
       <PreviewTableCard
-        title="③ 扫描待改进竞价（预览）"
+        :index="3"
+        title="扫描待改进竞价（预览）"
         :badge="previewDone ? `待改进竞价共 ${totalBidCount} 条` : ''"
         :rows="previewShops"
         :row-key-of="(r) => String(r.shopId)"
@@ -100,9 +99,9 @@ async function doCancel() {
         :can-run="selCount > 0 && !scanning"
         action-text="扫描待改进竞价"
         running-text="扫描中…"
-        danger-tip="扫描只读，不会改动任何竞价；确认条数后再执行下方撤销。"
+        tip="扫描只读，不会改动任何竞价；确认条数后再执行下方撤销。"
         :cancellable="false"
-        :log-lines="[]"
+        :log-visible="false"
         @run="onScan"
       >
         <template #toolbar>
@@ -125,12 +124,13 @@ async function doCancel() {
       </PreviewTableCard>
 
       <PreviewTableCard
-        title="④ 撤销竞价（危险操作）"
+        :index="4"
+        title="撤销竞价（危险操作）"
+        danger
         :rows="previewShops"
         :row-key-of="(r) => String(r.shopId)"
         count-label="待改进竞价"
         :count-of="(r) => r.bidCount"
-        :badge="cancelling ? `进度：已处理 ${job.progress.value.done} 项` : ''"
         :running="cancelling"
         :can-run="selCount > 0"
         action-text="撤销全部待改进竞价"
@@ -139,7 +139,9 @@ async function doCancel() {
         :paused="paused"
         :pausing="pausing"
         paused-tip="已暂停：不再发起撤销，点击「继续」恢复。"
-        :danger-tip="runningTip"
+        tip="撤销后竞价立即失效，不可恢复！建议先执行第 ③ 步扫描确认。"
+        tip-type="danger"
+        :progress="cancelling ? job.progress.value : null"
         :log-lines="logLines"
         @run="doCancel"
         @pause="togglePause"

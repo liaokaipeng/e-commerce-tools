@@ -1,5 +1,7 @@
-<!-- ① 登录（Cookie）状态卡：bidding / bidding-cancel 共用 -->
+<!-- ① 登录（Cookie）状态卡：bidding / bidding-cancel / hotlisting-cancel 共用 -->
 <script setup>
+import StepCard from './StepCard.vue';
+
 defineProps({
   status: { type: Object, required: true },
   refreshing: { type: Boolean, default: false },
@@ -9,8 +11,7 @@ const emit = defineEmits(['refresh']);
 </script>
 
 <template>
-  <el-card shadow="never" class="card">
-    <template #header>① 登录（Cookie）</template>
+  <StepCard :index="1" title="登录（Cookie）">
     <div class="status-bar" :class="{ flash }">
       <el-tag :type="status.checking ? 'info' : status.loggedIn ? 'success' : 'danger'" effect="light">
         <span class="dot" :class="status.loggedIn ? 'ok' : 'err'"></span>
@@ -19,7 +20,7 @@ const emit = defineEmits(['refresh']);
       <span class="status-tip">{{ status.tip }}</span>
       <el-button size="small" :loading="refreshing" @click="emit('refresh')">刷新状态</el-button>
     </div>
-  </el-card>
+  </StepCard>
 </template>
 
 <style scoped>

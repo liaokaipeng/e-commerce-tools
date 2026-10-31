@@ -1,8 +1,9 @@
 <!-- 开放平台 · ③ 已授权店铺卡片（展示层）。
      逐店操作与批量刷新逻辑在 openapi/useOpenapiShops.js / useOpenapiBatchRefresh.js，
-     本组件只负责渲染并上抛事件。 -->
+     本组件只负责渲染并上抛事件；批量刷新进行中在表头上方显示进度条（可取消）。 -->
 <script setup>
 import { computed, ref } from 'vue';
+import StepCard from '../components/StepCard.vue';
 
 const props = defineProps({
   /** 登录状态（shops / loading） */
@@ -25,25 +26,30 @@ const emit = defineEmits(['refresh-status', 'refresh-all', 'cancel-refresh-all',
 const onlyImportant = ref(false);
 const importantCount = computed(() => props.status.shops.filter((s) => s.important).length);
 const visibleShops = computed(() => (onlyImportant.value ? props.status.shops.filter((s) => s.important) : props.status.shops));
+
+// 批量刷新进度条：total 为共享 token 分组数
+const batchPercent = computed(() => (props.batch.total
+  ? Math.min(100, Math.round((props.batch.done / props.batch.total) * 100))
+  : 0));
 </script>
 
 <template>
-  <el-card shadow="never" class="card">
-    <template #header>
-      <div class="card-header-row">
-        <span>③ 已授权店铺</span>
-        <div class="row">
-          <span v-if="batch.running" class="hint">{{ batchProgress }}</span>
-          <span class="hint">重点 {{ importantCount }} / {{ status.shops.length }}</span>
-          <el-checkbox v-model="onlyImportant" :disabled="!status.shops.length">只看重点店铺</el-checkbox>
-          <el-button size="small" :disabled="batch.running" :loading="status.loading" @click="emit('refresh-status')">刷新状态</el-button>
-          <el-button size="small" type="warning" :loading="batch.running" :disabled="!status.shops.length" @click="emit('refresh-all')">
-            批量刷新 token
-          </el-button>
-          <el-button v-if="batch.running" size="small" type="danger" plain @click="emit('cancel-refresh-all')">取消</el-button>
-        </div>
-      </div>
+  <StepCard :index="3" title="已授权店铺">
+    <template #extra>
+      <span class="hint">重点 {{ importantCount }} / {{ status.shops.length }}</span>
+      <el-checkbox v-model="onlyImportant" :disabled="!status.shops.length">只看重点店铺</el-checkbox>
+      <el-button size="small" :disabled="batch.running" :loading="status.loading" @click="emit('refresh-status')">刷新状态</el-button>
+      <el-button size="small" type="warning" :loading="batch.running" :disabled="!status.shops.length" @click="emit('refresh-all')">
+        批量刷新 token
+      </el-button>
     </template>
+
+    <div v-if="batch.running" class="batch-progress">
+      <el-progress class="batch-progress-bar" :percentage="batchPercent" :stroke-width="8" :show-text="false" />
+      <span class="hint">{{ batchProgress }}</span>
+      <el-button size="small" type="danger" plain @click="emit('cancel-refresh-all')">取消</el-button>
+    </div>
+
     <el-table v-loading="status.loading" :data="visibleShops" border :empty-text="status.shops.length ? '没有标记为重点的店铺，取消勾选「只看重点店铺」可查看全部' : '暂无已授权店铺，请先完成 ② 店铺授权'">
       <el-table-column label="重点" width="56" align="center">
         <template #default="{ row }">
@@ -86,9 +92,16 @@ const visibleShops = computed(() => (onlyImportant.value ? props.status.shops.fi
       access_token 约 4 小时有效（过期自动刷新）；refresh_token 约 30 天有效，长期不用需重新授权。<br />
       批量刷新会逐店刷新（每个店铺用各自 shop_id 换 token，各自保存）；短时间内刚刷新过会跳过重复刷新（防连点刷死凭证），同一时刻只允许一个批量任务在跑；标「需重新授权」的店铺会被跳过，重新授权后自动恢复。
     </div>
-  </el-card>
+  </StepCard>
 </template>
 
 <style scoped>
+.batch-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: var(--sp-3);
+}
+.batch-progress-bar { flex: 1; }
 .table-foot-tip { margin-top: var(--sp-2); }
 </style>

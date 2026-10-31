@@ -1,6 +1,9 @@
-<!-- TikTok 无水印下载页：编排网络检测与下载任务，模板与样式见下。 -->
+<!-- TikTok 无水印下载页：编排网络检测与下载任务，展示统一走 PageHeader + StepCard + RunControl 骨架。 -->
 <script setup>
 import { onMounted } from 'vue';
+import PageHeader from '../components/PageHeader.vue';
+import StepCard from '../components/StepCard.vue';
+import RunControl from '../components/RunControl.vue';
 import DirRow from '../components/DirRow.vue';
 import LogPanel from '../components/LogPanel.vue';
 import { useDirSettings } from '../composables/useDirSettings.js';
@@ -19,7 +22,7 @@ const { proxyConnected, proxyText, showVpn, checkNetwork, recheckNetwork } = use
   },
 });
 
-const { urls, downloading, progress, progressPct, summary, validCount, startDownload, stopDownload } =
+const { urls, downloading, progress, summary, validCount, startDownload, stopDownload } =
   useDownloadJob({ dir, ensureDefaultDir, log, clear: clearLog, showVpn });
 
 onMounted(() => {
@@ -31,6 +34,8 @@ onMounted(() => {
 <template>
   <div class="page">
     <div class="container">
+      <PageHeader title="视频下载" desc="粘贴 TikTok 链接批量下载无水印视频到本机目录" />
+
       <el-alert class="proxy-alert" :closable="false" type="info" show-icon>
         <template #title>
           <span class="dot" :class="proxyConnected ? '' : 'off'"></span>
@@ -46,8 +51,7 @@ onMounted(() => {
         </template>
       </el-alert>
 
-      <el-card shadow="never" class="card">
-        <template #header>① 输入 TikTok 视频链接</template>
+      <StepCard :index="1" title="输入 TikTok 视频链接">
         <el-input
           v-model="urls"
           type="textarea"
@@ -55,39 +59,37 @@ onMounted(() => {
           placeholder="每行粘贴一个 TikTok 视频链接，例如：&#10;https://www.tiktok.com/@username/video/7439702365055290666&#10;&#10;支持 www.tiktok.com / vm.tiktok.com / v.tiktok.com 短链接"
         />
         <div class="hint empty-hint">{{ validCount ? `已识别 ${validCount} 个有效链接` : '' }}</div>
-      </el-card>
+      </StepCard>
 
-      <el-card shadow="never" class="card">
-        <template #header>② 选择保存位置</template>
+      <StepCard :index="2" title="选择保存位置">
         <DirRow
-              v-model:dir="dir"
-              placeholder="例如 D:\videos\tiktok"
+          v-model:dir="dir"
+          placeholder="例如 D:\videos\tiktok"
           @set-default="setDefaultDir"
           @open="openDir"
         />
-        <div class="actions">
-          <template v-if="downloading">
-            <el-button type="primary" size="large" :loading="downloading">下载中...</el-button>
-            <el-button type="danger" size="large" @click="stopDownload">停止下载</el-button>
+        <RunControl
+          class="run-area"
+          action-text="开始下载"
+          running-text="下载中…"
+          :running="downloading"
+          :can-run="validCount > 0 && !downloading"
+          :pausable="false"
+          :cancellable="false"
+          :progress="downloading && progress.show ? { done: progress.done, total: progress.total, fail: progress.fail } : null"
+          tip="下载逐条进行，保存到上方设置的目录；大陆网络需保持代理开启。"
+        >
+          <template #extra-actions>
+            <el-button v-if="downloading" size="large" type="danger" plain @click="stopDownload">停止下载</el-button>
+            <el-button size="large" @click="recheckNetwork">重新检测网络</el-button>
           </template>
-          <el-button v-else type="primary" size="large" @click="startDownload">开始下载</el-button>
-          <el-button size="large" @click="recheckNetwork">重新检测网络</el-button>
-        </div>
-      </el-card>
+        </RunControl>
+      </StepCard>
 
-      <el-card shadow="never" class="card">
-        <template #header>③ 下载日志</template>
-        <div v-if="progress.show" class="progress-line">
-          <el-progress :percentage="progressPct" :stroke-width="12" class="progress-bar" />
-          <div class="progress-text">
-            进度：{{ progress.done }} / {{ progress.total }}
-            <span class="ok">成功 {{ progress.ok }}</span>
-            <span class="err">失败 {{ progress.fail }}</span>
-          </div>
-        </div>
+      <StepCard :index="3" title="下载日志">
         <el-alert v-if="summary.show" :closable="false" :title="summary.text" class="summary-alert" :class="summary.failed ? 'sum-err' : 'sum-ok'" />
         <LogPanel :lines="logLines" height="420px" />
-      </el-card>
+      </StepCard>
     </div>
   </div>
 </template>
@@ -104,21 +106,7 @@ onMounted(() => {
 }
 .dot.off { background: var(--warning-bright); }
 .empty-hint { margin-top: var(--sp-2); }
-.actions { margin-top: var(--sp-4); }
-.progress-line {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-3);
-}
-.progress-bar { flex: 1; min-width: 160px; }
-.progress-text {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.progress-text .ok { color: var(--success); margin-left: var(--sp-2); }
-.progress-text .err { color: var(--danger); margin-left: var(--sp-2); }
+.run-area { margin-top: var(--sp-4); }
 .summary-alert { margin-bottom: var(--sp-3); }
 .summary-alert.sum-ok { color: var(--success); }
 .summary-alert.sum-err { color: var(--danger); }

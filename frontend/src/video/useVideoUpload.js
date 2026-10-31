@@ -8,10 +8,11 @@ import { postJsonResult } from '../composables/api.js';
 
 export function useVideoUpload({ site, isPh, siteLabel, onFinish }) {
   const { logLines, log, clear: clearLog } = useLog();
-  const autoScroll = ref(true);
   const uploading = ref(false);
   const summary = ref('');
   const currentJobId = ref('');
+  // 可视化进度条数据（RunControl 消费；summary 文案仍走 upload-events 的 formatProgress）
+  const progress = ref({ done: 0, total: 0, fail: 0 });
   let cancelledFlag = false;
   let es = null;
 
@@ -42,6 +43,7 @@ export function useVideoUpload({ site, isPh, siteLabel, onFinish }) {
     currentJobId.value = '';
     clearLog();
     summary.value = '';
+    progress.value = { done: 0, total: 0, fail: 0 };
     log(`开始批量上传（${siteLabel.value}），共 ${rows.length} 个任务`, 'ok');
 
     runUploadJob(rows, creds); // 后台进行：SSE 驱动进度，完成后经 onFinish 回调
@@ -68,6 +70,7 @@ export function useVideoUpload({ site, isPh, siteLabel, onFinish }) {
         const d = JSON.parse(ev.data);
         const res = reduceUploadEvent(d, stats);
         stats = res.stats;
+        progress.value = { done: stats.done, total: stats.total, fail: stats.fail };
         if (res.row) {
           const row = rows[res.row.index];
           if (row) row.status = res.row.status;
@@ -105,5 +108,5 @@ export function useVideoUpload({ site, isPh, siteLabel, onFinish }) {
     if (es) es.close();
   }
 
-  return { logLines, log, clearLog, autoScroll, uploading, summary, currentJobId, startUpload, cancelUpload, finish, dispose };
+  return { logLines, log, clearLog, uploading, summary, progress, currentJobId, startUpload, cancelUpload, finish, dispose };
 }

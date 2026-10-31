@@ -15,6 +15,8 @@ export function usePortalTabs() {
   const active = ref(DEFAULT_KEY);
   // 用 reactive 包裹，add/delete 会触发视图更新（否则首次挂载后 iframe src 不会刷新）
   const loaded = reactive(new Set());
+  // iframe 已触发 load 事件的 Tab：门户据此隐藏「正在加载」骨架（loaded 但未 ready = 加载中）
+  const ready = reactive(new Set());
 
   function show(key, { pushHistory = true } = {}) {
     const tab = TABS.find((t) => t.key === key);
@@ -29,7 +31,20 @@ export function usePortalTabs() {
       if (pushHistory) history.pushState({ tab: key }, '', `#/${key}`);
       else history.replaceState({ tab: key }, '', `#/${key}`);
     }
+    document.title = `${tab.label} · 电商工具箱`;
     notifyTabs(key);
+  }
+
+  /** 预载：仅为 Tab 的 iframe 赋 src（不激活），侧栏 hover 意图预载用 */
+  function preload(key) {
+    if (TABS.some((t) => t.key === key) && !loaded.has(key)) {
+      loaded.add(key);
+    }
+  }
+
+  /** iframe load 事件回调：标记该 Tab 已就绪（骨架淡出） */
+  function markReady(key) {
+    ready.add(key);
   }
 
   /** 通知所有已加载 iframe 当前激活的 Tab（监控大屏据此启停按需采集） */
@@ -90,6 +105,7 @@ export function usePortalTabs() {
       loaded.add(DEFAULT_KEY);
       history.replaceState({ tab: DEFAULT_KEY }, '', `#/${DEFAULT_KEY}`);
     }
+    document.title = `${TABS.find((t) => t.key === active.value)?.label || '电商工具箱'} · 电商工具箱`;
     notifyTabs(active.value);
     window.addEventListener('popstate', onPopState);
     window.addEventListener('hashchange', onPopState);
@@ -100,5 +116,5 @@ export function usePortalTabs() {
     window.removeEventListener('hashchange', onPopState);
   });
 
-  return { tabs: TABS, active, show, isActive, iframeSrc };
+  return { tabs: TABS, active, show, isActive, iframeSrc, ready, markReady, preload };
 }

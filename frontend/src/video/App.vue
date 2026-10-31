@@ -7,6 +7,7 @@
 //   VideoSteps.vue    展示：凭证卡片 + 表格卡片
 //   VideoUploadPanel.vue 展示：执行卡片 + 日志面板
 import { ref } from 'vue';
+import PageHeader from '../components/PageHeader.vue';
 import { useVideoCreds, useVideoPageLifecycle } from './useVideoCreds.js';
 import { useVideoTable } from './useVideoTable.js';
 import { useVideoUpload } from './useVideoUpload.js';
@@ -43,7 +44,7 @@ function onFileRemove() {
   pendingFile.value = null;
 }
 
-const { logLines, clearLog, autoScroll, uploading, summary, currentJobId, startUpload, cancelUpload } =
+const { logLines, clearLog, uploading, summary, progress, currentJobId, startUpload, cancelUpload } =
   useVideoUpload({
     site, isPh, siteLabel,
     // 任务结束（完成/取消）后自动导出带【状态】列的结果表格
@@ -62,6 +63,8 @@ function onStart() {
 <template>
   <div class="page">
     <div class="container">
+      <PageHeader title="视频批量上传" :desc="siteLabel + ' · 解析表格 → 逐条上传 → 自动导出结果'" />
+
       <VideoSteps
         :is-ph="isPh"
         :refreshing-creds="refreshingCreds"
@@ -88,7 +91,7 @@ function onStart() {
         :uploading="uploading"
         :current-job-id="currentJobId"
         :summary="summary"
-        v-model:auto-scroll="autoScroll"
+        :progress="progress"
         :log-lines="logLines"
         @start="onStart"
         @cancel="cancelUpload"

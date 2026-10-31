@@ -49,7 +49,7 @@ export function reduceUploadEvent(d, stats) {
       next.fail++;
       out.summary = formatProgress(next);
       out.row = { index: d.index, status: 'err' };
-      out.log = { msg: `  ✗ 任务 ${d.index + 1} 失败: ${d.error}`, cls: 'err' };
+      out.log = { msg: `  ✕ 任务 ${d.index + 1} 失败: ${d.error}`, cls: 'err' };
     }
   } else if (d.type === 'finished') {
     out.log = { msg: `全部完成：成功 ${next.ok}，失败 ${next.fail}` + skipSuffix(next.skip) + `，共 ${d.total}`, cls: next.ok ? 'ok' : 'err' };

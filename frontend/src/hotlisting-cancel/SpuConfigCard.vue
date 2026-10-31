@@ -1,6 +1,7 @@
 <!-- Shopee 取消注册 Hot Listing · ③ SPU 配置卡片：只渲染已选店铺，支持搜索/筛选、导入导出入口与历史配置折叠。
      配置读写与派生状态在 useSpuConfig.js，本组件只负责渲染并上抛导入/导出事件。 -->
 <script setup>
+import StepCard from '../components/StepCard.vue';
 import { regionLabel } from '../region-utils.js';
 
 defineProps({
@@ -25,16 +26,13 @@ const emit = defineEmits(['bulk-import', 'bulk-export']);
 </script>
 
 <template>
-  <el-card shadow="never" class="card">
-    <template #header>
-      <div class="card-header-row">
-        <span>③ 已选店铺的 SPU ID（自动保存）</span>
-        <span class="save-state">
-          <span v-if="saveState === 'saving'" class="sv-saving">保存中…</span>
-          <span v-else-if="saveState === 'saved'" class="sv-ok">已保存 ✓</span>
-          <span v-else-if="saveState === 'error'" class="sv-err">保存失败</span>
-        </span>
-      </div>
+  <StepCard :index="3" title="已选店铺的 SPU ID（自动保存）">
+    <template #extra>
+      <span class="save-state">
+        <span v-if="saveState === 'saving'" class="sv-saving">保存中…</span>
+        <span v-else-if="saveState === 'saved'" class="sv-ok">已保存 ✓</span>
+        <span v-else-if="saveState === 'error'" class="sv-err">保存失败</span>
+      </span>
     </template>
     <div class="spu-tip">
       每个店铺配一个 SPU ID（卖家中心商品链接中的 spuId，形如 /portal/marketing/cmt-buy-box?spuId=<b>42555837160</b>）；
@@ -141,7 +139,7 @@ const emit = defineEmits(['bulk-import', 'bulk-export']);
         </el-collapse-item>
       </el-collapse>
     </template>
-  </el-card>
+  </StepCard>
 </template>
 
 <style scoped>
