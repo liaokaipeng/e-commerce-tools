@@ -1,8 +1,8 @@
 {
-  "version": "1.5.2",
-  "builtAt": "2026-10-29T21:46:21.253Z",
-  "commit": "f06c846",
-  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.5.2/kp_tools-v1.5.2.zip",
-  "sha256": "b9086d1c8a0ca093512c920e44f16d9b6803f2e09f1d8553397063aa2117c27e",
-  "notes": "界面一致性修复：门户「一键更新」按钮恢复品牌橙色；TikTok 页网络状态点在未连接时有颜色显示；开放平台店铺表格补齐边框；SPU 批量导入 / 导出弹窗不再被误点遮罩关闭；各页「取消」「刷新」按钮样式统一；取消 Hot Listing 页预览卡补「已选店铺」计数。功能逻辑无变化。"
+  "version": "1.6.0",
+  "builtAt": "2026-10-31T21:35:29.509Z",
+  "commit": "b2ea2a1",
+  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.6.0/kp_tools-v1.6.0.zip",
+  "sha256": "259971bae54f279fb90c32dc09e9384dfb74fdef48cbc4f5aa46a6a425ee4930",
+  "notes": "全新界面与交互升级：门户侧栏重做（工具图标、更清晰的高亮与版本卡片）、切换页面不再白屏（加载骨架 + 平滑过渡 + 悬停预载）；全部工具页统一为「页头 + 编号步骤卡」布局；批量任务（取消竞价 / 取消 Hot Listing / 退单仓库 / 视频上传 / 竞价导出 / 批量刷新 token）新增可视化进度条；日志面板内置自动滚动开关；界面逻辑与按钮位置不变，用起来和以前一样。"
 }
