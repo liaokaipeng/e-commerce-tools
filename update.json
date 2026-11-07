@@ -1,8 +1,8 @@
 {
-  "version": "1.6.0",
-  "builtAt": "2026-10-31T21:35:29.509Z",
-  "commit": "b2ea2a1",
-  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.6.0/kp_tools-v1.6.0.zip",
-  "sha256": "259971bae54f279fb90c32dc09e9384dfb74fdef48cbc4f5aa46a6a425ee4930",
-  "notes": "全新界面与交互升级：门户侧栏重做（工具图标、更清晰的高亮与版本卡片）、切换页面不再白屏（加载骨架 + 平滑过渡 + 悬停预载）；全部工具页统一为「页头 + 编号步骤卡」布局；批量任务（取消竞价 / 取消 Hot Listing / 退单仓库 / 视频上传 / 竞价导出 / 批量刷新 token）新增可视化进度条；日志面板内置自动滚动开关；界面逻辑与按钮位置不变，用起来和以前一样。"
+  "version": "1.6.1",
+  "builtAt": "2026-11-07T15:36:16.872Z",
+  "commit": "341eff8",
+  "url": "https://github.com/liaokaipeng/e-commerce-tools/releases/download/v1.6.1/kp_tools-v1.6.1.zip",
+  "sha256": "d28b698fb812cce1d12b0b360032fe30e6b00fc4c0e52d578455c64c56159fec",
+  "notes": "获取退单仓库升级：可直接上传「多客」导出的退款单表（自动识别「退款单号」与「店铺」列，订单编号 / 站点可选）；改为每店只查一次退货仓清单并按站点筛选，同站点仅一个仓时整店直接得出地址，只有多仓时才逐单查逆向物流轨迹；结果表新增「退货仓库」「退货仓库地址」两列并插在订单编号列后；未授权或失效店铺的行会跳过并标注原因，其余店铺照常执行。"
 }
