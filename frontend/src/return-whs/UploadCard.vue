@@ -47,7 +47,7 @@ function onFileExceed(files) {
       <el-icon class="el-icon--upload"><upload-filled /></el-icon>
       <div class="el-upload__text">把表格文件拖到这里，或 <em>点击选择文件</em></div>
       <template #tip>
-        <div class="el-upload__tip">表头第 1 行必须包含 <b>Return ID</b> 列、<b>Order ID</b> 列与 <b>店铺ID</b> 列（也识别「退货ID / 退单编号 / 订单编号 / Shop ID / 店铺编号」等写法）。每行按自己的店铺ID查询，可一次混排多个店铺。</div>
+        <div class="el-upload__tip">表头第 1 行按「多客退款单」导出表即可直接识别：<b>退款单号</b>、<b>店铺</b>（店名末尾带店铺ID，如 <code>…-zhangdm1.ph-557630453</code>）为必需，<b>订单编号</b>可选（用于决定新列插入位置）。<b>站点</b>列有则用于筛选同站点退货仓，没有则按店铺区域自动判断。每行按自己的店铺ID查询，可一次混排多个店铺。</div>
       </template>
     </el-upload>
     <div v-if="table" class="table-meta">
@@ -62,7 +62,7 @@ function onFileExceed(files) {
       :closable="false"
       show-icon
       :title="`表格中有未授权或已失效的店铺ID：${badShopIds.join('、')}`"
-      description="请先到「开放平台」页完成授权或重新授权后再执行。"
+      description="这些店铺的行会被跳过（导出时标注原因），其余店铺照常执行；如需补齐请到「开放平台」页完成授权或重新授权。"
     />
   </StepCard>
 </template>

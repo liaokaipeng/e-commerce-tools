@@ -9,7 +9,7 @@
 //   /bidding/         Shopee 竞价导出
 //   /bidding-cancel/  Shopee 取消竞价
 //   /hotlisting-cancel/  Shopee 取消注册 Hot Listing
-//   /return-whs/        Shopee 获取退单仓库（Return ID → whs_id）
+//   /return-whs/        Shopee 获取退单仓库（Return ID → 退货仓 + 完整地址）
 //   /video/           Shopee 视频上传
 // main.js 只负责「路由注册 + 静态服务 + 服务启动」，业务路由与 SSE 由各模块 register 提供。
 const http = require('http');

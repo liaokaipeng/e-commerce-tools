@@ -17,7 +17,7 @@ export const TABS = [
   { key: 'bidding', label: '竞价导出', sub: '获胜数据 → Excel', group: 'Shopee', src: '/bidding/', icon: DataAnalysis },
   { key: 'bidding-cancel', label: '取消竞价', sub: '批量撤销待改进竞价', group: 'Shopee', src: '/bidding-cancel/', icon: CircleClose },
   { key: 'hotlisting-cancel', label: '取消Hot Listing', sub: '批量取消注册已注册 SKU', group: 'Shopee', src: '/hotlisting-cancel/', icon: DeleteFilled },
-  { key: 'return-whs', label: '获取退单仓库', sub: 'Return ID → 退货仓 whs_id', group: 'Shopee', src: '/return-whs/', icon: Box },
+  { key: 'return-whs', label: '获取退单仓库', sub: 'Return ID → 退货仓地址', group: 'Shopee', src: '/return-whs/', icon: Box },
   { key: 'video-cn', label: '跨境视频上传', sub: '批量上传并关联商品', group: 'Shopee', src: '/video/?mode=cn', icon: UploadFilled },
   { key: 'video-ph', label: '本土视频上传', sub: '菲律宾站点批量上传', group: 'Shopee', src: '/video/?mode=ph', icon: VideoCamera },
   { key: 'openapi', label: '开放平台', sub: 'App 授权与 Token 管理', group: 'Shopee', src: '/openapi/', icon: Key },

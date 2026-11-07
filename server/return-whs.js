@@ -2,21 +2,25 @@
  * Shopee 获取退单仓库模块（CommonJS）
  * 由合并服务 main.js 引入，通过 register({ get, post }) 注册路由（本文件只注册路由）。
  *
- * 功能：批量把 Return ID 转成退货仓库 ID（whs_id）。表格解析与导出在前端完成
- * （SheetJS，与 video 页一致），后端只接收解析后的行并逐行调官方接口。
+ * 功能：批量把 Return ID 转成退货仓库 + 完整收货地址。表格解析与导出在前端完成
+ * （SheetJS，与 video 页一致），后端只接收解析后的行。
  *
- * 接口还原（开放平台，非 UI 自动化；2026-10 实测）：
- *   GET /api/v2/returns/get_return_detail?return_sn=<Return ID>
- *     → response.return_address.whs_id 即退货仓库 ID（如 PHBUL4）
- *   注意：response.return_pickup_address（买家取货地址）全量打码不可用；
- *         v2.returns.get_return_list 响应不含 whs_id 且不支持按 order_sn 过滤，
- *         所以只能逐单查 detail（表格需带 Return ID 列）。
+ * 接口还原（开放平台，非 UI 自动化；2026-11 实测）：
+ *   GET /api/v2/shop/get_warehouse_detail?warehouse_type=2
+ *     → response 为仓库数组，含 warehouse_id / warehouse_name / region / address
+ *       （按店铺 region 过滤后通常只剩 1 个，整店直接套用、无需逐单调用）
+ *   GET /api/v2/returns/get_reverse_tracking_info?return_sn=<Return ID>
+ *     → 同站点有多个退货仓时，用 tracking_info[].tracking_description 的分拣中心名匹配仓
+ *   兜底：GET /api/v2/returns/get_return_detail → response.return_address.whs_id
+ *     （实测跨境 LFF 店恒为空串；return_pickup_address 全量打码不可用）
+ *   注意：v2.returns.get_return_list 响应不含仓库 / 地址且不支持按 order_sn 过滤，
+ *         所以表格必须带 Return ID 列。
  * 调用统一走 lib/openapi/client 的 callOpenApi（自动签名 / 带 token / 刷新），
  * 查询类接口必须显式 method: 'GET'。
  *
  * 链路拆分到 return-whs/ 子模块：
- *   parse.js    纯解析（Return ID 归一化 / whs_id 提取 / 分块）
- *   job.js      执行编排（SSE + 暂停/继续/取消）
+ *   parse.js    纯解析（Return ID / 站点归一化、退货仓筛选、轨迹匹配、分块）
+ *   job.js      执行编排（每店取仓 + 逐行消歧 + SSE 暂停/继续/取消）
  */
 'use strict';
 const { readJsonBodySoft } = require('./lib/http-utils');

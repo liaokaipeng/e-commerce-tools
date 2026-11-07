@@ -21,7 +21,7 @@ const shopLabel = (s) => (s.shopName ? `${s.shopName}（${s.shopId}）` : `店�
     <template #extra>
       <el-button size="small" :loading="shopsLoading" @click="reload()">刷新</el-button>
     </template>
-    <div class="hint">店铺由表格「店铺ID」列逐行决定，这里只需确认这些店铺已授权（失效店铺需先去「开放平台」页重新授权）。</div>
+    <div class="hint">店铺由表格「店铺」列（店名末尾的店铺ID）逐行决定，这里只需确认这些店铺已授权（失效店铺需先去「开放平台」页重新授权）。</div>
     <div v-if="shops.length" class="shop-tags">
       <el-tag
         v-for="s in shops"

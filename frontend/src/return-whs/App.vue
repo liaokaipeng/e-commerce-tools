@@ -1,6 +1,6 @@
-<!-- Shopee 获取退单仓库 · 页面编排：上传表格（Return ID / Order ID / 店铺ID 三列）→ 按行取店铺ID
-     → SSE 批量调 get_return_detail 取 whs_id → 导出「Order ID 列后插入退单仓库ID」的新表格。
-     多店铺：店铺不在这里选，完全由表格「店铺ID」列决定（须为开放平台已授权店铺）。
+<!-- Shopee 获取退单仓库 · 页面编排：上传表格（退款单号 / 店铺 / 订单编号 / 站点，即「多客退款单」导出表的列）
+     → 按店铺取退货仓清单并按站点筛选 → 导出「订单编号列后插入退单仓库ID / 退货仓库 / 退货仓库地址」的新表格。
+     多店铺：店铺不在这里选，完全由表格「店铺」列（店名末尾的店铺ID）决定（须为开放平台已授权店铺）。
      展示拆 ShopWallCard（① 授权店铺）/ UploadCard（② 上传表格）；表格解析与列语义见 useReturnTable.js；
      批量执行复用 composables/useBatchJob.js（执行区含可视化进度条）。 -->
 <script setup>
@@ -43,7 +43,7 @@ const shopById = computed(() => {
   return m;
 });
 
-// ---------- ② 表格（SheetJS 前端解析；表头需含 Return ID / Order ID / 店铺ID 列） ----------
+// ---------- ② 表格（SheetJS 前端解析；表头需含 退款单号 / 店铺 列） ----------
 const table = ref(null); // { aoa, returnCol, orderCol, shopCol, rows, skipped, skippedNoShop, fileName }
 
 async function onFileChange(file) {
@@ -57,13 +57,14 @@ async function onFileChange(file) {
     results.value = [];
     finished.value = false;
     if (!built.rows.length) {
-      ElMessage.warning('表格中没有有效的 Return ID 数据行');
+      ElMessage.warning('表格中没有有效的退款单号数据行');
     } else {
       const tips = [];
-      if (built.skipped) tips.push(`跳过 ${built.skipped} 行无 Return ID`);
-      if (built.skippedNoShop) tips.push(`跳过 ${built.skippedNoShop} 行无店铺ID`);
+      if (built.skipped) tips.push(`跳过 ${built.skipped} 行无退款单号`);
+      if (built.skippedNoShop) tips.push(`跳过 ${built.skippedNoShop} 行店铺列取不到店铺ID`);
       const skipTip = tips.length ? `，${tips.join('，')}` : '';
-      ElMessage.success(`已识别 Return ID / Order ID / 店铺ID 列，待查询 ${built.rows.length} 行（${tableShopIds.value.length} 个店铺）${skipTip}`);
+      const regionTip = parsed.regionCol >= 0 ? '含站点列' : '无站点列（按店铺区域自动判断）';
+      ElMessage.success(`已识别 退款单号 / 店铺（含店铺ID）列（${regionTip}），待查询 ${built.rows.length} 行（${tableShopIds.value.length} 个店铺）${skipTip}`);
     }
   } catch (e) {
     table.value = null;
@@ -83,13 +84,13 @@ const tableShopIds = computed(() => {
   return Array.from(new Set(table.value.rows.map((r) => r.shopId)));
 });
 
-// 表中未授权 / 已失效的店铺ID（有则禁止执行，避免整批逐行报「店铺尚未授权」）
+// 表中未授权 / 已失效的店铺ID（仅提示；这些店铺的行会被跳过，其余店铺照常执行）
 const badShopIds = computed(() => tableShopIds.value.filter((id) => {
   const s = shopById.value.get(id);
   return !s || s.state === 're_auth';
 }));
 
-// ---------- ③ 执行（SSE 批量任务：逐行 get_return_detail → whs_id） ----------
+// ---------- ③ 执行（SSE 批量任务：按店铺取退货仓清单 → 站点筛选 → 必要时轨迹消歧） ----------
 const { logLines, log, clear: clearLog } = useLog();
 const results = ref([]);
 const finished = ref(false);
@@ -101,13 +102,26 @@ const job = useBatchJob({
   // 行键用 AOA 行下标；SSE 事件的 rowIndex 与预览行、导出写回三处对齐
   rowKeyOf: (r) => String(r.rowIndex),
   overrides: {
+    'shop-warehouse': (ev) => {
+      const names = (ev.candidates || []).map((w) => w.whsName || w.whsId).filter(Boolean);
+      const scope = ev.region ? `${ev.region} 站点` : '全部站点';
+      return {
+        cls: 'info',
+        msg: `  店铺 ${ev.shopId}：${scope}退货仓 ${names.length} 个${names.length ? `（${names.join('、')}）` : ''}`,
+      };
+    },
     'row-done': (ev, ctx) => {
-      results.value.push({ rowIndex: ev.rowIndex, returnId: ev.returnId, shopId: ev.shopId, ok: ev.ok, whsId: ev.whsId, msg: ev.msg });
+      results.value.push({
+        rowIndex: ev.rowIndex, returnId: ev.returnId, shopId: ev.shopId, ok: ev.ok,
+        whsId: ev.whsId, whsName: ev.whsName, whsAddress: ev.whsAddress, source: ev.source, msg: ev.msg,
+      });
       ctx.progress.value.done += 1;
       if (!ev.ok) ctx.progress.value.fail += 1;
-      return ev.ok
-        ? { cls: 'ok', msg: `  ✓ 第 ${ev.rowIndex + 1} 行 ${ev.returnId}（店铺 ${ev.shopId}）→ ${ev.whsId}` }
-        : { cls: 'err', msg: `  ✕ 第 ${ev.rowIndex + 1} 行 ${ev.returnId}（店铺 ${ev.shopId}）：${ev.msg}` };
+      if (!ev.ok) return { cls: 'err', msg: `  ✕ 第 ${ev.rowIndex + 1} 行 ${ev.returnId}（店铺 ${ev.shopId}）：${ev.msg}` };
+      // 兜底口径只有 whs_id（接口未给地址），日志里标出来，避免误以为是完整地址
+      const hit = ev.whsName || ev.whsAddress || ev.whsId || '-';
+      const tail = ev.source === 'detail' ? '（仅仓库ID，接口未返回地址）' : '';
+      return { cls: 'ok', msg: `  ✓ 第 ${ev.rowIndex + 1} 行 ${ev.returnId}（店铺 ${ev.shopId}）→ ${hit}${tail}` };
     },
     'summary': (ev) => ({ cls: ev.failed ? 'err' : 'ok', msg: `全部完成：成功 ${ev.success} 条，失败 ${ev.failed} 条，共 ${ev.cancelled} 条。` }),
     'cancelled': (ev) => ({ cls: 'err', msg: `已取消：已处理 ${ev.cancelled} 条，失败 ${ev.failed} 条。已完成的结果仍可导出。` }),
@@ -117,20 +131,21 @@ const job = useBatchJob({
 
 const { running, progress, paused, pausing, jobId, togglePause, cancel } = job;
 
-const canRun = computed(() => !!table.value && table.value.rows.length > 0
-  && badShopIds.value.length === 0 && !running.value);
+const canRun = computed(() => !!table.value && table.value.rows.length > 0 && !running.value);
 
 async function onRun() {
-  if (!table.value || !table.value.rows.length) { ElMessage.warning('请先上传包含 Return ID / 店铺ID 列的表格'); return; }
-  if (badShopIds.value.length) { ElMessage.warning(`表格中有未授权或已失效的店铺ID：${badShopIds.value.join('、')}`); return; }
+  if (!table.value || !table.value.rows.length) { ElMessage.warning('请先上传包含 退款单号 / 店铺 列的表格'); return; }
   results.value = [];
   finished.value = false;
   clearLog();
   log(`开始获取退单仓库：${tableShopIds.value.length} 个店铺、共 ${table.value.rows.length} 行…`, 'info');
+  if (badShopIds.value.length) {
+    log(`其中 ${badShopIds.value.length} 个店铺未授权或已失效，这些行会被跳过：${badShopIds.value.join('、')}`, 'info');
+  }
   await job.start(table.value.rows, { rows: table.value.rows });
 }
 
-// ---------- ④ 导出（Order ID 列后插入「退单仓库ID」新列） ----------
+// ---------- ④ 导出（Order ID 列后插入「退单仓库ID / 退货仓库 / 退货仓库地址」三列） ----------
 function onExport() {
   if (!table.value) return;
   const aoa = buildExportAoa(table.value.aoa, {
@@ -138,15 +153,15 @@ function onExport() {
     orderCol: table.value.orderCol,
     shopCol: table.value.shopCol,
   }, results.value);
-  downloadAoaXlsx(aoa, '退单仓库', '退单仓库ID.xlsx');
-  ElMessage.success('已导出：新列「退单仓库ID」已插在 Order ID 列后面');
+  downloadAoaXlsx(aoa, '退单仓库', '退单仓库地址.xlsx');
+  ElMessage.success('已导出：新列「退单仓库ID / 退货仓库 / 退货仓库地址」已插在 Order ID 列后面');
 }
 </script>
 
 <template>
   <div class="page">
     <div class="container">
-      <PageHeader title="获取退单仓库" desc="按表格逐行查询 Return ID 对应的退货仓库 ID（whs_id），结果写回表格导出" />
+      <PageHeader title="获取退单仓库" desc="直接上传「多客退款单」导出表，按店铺与站点取各店退货仓，写入完整仓库地址后导出" />
 
       <ShopWallCard
         :shops="shops"
@@ -176,7 +191,7 @@ function onExport() {
           :paused="paused"
           :pausing="pausing"
           :progress="running ? progress : null"
-          tip="逐行按表格「店铺ID」列调用开放平台 get_return_detail 获取退货仓库 ID（whs_id），只读不改动任何退单状态。"
+          tip="按表格「店铺」列（店名末尾的店铺ID）每店查询一次退货仓清单（get_warehouse_detail），按站点筛选；同站点有多个仓时再用退货物流轨迹（get_reverse_tracking_info）区分。只读不改动任何退单状态。"
           @run="onRun"
           @pause="togglePause"
           @cancel="cancel"
@@ -196,10 +211,16 @@ function onExport() {
             </el-table-column>
             <el-table-column prop="shopId" label="店铺ID" width="130" show-overflow-tooltip />
             <el-table-column prop="returnId" label="Return ID" min-width="160" show-overflow-tooltip />
-            <el-table-column label="退单仓库ID" min-width="140">
+            <el-table-column label="退货仓库" min-width="150" show-overflow-tooltip>
               <template #default="{ row }">
-                <span v-if="row.ok" class="whs">{{ row.whsId }}</span>
+                <span v-if="row.ok">{{ row.whsName || '—' }}</span>
                 <el-tag v-else type="danger" size="small" :title="row.msg">失败</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="退货仓库地址" min-width="260" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="row.ok">{{ row.whsAddress || (row.whsId ? `仅仓库ID：${row.whsId}` : '—') }}</span>
+                <span v-else class="fail-msg">{{ row.msg }}</span>
               </template>
             </el-table-column>
             <el-table-column label="状态" width="90">
@@ -216,5 +237,5 @@ function onExport() {
 
 <style scoped>
 .job-id { font-size: var(--fs-xs); color: var(--text-3); }
-.whs { font-family: var(--font-mono); }
+.fail-msg { color: var(--danger, #f56c6c); }
 </style>
