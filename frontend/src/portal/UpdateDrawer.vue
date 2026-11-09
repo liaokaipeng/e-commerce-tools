@@ -10,6 +10,7 @@ defineProps({
   steps: { type: Array, default: () => [] },
   doneInfo: { type: Object, default: null },
   restarting: { type: Boolean, default: false },
+  staleBackend: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['check', 'apply', 'download']);
@@ -28,6 +29,14 @@ function fmtTime(iso) {
         <b>v{{ upd.current.version || ver.version }}</b>
         <span v-if="upd.current.commit" class="upd-meta">{{ upd.current.commit }} · {{ fmtTime(upd.current.builtAt) }}</span>
       </div>
+
+      <el-alert
+        v-if="staleBackend"
+        type="warning"
+        :closable="false"
+        title="旧版本服务仍在运行：请关闭旧的黑窗口"
+        description="磁盘文件已是新版本，但黑色窗口里跑的还是旧进程。请关闭那个黑色命令窗口（Windows Terminal 中关闭对应标签页），再双击 启动.bat 启动新版本；只关浏览器页面无效。"
+      />
 
       <el-alert
         v-if="!upd.configured"
@@ -87,10 +96,10 @@ function fmtTime(iso) {
         :closable="false"
         :title="restarting
           ? `已更新到 v${doneInfo.version}，正在自动重启…`
-          : `已更新到 v${doneInfo.version}，重启后生效`"
+          : `已更新到 v${doneInfo.version}，请关闭旧的黑窗口`"
         :description="(restarting
           ? '服务正在自动重启，页面会在几秒后自动刷新，请稍候。'
-          : '请直接双击 启动.bat：会自动结束旧的黑色窗口并启动新版本，无需手动关闭。')
+          : '旧版本不支持自动重启：请关闭旧的黑色命令窗口后再双击 启动.bat（只关浏览器页面无效）。')
           + (doneInfo.backup ? `更新前的数据已备份到 ${doneInfo.backup}。` : '')
           + '浏览器扩展若是新版本，需在 edge://extensions 点「重新加载」。'"
       />

@@ -10,7 +10,7 @@ import UpdateDrawer from './UpdateDrawer.vue';
 // 切换 Tab 只改变透明度，不重新加载页面，从而保留各 Tab 状态；
 // iframe 未触发 load 前显示骨架占位，消除首次切换的白屏。
 const { tabs, active, show, isActive, iframeSrc, ready, markReady, preload } = usePortalTabs();
-const { ver, upd, updateDrawer, checking, applying, steps, doneInfo, restarting, checkUpdate, applyUpdate, openUpdate, downloadPackage } = useAppUpdate();
+const { ver, upd, updateDrawer, checking, applying, steps, doneInfo, restarting, staleBackend, checkUpdate, applyUpdate, openUpdate, downloadPackage } = useAppUpdate();
 
 // ---------- 侧栏 hover 意图预载：悬停 600ms 才赋 src，划过不触发加载 ----------
 // （preload 内部自带「已加载则跳过」守卫，这里只需挡掉已就绪的 Tab）
@@ -63,7 +63,8 @@ onUnmounted(() => { for (const t of hoverTimers.values()) clearTimeout(t); });
           <span class="ver-text">v{{ ver.version || '…' }}</span>
         </div>
         <div class="ver-status">
-          <span v-if="upd.hasUpdate" class="ver-badge">新版本 v{{ upd.latest }} · 点击更新</span>
+          <span v-if="staleBackend" class="ver-warn">旧服务仍在运行 · 请关旧黑窗口并重启</span>
+          <span v-else-if="upd.hasUpdate" class="ver-badge">新版本 v{{ upd.latest }} · 点击更新</span>
           <span v-else-if="upd.error" class="ver-warn">更新检查失败，点击重试</span>
           <span v-else-if="checking" class="ver-dim">正在检查更新…</span>
           <span v-else class="ver-dim">点击查看版本与更新</span>
@@ -91,6 +92,7 @@ onUnmounted(() => { for (const t of hoverTimers.values()) clearTimeout(t); });
       :steps="steps"
       :done-info="doneInfo"
       :restarting="restarting"
+      :stale-backend="staleBackend"
       @check="checkUpdate(true)"
       @apply="applyUpdate"
       @download="downloadPackage"

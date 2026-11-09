@@ -12,6 +12,9 @@ const { readJson } = require('./json-file');
 const ROOT = path.join(__dirname, '..', '..');
 const PKG_FILE = path.join(ROOT, 'package.json');
 const BUILD_INFO_FILE = path.join(__dirname, '..', 'build-info.json');
+// 进程级标识：package.json 是磁盘状态，更新一落盘旧进程也会报新版本号，
+// 判断「是否真的重启过」只能看 pid / 启动时间是否变化。
+const STARTED_AT = new Date().toISOString();
 
 /** 当前版本号（package.json 的 version；读不到时回退 0.0.0，便于比对永远判为「有新版」） */
 function currentVersion() {
@@ -31,6 +34,8 @@ function info() {
     version: currentVersion(),
     commit: b.commit || null,
     builtAt: b.builtAt || null,
+    pid: process.pid,
+    startedAt: STARTED_AT,
   };
 }
 

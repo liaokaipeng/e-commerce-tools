@@ -117,5 +117,7 @@ if (isMain) {
 
     // 启动后自动检查更新（清单未配置时不产生定时器）
     update.startAutoCheck();
+    // 清理上次自动重启残留的标记（旧版 启动.bat 不认识标记时可能留下）
+    update.clearRestartMarkerLater();
   });
 }

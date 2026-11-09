@@ -23,6 +23,7 @@
  */
 const { register } = require('./routes');
 const { startAutoCheck } = require('./schedule');
+const { clearRestartMarkerLater } = require('./restart');
 const { COPY_ITEMS } = require('./whitelist');
 
-module.exports = { register, startAutoCheck, COPY_ITEMS };
+module.exports = { register, startAutoCheck, clearRestartMarkerLater, COPY_ITEMS };
